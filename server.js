@@ -238,19 +238,6 @@ function findEquipmentCostByName(name) {
   } catch { return 0; }
 }
 
-function getBalance(cb) {
-  db.get("SELECT balance FROM wallet WHERE id=1", (err,row)=> cb(err,row?.balance||0));
-}
-
-function adjustBalance(amount, cb) {
-  db.run("UPDATE wallet SET balance = balance + ? WHERE id=1", [amount], cb);
-}
-
-app.get('/api/wallet', (req,res)=>{
-  getBalance((err,bal)=> err ? res.status(500).json({error:err.message}) : res.json({balance: bal}));
-});
-
-
 function getBalance() {
   return new Promise((resolve, reject) => {
     db.get(`SELECT balance FROM wallet WHERE id=1`, (e, row) =>
@@ -312,19 +299,6 @@ function getStationById(id) {
   });
 }
 
-function stationBayUsage(stationId) {
-  return new Promise((resolve, reject) => {
-    db.get(`SELECT bay_count FROM stations WHERE id = ?`, [stationId], (err, s) => {
-      if (err) return reject(err);
-      if (!s) return resolve({ ok: false, reason: 'Station not found' });
-      db.get(`SELECT COUNT(*) AS used FROM units WHERE station_id = ?`, [stationId], (err2, r) => {
-        if (err2) return reject(err2);
-        resolve({ ok: true, bays: intOrZero(s.bay_count), used: intOrZero(r?.used) });
-      });
-    });
-  });
-}
-
 function stationBayUsage(stationId){
   return new Promise((resolve, reject) => {
     db.get(`SELECT bay_count FROM stations WHERE id=?`, [stationId], (err, s) => {
@@ -376,28 +350,6 @@ const EXPANSION_MULT = { bay: X100(200), holding: X100(150) }; // 2.0x and 1.5x
 
 const priceBays = (n, isExpansion)=> isExpansion ? Math.floor(BAY_BASE_COST*n*EXPANSION_MULT.bay/100) : BAY_BASE_COST*n;
 const priceHolding = (n, isExpansion)=> isExpansion ? Math.floor(HOLDING_CELL_BASE_COST*n*EXPANSION_MULT.holding/100) : HOLDING_CELL_BASE_COST*n;
-
-app.patch('/api/stations/:id/bays', (req, res) => {
-  const id = Number(req.params.id), add = Math.max(0, Number(req.body?.add||0));
-  if (!id || !add) return res.status(400).json({ error: 'Invalid station id/add' });
-  db.get(`SELECT bay_count FROM stations WHERE id=?`, [id], async (e, s) => {
-    if (e) return res.status(500).json({ error: e.message });
-    if (!s) return res.status(404).json({ error: 'Not found' });
-
-    const cost = priceBays(add, true); // your existing pricing (5000 each)
-    const ok = await requireFunds(cost);
-    if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: cost });
-
-    const newCount = Number(s.bay_count||0) + add;
-    db.run(`UPDATE stations SET bay_count=? WHERE id=?`, [newCount, id], async (e2)=>{
-      if (e2) return res.status(500).json({ error: e2.message });
-      await adjustBalance(-cost);
-      const balance = await getBalance();
-      res.json({ success:true, station_id:id, added:add, new_bay_count:newCount, cost, balance });
-    });
-  });
-});
-
 
 app.patch('/api/stations/:id/holding-cells', (req, res) => {
   const id = Number(req.params.id), add = Math.max(0, Number(req.body?.add||0));
@@ -1192,6 +1144,19 @@ app.get('/api/unit-types', (req, res) => res.json({ unitTypes }));
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
+
+setInterval(() => {
+  if (missionClocks.size === 0) return;
+  const now = Date.now();
+  const due = [];
+  for (const [id, clk] of missionClocks.entries()) {
+    if (clk && now - clk.startedAt >= (clk.durationMs || 0)) due.push(id);
+  }
+  if (!due.length) return;
+  due.forEach(id => {
+    resolveMissionById(id, () => clearMissionClock(id));
+  });
+}, 1000);
 
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
