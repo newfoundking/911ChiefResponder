@@ -1258,7 +1258,8 @@ async function dispatchSelectedUnits(missionId) {
 
       fetch(`/api/units/${uid}/status`, { method:'PATCH', headers:{ 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'enroute' }) });
 
-      const from = [st.lat, st.lon];
+      const current = marker.getLatLng ? marker.getLatLng() : L.latLng(st.lat, st.lon);
+      const from = [current.lat, current.lng];
       const to   = [mission.lat, mission.lon];
       const spd  = TRAVEL_SPEED[u.class] || 45;
 
@@ -1379,9 +1380,18 @@ async function checkMissionCompletion(mission) {
         ensureUnitMarker(u);
         const entry = unitMarkers.get(u.id);
         const current = entry?.marker.getLatLng() || L.latLng(mission.lat, mission.lon);
-        routeAndAnimateUnit(u.id, [current.lat, current.lng], [st.lat, st.lon], TRAVEL_SPEED[u.class] || 45, ()=>{
-          const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); }
-        });
+        routeAndAnimateUnit(
+          u.id,
+          [current.lat, current.lng],
+          [st.lat, st.lon],
+          TRAVEL_SPEED[u.class] || 45,
+          () => {
+            const rp = unitRoutes.get(u.id);
+            if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(u.id); }
+            fetch(`/api/unit-travel/${u.id}`, { method:'DELETE' }).catch(()=>{});
+          },
+          { phase: 'return' }
+        );
       }
       await refreshAssignedUnitsUI(mission.id);
       await fetchMissions();

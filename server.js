@@ -496,46 +496,9 @@ app.post('/api/missions/:id/resolve', (req, res) => {
   const missionId = parseInt(req.params.id, 10);
   if (!missionId) return res.status(400).json({ error: 'invalid id' });
 
-  db.serialize(() => {
-    db.run('UPDATE missions SET status=? WHERE id=?', ['resolved', missionId]);
-    db.all('SELECT unit_id FROM mission_units WHERE mission_id=?', [missionId], async (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-
-      const ids = rows.map(r => r.unit_id);
-      const placeholders = ids.map(() => '?').join(',');
-      const free = ids.length
-        ? new Promise((resolve, reject) => {
-           db.run(`UPDATE units SET status='return' WHERE id IN (${placeholders})`, ids, (e) => e ? reject(e) : resolve());
-          })
-        : Promise.resolve();
-
-      try {
-        await free;
-        db.run('DELETE FROM mission_units WHERE mission_id=?', [missionId], (e2) => {
-          if (e2) return res.status(500).json({ error: e2.message });
-
-          // Look up mission.type, then template rewards by name
-          db.get(`SELECT type FROM missions WHERE id=?`, [missionId], (e3, m) => {
-            if (e3) return res.status(500).json({ error: e3.message });
-            const missionName = m?.type || '';
-
-            db.get(`SELECT rewards FROM mission_templates WHERE name=?`, [missionName], async (e4, trow) => {
-              if (e4) return res.status(500).json({ error: e4.message });
-              const reward = Number(trow?.rewards || 0);
-
-              (reward > 0 ? adjustBalance(+reward) : Promise.resolve())
-                .then(async () => {
-                  const balance = await getBalance();
-                  res.json({ ok: true, freed: ids.length, reward, balance });
-                })
-                .catch(errAdj => res.status(500).json({ error: errAdj.message }));
-            });
-          });
-        });
-      } catch (e) {
-        return res.status(500).json({ error: e.message });
-      }
-    });
+  resolveMissionById(missionId, (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ ok: true, ...(result || {}) });
   });
 });
 
