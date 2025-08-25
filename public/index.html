@@ -113,13 +113,13 @@
 
 <!-- Unit Detail Modal -->
 <div id="unitDetailModal" style="
-	position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
-	background: white; border: 2px solid #444; padding: 1em;
-	width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
-	display: none; z-index: 10001;">
-	<h3>Unit Details</h3>
-	<div id="unitDetailContent">Loading...</div>
-	<button onclick="document.getElementById('unitDetailModal').style.display = 'none';">Close</button>
+        position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+        background: white; border: 2px solid #444; padding: 1em;
+        width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        display: none; z-index: 10001; max-height: 80vh; overflow-y: auto;">
+        <h3>Unit Details</h3>
+        <div id="unitDetailContent">Loading...</div>
+        <button onclick="document.getElementById('unitDetailModal').style.display = 'none';">Close</button>
 </div>
 
 <div id="cadPopup" class="popup hidden">
