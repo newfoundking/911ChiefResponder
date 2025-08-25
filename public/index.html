@@ -585,20 +585,23 @@ async function showStationDetails(station) {
       ${
         (getTrainingsForClass(station.type).length
           ? getTrainingsForClass(station.type)
-          : ['general']
-        ).map((t,idx)=>`<label><input type="checkbox" value="${t}" ${idx===0?"checked":""}/> ${t}</label><br>`).join('')
+          : [{ name: 'general', cost: 0 }]
+        ).map((t,idx)=>{
+          const name = typeof t === 'string' ? t : t.name;
+          const cost = typeof t === 'object' && t.cost ? t.cost : 0;
+          return `<label><input type="checkbox" value="${name}" data-cost="${cost}" ${idx===0?"checked":""}/> ${name}${cost?` ($${cost})`:''}</label><br>`;
+        }).join('')
       }
     </div>
-	<div id="bay-info"></div>
-	<div>
-	  <label>Add bays:
-		<input id="add-bays-count" type="number" min="1" value="1">
-	  </label>
-	  <button id="add-bays-btn">Add Bays</button>
-	</div>
-
-	const costForInitialBays = priceBays(initialBayCount, /* isExpansion= */ false);
-	<button id="create-personnel">Add Personnel</button>
+    <div id="personnel-cost"></div>
+    <div id="bay-info">Bays: ${station.bay_count || 0} (1 bay = 1 unit)</div>
+    <div>
+      <label>Add bays:
+        <input id="add-bays-count" type="number" min="1" value="1">
+      </label>
+      <button id="add-bays-btn">Add Bays</button>
+    </div>
+    <button id="create-personnel">Add Personnel</button>
     <h3>Assigned Units</h3>
     <h3>Personnel</h3>
     <ul id="personnel-list"></ul>
@@ -615,23 +618,34 @@ async function showStationDetails(station) {
 	  el.textContent = `Bays: ${s.bay_count} (1 bay = 1 unit)`;
 	}
 
-	document.getElementById('add-bays-btn')?.addEventListener('click', async () => {
-	  const n = Number(document.getElementById('add-bays-count').value || 1);
-	  const stationId = currentStationId; // however you track the opened station
-	  const res = await fetch(`/api/stations/${stationId}/bays`, {
-		method: 'PATCH',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ add: n })
-	  });
-	  const data = await res.json();
-	  if (!res.ok || !data.success) {
-		alert(`Failed: ${data.error || res.statusText}`);
-		return;
-	  }
-	  // Optionally show cost until wallet is wired:
-	  alert(`Added ${data.added} bay(s). Cost: $${data.cost}`);
-	  refreshBayInfo(stationId);
-	});
+        const BASE_PERSON_COST = 100;
+        function updatePersonnelCost() {
+          const selected = Array.from(detail.querySelectorAll('#personnel-training input[type=checkbox]:checked'));
+          const cost = selected.reduce((sum, cb) => sum + Number(cb.dataset.cost || 0), BASE_PERSON_COST);
+          const el = detail.querySelector('#personnel-cost');
+          if (el) el.textContent = `Cost: $${cost}`;
+          return cost;
+        }
+        detail.querySelectorAll('#personnel-training input[type=checkbox]').forEach(cb => cb.addEventListener('change', updatePersonnelCost));
+        updatePersonnelCost();
+
+        document.getElementById('add-bays-btn')?.addEventListener('click', async () => {
+          const n = Number(document.getElementById('add-bays-count').value || 1);
+          const stationId = station.id;
+          const res = await fetch(`/api/stations/${stationId}/bays`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ add: n })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+                alert(`Failed: ${data.error || res.statusText}`);
+                return;
+          }
+          alert(`Added ${data.added} bay(s). Cost: $${data.cost}`);
+          refreshBayInfo(stationId);
+          refreshWallet();
+        });
   // Replace inline openAssignModal with safe listeners
 	detail.querySelectorAll('button').forEach(btn => {
 	  const m = btn.getAttribute('onclick');
@@ -678,14 +692,15 @@ async function showStationDetails(station) {
 		  <div>
 			<div>Training</div>
 			<div id="edit-training-list" style="max-height:160px; overflow:auto; padding:6px; border:1px solid #ddd; border-radius:6px;">
-			  ${
-				availableTrainings.length
-				  ? availableTrainings.map(t => {
-					  const checked = curSet.has(String(t).toLowerCase()) ? 'checked' : '';
-					  return `<label style="display:block;"><input type="checkbox" value="${t}" ${checked}> ${t}</label>`;
-					}).join('')
-				  : '<em>No training list available for this station type.</em>'
-			  }
+                            ${
+                                  availableTrainings.length
+                                    ? availableTrainings.map(t => {
+                                            const name = typeof t === 'string' ? t : t.name;
+                                            const checked = curSet.has(String(name).toLowerCase()) ? 'checked' : '';
+                                            return `<label style="display:block;"><input type="checkbox" value="${name}" ${checked}> ${name}</label>`;
+                                          }).join('')
+                                    : '<em>No training list available for this station type.</em>'
+                            }
 			</div>
 		  </div>
 
@@ -766,15 +781,15 @@ async function showStationDetails(station) {
 	}
 
 	// expose globally for inline paths
-	window.openPersonnelModal = openPersonnelModal;
+        window.openPersonnelModal = openPersonnelModal;
 
-	function editPersonnel(id) {
-	  fetch(`/api/personnel/${id}`)
-		.then(res => res.json())
-		.then(person => {
-		  openPersonnelModal(person);
-		});
-	}
+        function editPersonnel(id) {
+          fetch(`/api/personnel/${id}`)
+                .then(res => res.json())
+                .then(person => {
+                  openPersonnelModal(person);
+                });
+        }
 
   document.getElementById('create-unit').addEventListener('click', async ()=>{
     const type = document.getElementById('unit-type').value;
@@ -787,7 +802,11 @@ async function showStationDetails(station) {
     const name = document.getElementById('personnel-name').value;
     const training = Array.from(document.querySelectorAll('#personnel-training input[type=checkbox]:checked')).map(cb=>cb.value);
     if (!name) return alert("Missing name");
-    await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, station_id: station.id, training })});
+    const res = await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, station_id: station.id, training })});
+    const data = await res.json();
+    if (!res.ok) { alert(`Failed: ${data.error || res.statusText}`); return; }
+    alert(`Personnel added. Cost: $${data.charged}`);
+    refreshWallet();
     showStationDetails(station);
   });
 
@@ -797,9 +816,12 @@ async function showStationDetails(station) {
   personnelList.innerHTML = '';
   personnel.forEach(p=>{
     const li = document.createElement("li");
-    li.innerHTML = `<strong>${p.name}</strong> (${(p.training||[]).join(', ')}) <button onclick="editPersonnel(${p.id})" style="margin-left:10px;">Edit</button>`;
+    const trainings = (p.training || []).map(t => typeof t === 'string' ? t : t.name).join(', ');
+    li.innerHTML = `<strong>${p.name}</strong> (${trainings}) <button onclick="editPersonnel(${p.id})" style="margin-left:10px;">Edit</button>`;
     personnelList.appendChild(li);
   });
+
+  refreshBayInfo(station.id);
 }
 
 // Build station
