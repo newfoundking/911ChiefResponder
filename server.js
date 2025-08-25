@@ -137,9 +137,18 @@ db.run(`
   )
 `);
 
-// Station equipment slots
+// Station upgrades / storage columns
 db.run(`
   ALTER TABLE stations ADD COLUMN equipment_slots INTEGER DEFAULT 0
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE stations ADD COLUMN bay_count INTEGER DEFAULT 0
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE stations ADD COLUMN holding_cells INTEGER DEFAULT 0
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE stations ADD COLUMN equipment TEXT DEFAULT '[]'
 `, () => { /* ignore if exists */ });
 db.run(`INSERT OR IGNORE INTO wallet (id, balance) VALUES (1, 100000)`);
 
@@ -294,6 +303,10 @@ function getStationById(id) {
   return new Promise((resolve, reject) => {
     db.get(`SELECT * FROM stations WHERE id = ?`, [id], (err, row) => {
       if (err) return reject(err);
+      if (row) {
+        try { row.equipment = JSON.parse(row.equipment || '[]'); }
+        catch { row.equipment = []; }
+      }
       resolve(row || null);
     });
   });
@@ -509,7 +522,22 @@ app.post('/api/missions/:id/resolve', (req, res) => {
 app.get('/api/stations', (req, res) => {
   db.all('SELECT * FROM stations', (err, rows) => {
     if (err) return res.status(500).send('Error reading stations');
+    rows = rows.map(r => {
+      try { r.equipment = JSON.parse(r.equipment || '[]'); } catch { r.equipment = []; }
+      return r;
+    });
     res.json(rows);
+  });
+});
+
+app.get('/api/stations/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid station id' });
+  db.get('SELECT * FROM stations WHERE id=?', [id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Station not found' });
+    try { row.equipment = JSON.parse(row.equipment || '[]'); } catch { row.equipment = []; }
+    res.json(row);
   });
 });
 
@@ -570,7 +598,7 @@ app.post('/api/stations', async (req, res) => {
         if (err) return res.status(500).send('Failed to insert station');
         await adjustBalance(-BUILD_COST);
         const balance = await getBalance();
-        res.json({ id: this.lastID, name, type, lat, lon, bay_count: 0, equipment_slots: 0, holding_cells: 0, charged: BUILD_COST, balance });
+        res.json({ id: this.lastID, name, type, lat, lon, bay_count: 0, equipment_slots: 0, holding_cells: 0, equipment: [], charged: BUILD_COST, balance });
       }
     );
   } catch (e) {
@@ -604,6 +632,33 @@ app.patch('/api/stations/:id/equipment-slots', (req, res) => {
   });
 });
 
+// POST /api/stations/:id/equipment  { name: <string> }
+app.post('/api/stations/:id/equipment', (req, res) => {
+  const stationId = Number(req.params.id);
+  const name = String(req.body?.name || '').trim();
+  if (!stationId || !name) return res.status(400).json({ error: 'Invalid station id or name' });
+
+  db.get(`SELECT equipment, equipment_slots FROM stations WHERE id=?`, [stationId], async (err, st) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!st) return res.status(404).json({ error: 'Station not found' });
+    let list; try { list = JSON.parse(st.equipment || '[]'); } catch { list = []; }
+    const slots = Number(st.equipment_slots || 0);
+    if (slots && list.length >= slots) return res.status(409).json({ error: 'No free equipment slots' });
+
+    const cost = findEquipmentCostByName(name);
+    const ok = await requireFunds(cost);
+    if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: cost });
+
+    list.push(name);
+    db.run(`UPDATE stations SET equipment=? WHERE id=?`, [JSON.stringify(list), stationId], async (e2) => {
+      if (e2) return res.status(500).json({ error: e2.message });
+      await adjustBalance(-cost);
+      const balance = await getBalance();
+      res.json({ success: true, station_id: stationId, equipment: list, cost, balance });
+    });
+  });
+});
+
 
 app.delete('/api/stations', (req, res) => {
   db.run('DELETE FROM stations', err => {
@@ -632,6 +687,39 @@ app.get('/api/units', (req, res) => {
       equipment: JSON.parse(u.equipment || '[]'),
     }));
     res.json(parsed);
+  });
+});
+
+// Assign equipment from station storage to a unit
+app.patch('/api/units/:id/equipment', (req, res) => {
+  const unitId = Number(req.params.id);
+  const stationId = Number(req.body?.station_id);
+  const name = String(req.body?.name || '').trim();
+  if (!unitId || !stationId || !name) {
+    return res.status(400).json({ error: 'unit_id, station_id and name are required' });
+  }
+
+  db.get(`SELECT equipment FROM stations WHERE id=?`, [stationId], (err, st) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!st) return res.status(404).json({ error: 'Station not found' });
+    let stList; try { stList = JSON.parse(st.equipment || '[]'); } catch { stList = []; }
+    const idx = stList.indexOf(name);
+    if (idx === -1) return res.status(409).json({ error: 'Equipment not available' });
+
+    db.get(`SELECT equipment FROM units WHERE id=?`, [unitId], (err2, u) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+      if (!u) return res.status(404).json({ error: 'Unit not found' });
+      let uList; try { uList = JSON.parse(u.equipment || '[]'); } catch { uList = []; }
+      uList.push(name);
+      stList.splice(idx, 1);
+      db.serialize(() => {
+        db.run(`UPDATE stations SET equipment=? WHERE id=?`, [JSON.stringify(stList), stationId]);
+        db.run(`UPDATE units SET equipment=? WHERE id=?`, [JSON.stringify(uList), unitId], function (e3) {
+          if (e3) return res.status(500).json({ error: e3.message });
+          res.json({ success: true, unit_id: unitId, equipment: uList, station_equipment: stList });
+        });
+      });
+    });
   });
 });
 
@@ -1061,6 +1149,10 @@ function getStationById(id) {
   return new Promise((resolve, reject) => {
     db.get(`SELECT * FROM stations WHERE id = ?`, [id], (err, row) => {
       if (err) return reject(err);
+      if (row) {
+        try { row.equipment = JSON.parse(row.equipment || '[]'); }
+        catch { row.equipment = []; }
+      }
       resolve(row || null);
     });
   });
