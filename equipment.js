@@ -15,3 +15,6 @@ const equipment = {
     { name: "Ventilator", cost: 3500 }
   ]
 };
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
+  module.exports = equipment;
+}

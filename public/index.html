@@ -158,6 +158,7 @@ function fetchNoCache(url) {
 // Refresh a single station panel with fresh data (no cache)
 async function refreshStationPanelNoCache(stationId) {
   const stations = await fetchNoCache('/api/stations').then(r=>r.json());
+  cacheStations(stations);
   const st = stations.find(s => s.id === stationId);
   if (st) showStationDetails(st);
 }
@@ -462,13 +463,20 @@ async function fetchStations() {
   stationMarkers = [];
   const list = document.getElementById("stationList");
   list.innerHTML = "";
-  stations.forEach(st => {
+
+  const unitCounts = await Promise.all(
+    stations.map(st => fetch(`/api/units?station_id=${st.id}`).then(r=>r.json()).then(arr=>arr.length).catch(()=>0))
+  );
+
+  stations.forEach((st, idx) => {
+    const used = unitCounts[idx];
+    const free = (st.bay_count || 0) - used;
     const iconUrl = stationIcons[st.type] || stationIcons.fire;
     const icon = L.icon({ iconUrl, iconSize: [30,30], iconAnchor: [15,30] });
     const marker = L.marker([st.lat, st.lon], { icon }).addTo(map).on("click", () => showStationDetails(st));
     stationMarkers.push(marker);
     const el = document.createElement("div");
-    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>
+    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>Bays: ${used}/${st.bay_count || 0} (Free: ${free})<br>
       <button onclick='showStationDetails(${JSON.stringify(st)})'>Details</button>`;
     list.appendChild(el);
   });
@@ -626,9 +634,18 @@ function showMissionDetails(mission) {
 async function showStationDetails(station) {
   const res = await fetchNoCache(`/api/units?station_id=${station.id}`);
   const units = await res.json();
+  units.forEach(u => _unitById.set(u.id, u));
   const detail = document.getElementById('stationDetails');
   const unitOptions = unitTypes.filter(u=>u.class===station.type).map(u=>`<option value="${u.type}">${u.type}</option>`).join('');
   window.currentStation = station;
+  const usedBays = units.length;
+  const freeBays = (station.bay_count || 0) - usedBays;
+  const equipOptions = (equipment[station.type] || []).map(e=>{
+    const name = typeof e === 'string' ? e : e.name;
+    const cost = typeof e === 'object' && e.cost ? e.cost : 0;
+    return `<option value="${name}" data-cost="${cost}">${name}${cost?` ($${cost})`:''}</option>`;
+  }).join('');
+  const stationEquip = Array.isArray(station.equipment) ? station.equipment : [];
   detail.innerHTML = `
     <div style="text-align:right;">
       <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
@@ -654,17 +671,25 @@ async function showStationDetails(station) {
       }
     </div>
     <div id="personnel-cost"></div>
-    <div id="bay-info">Bays: ${station.bay_count || 0} (1 bay = 1 unit)</div>
+    <div id="bay-info">Bays: ${usedBays}/${station.bay_count || 0} (Free: ${freeBays})</div>
     <div>
       <label>Add bays:
         <input id="add-bays-count" type="number" min="1" value="1">
       </label>
       <button id="add-bays-btn">Add Bays</button>
     </div>
+    <h3>Station Equipment</h3>
+    <div id="station-equipment-display">
+      ${stationEquip.length ? `<ul>${stationEquip.map(e=>`<li>${e}</li>`).join('')}</ul>` : '<em>No equipment</em>'}
+    </div>
+    <div>
+      <select id="equipment-buy">${equipOptions}</select>
+      <button id="buy-equipment-btn">Buy</button>
+    </div>
     <button id="create-personnel">Add Personnel</button>
-    <h3>Assigned Units</h3>
     <h3>Personnel</h3>
     <ul id="personnel-list"></ul>
+    <h3>Assigned Units</h3>
     <ul id="unit-list">
       ${units.map(u=>`
         <li>
@@ -672,11 +697,15 @@ async function showStationDetails(station) {
           <button onclick="openAssignModal(${u.id}, ${station.id})">Assign</button>
         </li>`).join('')}
     </ul>`;
-	async function refreshBayInfo(stationId) {
-	  const s = await (await fetch(`/api/stations/${stationId}`, { cache: 'no-store' })).json();
-	  const el = document.getElementById('bay-info');
-	  el.textContent = `Bays: ${s.bay_count} (1 bay = 1 unit)`;
-	}
+        async function refreshBayInfo(stationId) {
+          const [s, us] = await Promise.all([
+            fetch(`/api/stations/${stationId}`, { cache: 'no-store' }).then(r=>r.json()),
+            fetch(`/api/units?station_id=${stationId}`, { cache: 'no-store' }).then(r=>r.json())
+          ]);
+          const used = Array.isArray(us) ? us.length : 0;
+          const el = document.getElementById('bay-info');
+          el.textContent = `Bays: ${used}/${s.bay_count} (Free: ${s.bay_count - used})`;
+        }
 
         const BASE_PERSON_COST = 100;
         function updatePersonnelCost() {
@@ -705,6 +734,23 @@ async function showStationDetails(station) {
           alert(`Added ${data.added} bay(s). Cost: $${data.cost}`);
           refreshBayInfo(stationId);
           refreshWallet();
+        });
+        document.getElementById('buy-equipment-btn')?.addEventListener('click', async () => {
+          const sel = document.getElementById('equipment-buy');
+          const name = sel.value;
+          const res = await fetch(`/api/stations/${station.id}/equipment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            alert(`Failed: ${data.error || res.statusText}`);
+            return;
+          }
+          alert(`Purchased ${name} for $${data.cost}`);
+          refreshWallet();
+          refreshStationPanelNoCache(station.id);
         });
   // Replace inline openAssignModal with safe listeners
 	detail.querySelectorAll('button').forEach(btn => {
@@ -990,6 +1036,11 @@ async function showUnitDetails(unitId) {
   const equipmentHtml = eqNames.length
     ? `<ul>${eqNames.map(n => `<li>${n}</li>`).join('')}</ul>`
     : '<em>No equipment</em>';
+  const availableEq = Array.isArray(station?.equipment) ? station.equipment : [];
+  const assignHtml = availableEq.length
+    ? `<select id="unit-equip-select">${availableEq.map(n=>`<option value="${n}">${n}</option>`).join('')}</select>
+       <button id="assign-equip-btn">Assign</button>`
+    : '<p><em>No equipment in station storage.</em></p>';
 
   const personnelHtml = assigned.length
     ? `<ul>${assigned.map(p => `
@@ -1006,6 +1057,8 @@ async function showUnitDetails(unitId) {
     <p><strong>Vehicle Class:</strong> ${unit?.class || 'Unknown'} (${unit?.type || ''})</p>
     <h4>Equipment Aboard</h4>
     ${equipmentHtml}
+    <h4>Assign Equipment from Station</h4>
+    ${assignHtml}
     <h4>Assigned Personnel</h4>
     ${personnelHtml}
   `;
@@ -1022,6 +1075,23 @@ async function showUnitDetails(unitId) {
       modal.style.display = "none";
       showStationDetails({ id: sid });
     });
+  });
+  const assignBtn = content.querySelector('#assign-equip-btn');
+  assignBtn?.addEventListener('click', async () => {
+    const name = content.querySelector('#unit-equip-select').value;
+    const res = await fetch(`/api/units/${unitId}/equipment`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ station_id: unit.station_id, name })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      alert(`Failed: ${data.error || res.statusText}`);
+      return;
+    }
+    _unitById.set(unitId, { ...unit, equipment: data.equipment });
+    modal.style.display = 'none';
+    refreshStationPanelNoCache(unit.station_id);
   });
 
   modal.style.display = "block";
