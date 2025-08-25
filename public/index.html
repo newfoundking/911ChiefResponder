@@ -1413,6 +1413,26 @@ async function clearAssignedUnit(missionId, unitId) {
 
 // Work timer / resolve
 const activeWorkTimers = new Map();
+
+function persistWorkTimers() {
+  const arr = Array.from(activeWorkTimers.entries()).map(([id, obj]) => ({ id, endTime: obj.endTime }));
+  try { localStorage.setItem('activeWorkTimers', JSON.stringify(arr)); }
+  catch { /* ignore */ }
+}
+
+(function restoreWorkTimers(){
+  try {
+    const data = JSON.parse(localStorage.getItem('activeWorkTimers') || '[]');
+    const now = Date.now();
+    for (const { id, endTime } of data) {
+      if (endTime > now) activeWorkTimers.set(id, { endTime });
+    }
+    persistWorkTimers();
+  } catch {
+    /* ignore */
+  }
+})();
+
 function startMissionCountdown(missionId, endTime) {
   const tDiv = document.getElementById('missionTimerArea');
   if (!tDiv) return;
@@ -1432,6 +1452,7 @@ function startMissionCountdown(missionId, endTime) {
   update();
   const iid = setInterval(update, 1000);
   if (existing) existing.intervalId = iid; else activeWorkTimers.set(missionId, { endTime, intervalId: iid });
+  persistWorkTimers();
 }
 
 async function checkMissionCompletion(mission) {
@@ -1446,6 +1467,7 @@ async function checkMissionCompletion(mission) {
       if (existing.timeoutId) clearTimeout(existing.timeoutId);
       if (existing.intervalId) clearInterval(existing.intervalId);
       activeWorkTimers.delete(mission.id);
+      persistWorkTimers();
       const tDiv = document.getElementById('missionTimerArea');
       if (tDiv) tDiv.textContent = '';
     }
@@ -1460,6 +1482,7 @@ async function checkMissionCompletion(mission) {
       const cur = activeWorkTimers.get(mission.id);
       if (cur && cur.intervalId) clearInterval(cur.intervalId);
       activeWorkTimers.delete(mission.id);
+      persistWorkTimers();
       const assignedBefore = await (await fetch(`/api/missions/${mission.id}/units`)).json();
       await fetch(`/api/missions/${mission.id}/resolve`, { method:'POST' });
       if (!_stationById || _stationById.size===0) { const stations = await (await fetch('/api/stations')).json(); cacheStations(stations); }
@@ -1488,6 +1511,7 @@ async function checkMissionCompletion(mission) {
       if (area) area.innerHTML = '<strong>Mission resolved.</strong>';
     }, ms);
     activeWorkTimers.set(mission.id, { timeoutId: tid, endTime });
+    persistWorkTimers();
     startMissionCountdown(mission.id, endTime);
   }
 }
