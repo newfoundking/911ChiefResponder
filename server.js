@@ -19,6 +19,7 @@ app.use(express.static('public'));
 app.get('/config/unitTypes.js', (req,res)=>res.sendFile(path.join(__dirname,'unitTypes.js')));
 app.get('/config/trainings.js', (req,res)=>res.sendFile(path.join(__dirname,'trainings.js')));
 app.get('/config/equipment.js', (req,res)=>res.sendFile(path.join(__dirname,'equipment.js')));
+app.get('/config/osmPoiTypes.js', (req,res)=>res.sendFile(path.join(__dirname,'osmPoiTypes.js')));
 
 db.serialize(() => {
   // Stations
