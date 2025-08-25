@@ -528,20 +528,14 @@ function renderRequirementsDynamic(mission, assigned) {
     if (u.status === 'onscene') counts.onscene.set(u.type, (counts.onscene.get(u.type)||0)+1);
     else if (u.status === 'enroute') counts.enroute.set(u.type, (counts.enroute.get(u.type)||0)+1);
   }
-  const items = [];
-  for (const r of req) {
+  const items = req.map(r => {
     const need = r.quantity ?? r.count ?? 1;
     const onscene = counts.onscene.get(r.type) || 0;
     const enroute = counts.enroute.get(r.type) || 0;
-    const remaining = Math.max(0, need - onscene);
-    if (remaining <= 0) continue;
-    const badges = [];
-    if (enroute) badges.push(`${enroute} en route`);
-    if (onscene) badges.push(`${onscene} on scene`);
-    const badgeTxt = badges.length ? ` <small>(${badges.join(', ')})</small>` : '';
-    items.push(`<li>${remaining} × ${r.type}${badgeTxt}</li>`);
-  }
-  return items.length ? `<ul>${items.join('')}</ul>` : '<em>All required units are on scene.</em>';
+    const outstanding = Math.max(0, need - enroute - onscene);
+    return `<li>${need} × ${r.type} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onscene})</small></li>`;
+  });
+  return `<ul>${items.join('')}</ul>`;
 }
 
 function renderTrainingRequirements(mission) {
@@ -1219,7 +1213,7 @@ function renderManualList(stations, unitsByStation, busyIds, mission) {
   const selectSort = document.getElementById('md-sort');
   const selectClass = document.getElementById('md-class');
   const inputType = document.getElementById('md-type');
-  const sortVal = selectSort ? selectSort.value : 'name';
+  const sortVal = selectSort ? selectSort.value : 'distance';
   const classVal = selectClass ? selectClass.value : '';
   const typeFilter = (inputType ? inputType.value : '').toLowerCase();
 
@@ -1317,8 +1311,8 @@ async function openManualDispatch(mission) {
       <div style="display:flex; gap:8px; align-items:center; margin:6px 0; flex-wrap: wrap;">
         <label>Sort:
           <select id="md-sort">
+            <option value="distance" selected>Distance to call</option>
             <option value="name">Name (A–Z)</option>
-            <option value="distance">Distance to call</option>
             <option value="type">Type</option>
           </select>
         </label>
@@ -1335,10 +1329,10 @@ async function openManualDispatch(mission) {
         </label>
         <button id="md-reset" type="button">Reset Filters</button>
       </div>
-      <div id="md-list">Building list…</div>
-      <div style="margin-top:10px;">
+      <div style="margin:8px 0;">
         <button id="dispatchSelectedBtn">Dispatch Selected Units</button>
-      </div>`;
+      </div>
+      <div id="md-list">Building list…</div>`;
 
     const mdList = document.getElementById('md-list');
     const redraw = ()=>{ mdList.innerHTML = renderManualList(stations, unitsByStation, busyIds, mission); };
@@ -1346,7 +1340,7 @@ async function openManualDispatch(mission) {
     document.getElementById('md-class').onchange = redraw;
     document.getElementById('md-type').oninput = redraw;
     document.getElementById('md-reset').onclick = ()=>{
-      document.getElementById('md-sort').value = 'name';
+      document.getElementById('md-sort').value = 'distance';
       document.getElementById('md-class').value = '';
       document.getElementById('md-type').value = '';
       redraw();
@@ -1473,25 +1467,35 @@ function persistWorkTimers() {
 })();
 
 function startMissionCountdown(missionId, endTime) {
-  const tDiv = document.getElementById('missionTimerArea');
-  if (!tDiv) return;
   const existing = activeWorkTimers.get(missionId);
   if (existing && existing.intervalId) clearInterval(existing.intervalId);
   const update = () => {
+    const tDiv = document.getElementById('missionTimerArea');
     const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
     if (remaining <= 0) {
-      tDiv.textContent = 'Resolving…';
+      if (tDiv) tDiv.textContent = 'Resolving…';
       if (existing && existing.intervalId) clearInterval(existing.intervalId);
       return;
     }
-    const mins = Math.floor(remaining / 60);
-    const secs = remaining % 60;
-    tDiv.textContent = `Time remaining: ${mins}:${secs.toString().padStart(2, '0')}`;
+    if (tDiv) {
+      const mins = Math.floor(remaining / 60);
+      const secs = remaining % 60;
+      tDiv.textContent = `Time remaining: ${mins}:${secs.toString().padStart(2, '0')}`;
+    }
   };
   update();
   const iid = setInterval(update, 1000);
-  if (existing) existing.intervalId = iid; else activeWorkTimers.set(missionId, { endTime, intervalId: iid });
+  if (existing) {
+    existing.intervalId = iid;
+    existing.endTime = endTime;
+  } else {
+    activeWorkTimers.set(missionId, { endTime, intervalId: iid });
+  }
   persistWorkTimers();
+}
+
+for (const [id, obj] of Array.from(activeWorkTimers.entries())) {
+  startMissionCountdown(id, obj.endTime);
 }
 
 async function checkMissionCompletion(mission) {
