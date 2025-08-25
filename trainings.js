@@ -27,3 +27,7 @@ const trainingsByClass = {
     { name: "incident command", cost: 1000 }
   ]
 };
+
+if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
+  module.exports = trainingsByClass;
+}
