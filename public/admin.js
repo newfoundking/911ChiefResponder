@@ -57,8 +57,14 @@ function openMissionForm(existing = null) {
     <h3>${existing ? "Edit" : "New"} Mission</h3>
     <input type="hidden" id="mission-id" value="${existing?.id || ""}">
     <label>Name: <input id="mission-name" value="${existing?.name || ""}"></label><br>
-    <label>Trigger Type: <input id="trigger-type" value="${existing?.trigger_type || ""}"></label><br>
-    <label>Trigger Filter: <input id="trigger-filter" value="${existing?.trigger_filter || ""}"></label><br>
+    <label>Trigger Type:
+      <select id="trigger-type">
+        <option value=""></option>
+        <option value="poi">poi</option>
+        <option value="intersection">intersection</option>
+      </select>
+    </label><br>
+    <label>Trigger Filter: <span id="trigger-filter-container"></span></label><br>
     <label>Timing (minutes): <input id="timing" type="number" value="${existing?.timing ?? 0}"></label><br>
     <label>Rewards (currency): <input id="rewards" type="number" value="${existing?.rewards ?? 0}"></label><br>
 
@@ -95,6 +101,9 @@ function openMissionForm(existing = null) {
     <button onclick="submitMission()">Save</button>
   `;
 
+  buildTriggerFilterUI(existing?.trigger_type || '', existing?.trigger_filter || '');
+  document.getElementById('trigger-type').addEventListener('change', () => buildTriggerFilterUI());
+
   // Populate if editing
   (Array.isArray(existing?.required_units) ? existing.required_units : []).forEach(r => addUnitRequirementRow(r.type, r.quantity ?? r.count ?? 1));
   (Array.isArray(existing?.patients) ? existing.patients : []).forEach(p => addPatientRow(p.min, p.max, p.chance, p.codes));
@@ -102,6 +111,47 @@ function openMissionForm(existing = null) {
   (Array.isArray(existing?.required_training) ? existing.required_training : []).forEach(t => addTrainingRow(t.training ?? t.name ?? t, t.qty ?? 1));
   (Array.isArray(existing?.modifiers) ? existing.modifiers : []).forEach(m => addModifierRow(m.type, m.timeReduction, m.maxCount));
   (Array.isArray(existing?.equipment_required) ? existing.equipment_required : []).forEach(e => addEquipmentRow(e.name ?? e, e.qty ?? 1));
+}
+
+function buildTriggerFilterUI(type, filter) {
+  const select = document.getElementById('trigger-type');
+  const container = document.getElementById('trigger-filter-container');
+  if (!select || !container) return;
+  if (typeof type === 'string') select.value = type;
+  container.innerHTML = '';
+  const current = select.value;
+  if (current === 'poi') {
+    const sel = document.createElement('select');
+    sel.id = 'trigger-filter';
+    (OSM_POI_TYPES || []).forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = p;
+      if (filter === p) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    container.appendChild(sel);
+  } else if (current === 'intersection') {
+    const road1 = document.createElement('input');
+    road1.id = 'trigger-filter-road1';
+    road1.placeholder = 'Road 1';
+    const road2 = document.createElement('input');
+    road2.id = 'trigger-filter-road2';
+    road2.placeholder = 'Road 2';
+    if (filter) {
+      const [r1, r2] = String(filter).split('|');
+      road1.value = r1 || '';
+      road2.value = r2 || '';
+    }
+    container.appendChild(road1);
+    container.appendChild(document.createTextNode(' & '));
+    container.appendChild(road2);
+  } else {
+    const input = document.createElement('input');
+    input.id = 'trigger-filter';
+    input.value = filter || '';
+    container.appendChild(input);
+  }
 }
 
 // ====== Add Row Functions ======
@@ -280,10 +330,22 @@ async function editMission(id) {
 
 async function submitMission() {
   const id = document.getElementById("mission-id").value || null;
+  const triggerType = document.getElementById("trigger-type").value;
+  let triggerFilter = '';
+  if (triggerType === 'poi') {
+    triggerFilter = document.getElementById('trigger-filter').value;
+  } else if (triggerType === 'intersection') {
+    const r1 = document.getElementById('trigger-filter-road1').value;
+    const r2 = document.getElementById('trigger-filter-road2').value;
+    triggerFilter = `${r1}|${r2}`;
+  } else {
+    const f = document.getElementById('trigger-filter');
+    triggerFilter = f ? f.value : '';
+  }
   const mission = {
     name: document.getElementById("mission-name").value,
-    trigger_type: document.getElementById("trigger-type").value,
-    trigger_filter: document.getElementById("trigger-filter").value,
+    trigger_type: triggerType,
+    trigger_filter: triggerFilter,
     timing: Number(document.getElementById("timing").value),
     rewards: Number(document.getElementById("rewards").value) || 0, // <-- NEW
     required_units: collectRows("#unit-req-container") || [],
