@@ -1035,7 +1035,7 @@ async function showUnitDetails(unitId) {
     : [];
 
   const equipmentHtml = eqNames.length
-    ? `<ul>${eqNames.map(n => `<li>${n}</li>`).join('')}</ul>`
+    ? `<ul>${eqNames.map(n => `<li>${n} <button class="remove-equip-btn" data-name="${n}">Remove</button></li>`).join('')}</ul>`
     : '<em>No equipment</em>';
   const availableEq = Array.isArray(station?.equipment) ? station.equipment : [];
   const assignHtml = availableEq.length
@@ -1075,6 +1075,24 @@ async function showUnitDetails(unitId) {
       });
       modal.style.display = "none";
       showStationDetails({ id: sid });
+    });
+  });
+  content.querySelectorAll('.remove-equip-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.name;
+      const res = await fetch(`/api/units/${unitId}/equipment`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ station_id: unit.station_id, name })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(`Failed: ${data.error || res.statusText}`);
+        return;
+      }
+      _unitById.set(unitId, { ...unit, equipment: data.equipment });
+      modal.style.display = 'none';
+      refreshStationPanelNoCache(unit.station_id);
     });
   });
   const assignBtn = content.querySelector('#assign-equip-btn');
