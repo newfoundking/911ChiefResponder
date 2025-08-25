@@ -642,11 +642,12 @@ function showMissionDetails(mission) {
     ${patientHtml ? '<p><strong>Patients:</strong></p>' + patientHtml : ''}
     ${prisonerHtml ? '<p><strong>Prisoners:</strong></p>' + prisonerHtml : ''}
     <div id="assignedUnitsArea" style="margin-top:8px;"></div>
-    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button></div>
+    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button> <button id="autoDispatchBtn">Auto Dispatch</button></div>
     <div id="manualDispatchArea" style="margin-top:8px;"></div>
     <div id="missionTimerArea" style="margin-top:8px;"></div>
   `;
   document.getElementById('manualDispatchBtn').onclick = () => openManualDispatch(mission);
+  document.getElementById('autoDispatchBtn').onclick = () => autoDispatch(mission);
   refreshAssignedUnitsUI(mission.id).then(assigned => {
     const reqDiv = document.getElementById('reqDynamic');
     if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned);
@@ -1393,78 +1394,160 @@ async function openManualDispatch(mission) {
   }
 }
 
+async function sendUnitsToMission(mission, ids, area) {
+  await Promise.all(ids.map(id => fetch('/api/mission-units',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mission_id: mission.id, unit_id: id }) })));
+  if (area) area.innerHTML = `<strong>Dispatched ${ids.length} unit(s) to mission #${mission.id}.</strong>`;
+  const assigned = await refreshAssignedUnitsUI(mission.id);
+  const reqDiv = document.getElementById('reqDynamic');
+  if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned);
+  const trainDiv = document.getElementById('reqTrainingDynamic');
+  if (trainDiv) trainDiv.innerHTML = renderTrainingRequirementsDynamic(mission, assigned);
+  const equipDiv = document.getElementById('reqEquipmentDynamic');
+  if (equipDiv) equipDiv.innerHTML = renderEquipmentRequirementsDynamic(mission, assigned);
+
+  const allUnits = await (await fetch('/api/units')).json();
+  cacheUnits(allUnits);
+
+  for (const uid of ids) {
+    const u = _unitById.get(uid);
+    if (!u) continue;
+    const st = _stationById.get(u.station_id);
+    if (!st) continue;
+    const marker = ensureUnitMarker(u);
+    if (!marker) continue;
+
+    fetch(`/api/units/${uid}/status`, { method:'PATCH', headers:{ 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'enroute' }) });
+
+    const current = marker.getLatLng ? marker.getLatLng() : L.latLng(st.lat, st.lon);
+    const from = [current.lat, current.lng];
+    const to   = [mission.lat, mission.lon];
+    const spd  = TRAVEL_SPEED[u.class] || 45;
+
+    routeAndAnimateUnit(
+      uid, from, to, spd,
+      async () => {
+        await fetch(`/api/units/${uid}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'onscene' })
+        });
+
+        const entry = unitMarkers.get(uid);
+        if (entry) { try { map.removeLayer(entry.marker); } catch {} unitMarkers.delete(uid); }
+
+        if (window.unitRoutes && unitRoutes.has(uid)) {
+          try { map.removeLayer(unitRoutes.get(uid)); } catch {}
+          unitRoutes.delete(uid);
+        }
+        if (typeof clearUnitEta === 'function') clearUnitEta(uid);
+
+        const assignedAfter = await refreshAssignedUnitsUI(mission.id);
+        const reqDiv2 = document.getElementById('reqDynamic');
+        if (reqDiv2) reqDiv2.innerHTML = renderRequirementsDynamic(mission, assignedAfter);
+        const trainDiv2 = document.getElementById('reqTrainingDynamic');
+        if (trainDiv2) trainDiv2.innerHTML = renderTrainingRequirementsDynamic(mission, assignedAfter);
+        const equipDiv2 = document.getElementById('reqEquipmentDynamic');
+        if (equipDiv2) equipDiv2.innerHTML = renderEquipmentRequirementsDynamic(mission, assignedAfter);
+        checkMissionCompletion(mission);
+      },
+      { mission_id: mission.id, phase: 'to_scene' }
+    );
+  }
+}
+
 async function dispatchSelectedUnits(missionId) {
   const area = document.getElementById('manualDispatchArea');
   const ids = Array.from(area.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>parseInt(cb.value,10));
   if (!ids.length){ alert('Select at least one unit to dispatch.'); return; }
   try {
-    await Promise.all(ids.map(id => fetch('/api/mission-units',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mission_id: missionId, unit_id: id }) })));
-    area.innerHTML = `<strong>Dispatched ${ids.length} unit(s) to mission #${missionId}.</strong>`;
-    const assigned = await refreshAssignedUnitsUI(missionId);
-
     const missions = await (await fetch('/api/missions')).json();
     const mission = missions.find(m=>m.id===missionId);
+    if (!mission) { alert('Mission not found.'); return; }
+    await sendUnitsToMission(mission, ids, area);
     openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon });
-    if (mission) {
-      const reqDiv = document.getElementById('reqDynamic');
-      if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned);
-      const trainDiv = document.getElementById('reqTrainingDynamic');
-      if (trainDiv) trainDiv.innerHTML = renderTrainingRequirementsDynamic(mission, assigned);
-      const equipDiv = document.getElementById('reqEquipmentDynamic');
-      if (equipDiv) equipDiv.innerHTML = renderEquipmentRequirementsDynamic(mission, assigned);
-    }
-
-    const allUnits = await (await fetch('/api/units')).json();
-    cacheUnits(allUnits);
-
-    for (const uid of ids) {
-      const u = _unitById.get(uid);
-      if (!u) continue;
-      const st = _stationById.get(u.station_id);
-      if (!st) continue;
-      const marker = ensureUnitMarker(u);
-      if (!marker) continue;
-
-      fetch(`/api/units/${uid}/status`, { method:'PATCH', headers:{ 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'enroute' }) });
-
-      const current = marker.getLatLng ? marker.getLatLng() : L.latLng(st.lat, st.lon);
-      const from = [current.lat, current.lng];
-      const to   = [mission.lat, mission.lon];
-      const spd  = TRAVEL_SPEED[u.class] || 45;
-
-      routeAndAnimateUnit(
-        uid, from, to, spd,
-        async () => {
-                        await fetch(`/api/units/${uid}/status`, {
-                          method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ status: 'onscene' })
-                        });
-
-			const entry = unitMarkers.get(uid);
-			if (entry) { try { map.removeLayer(entry.marker); } catch {} unitMarkers.delete(uid); }
-
-			if (window.unitRoutes && unitRoutes.has(uid)) {
-			  try { map.removeLayer(unitRoutes.get(uid)); } catch {}
-			  unitRoutes.delete(uid);
-			}
-			if (typeof clearUnitEta === 'function') clearUnitEta(uid);
-
-                        const assignedAfter = await refreshAssignedUnitsUI(missionId);
-                        const reqDiv = document.getElementById('reqDynamic');
-                        if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(mission, assignedAfter);
-                        const trainDiv = document.getElementById('reqTrainingDynamic');
-                        if (trainDiv) trainDiv.innerHTML = renderTrainingRequirementsDynamic(mission, assignedAfter);
-                        const equipDiv = document.getElementById('reqEquipmentDynamic');
-                        if (equipDiv) equipDiv.innerHTML = renderEquipmentRequirementsDynamic(mission, assignedAfter);
-                        checkMissionCompletion(mission);
-        },
-        { mission_id: missionId, phase: 'to_scene' }
-      );
-    }
   } catch (e) {
     console.error(e);
     alert('Failed to dispatch one or more units.');
+  }
+}
+
+async function autoDispatch(mission) {
+  const area = document.getElementById('manualDispatchArea');
+  area.innerHTML = 'Selecting units…';
+  try {
+    const [stations, allUnitsRaw] = await Promise.all([
+      fetch('/api/stations').then(r=>r.json()),
+      fetch('/api/units?status=available').then(r=>r.json())
+    ]);
+    cacheStations(stations);
+    const stMap = new Map(stations.map(s=>[s.id,s]));
+    const allUnits = allUnitsRaw.map(u=>{
+      const st = stMap.get(u.station_id);
+      const dist = st ? haversineKm(st.lat, st.lon, mission.lat, mission.lon) : Infinity;
+      return { ...u, _dist: dist };
+    });
+    const selected = [];
+    const selectedIds = new Set();
+
+    function pickUnits(filterFn, count) {
+      const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && filterFn(u)).sort((a,b)=>a._dist - b._dist);
+      const take = candidates.slice(0, count);
+      for (const u of take) { selectedIds.add(u.id); selected.push(u); }
+    }
+
+    const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
+    for (const r of reqUnits) {
+      const need = r.quantity ?? r.count ?? r.qty ?? 1;
+      pickUnits(u => u.type === r.type, need);
+    }
+
+    function trainingCount(u, name) {
+      let c = 0;
+      for (const p of Array.isArray(u.personnel)?u.personnel:[]) {
+        for (const t of Array.isArray(p.training)?p.training:[]) {
+          if (String(t).toLowerCase() === String(name).toLowerCase()) c++;
+        }
+      }
+      return c;
+    }
+    function equipmentCount(u, name) {
+      return Array.isArray(u.equipment)?u.equipment.filter(e=>String(e).toLowerCase()===String(name).toLowerCase()).length:0;
+    }
+
+    const reqTraining = Array.isArray(mission.required_training) ? mission.required_training : [];
+    for (const r of reqTraining) {
+      const need = r.qty ?? r.quantity ?? r.count ?? 1;
+      const name = r.training || r.name || r;
+      let have = selected.reduce((sum,u)=>sum + trainingCount(u,name),0);
+      if (have < need) {
+        const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && trainingCount(u,name)>0).sort((a,b)=>a._dist - b._dist);
+        for (const u of candidates) {
+          if (have >= need) break;
+          selectedIds.add(u.id); selected.push(u); have += trainingCount(u,name);
+        }
+      }
+    }
+
+    const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
+    for (const r of reqEquip) {
+      const need = r.qty ?? r.quantity ?? r.count ?? 1;
+      const name = r.name || r.type || r;
+      let have = selected.reduce((sum,u)=>sum + equipmentCount(u,name),0);
+      if (have < need) {
+        const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && equipmentCount(u,name)>0).sort((a,b)=>a._dist - b._dist);
+        for (const u of candidates) {
+          if (have >= need) break;
+          selectedIds.add(u.id); selected.push(u); have += equipmentCount(u,name);
+        }
+      }
+    }
+
+    if (!selected.length) { area.innerHTML = '<em>No available units meet the requirements.</em>'; return; }
+    const ids = selected.map(u=>u.id);
+    await sendUnitsToMission(mission, ids, area);
+  } catch (e) {
+    console.error(e);
+    area.innerHTML = '<span style="color:#b00;">Auto dispatch failed.</span>';
   }
 }
 
