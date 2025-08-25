@@ -60,9 +60,11 @@
   background: white; padding: 1em; border: 2px solid #444;
   box-shadow: 0 0 10px rgba(0,0,0,0.3); z-index: 9999;
   width: 420px; max-height: 80vh; overflow-y: auto; border-radius: 8px;">
-	<h3>Details</h3>
-	<div id="missionDetailsContent">Loading...</div>
-	<button onclick="document.getElementById('missionDetails').style.display = 'none';">Close</button>
+        <div style="text-align:right;">
+                <button onclick="document.getElementById('missionDetails').style.display = 'none';">Close</button>
+        </div>
+        <h3>Details</h3>
+        <div id="missionDetailsContent">Loading...</div>
 </div>
 
 <!-- Station Creation Form -->
@@ -542,6 +544,7 @@ function showMissionDetails(mission) {
     <div id="assignedUnitsArea" style="margin-top:8px;"></div>
     <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button></div>
     <div id="manualDispatchArea" style="margin-top:8px;"></div>
+    <div id="missionTimerArea" style="margin-top:8px;"></div>
   `;
   document.getElementById('manualDispatchBtn').onclick = () => openManualDispatch(mission);
   refreshAssignedUnitsUI(mission.id);
@@ -550,6 +553,13 @@ function showMissionDetails(mission) {
     if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned);
   }).catch(()=>{});
   document.getElementById("missionDetails").style.display = "block";
+  const active = activeWorkTimers.get(mission.id);
+  if (active && active.endTime) {
+    startMissionCountdown(mission.id, active.endTime);
+  } else {
+    const t = document.getElementById('missionTimerArea');
+    if (t) t.textContent = '';
+  }
 }
 
 // ===== Station details =====
@@ -1215,18 +1225,52 @@ async function clearAssignedUnit(missionId, unitId) {
 
 // Work timer / resolve
 const activeWorkTimers = new Map();
+function startMissionCountdown(missionId, endTime) {
+  const tDiv = document.getElementById('missionTimerArea');
+  if (!tDiv) return;
+  const existing = activeWorkTimers.get(missionId);
+  if (existing && existing.intervalId) clearInterval(existing.intervalId);
+  const update = () => {
+    const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+    if (remaining <= 0) {
+      tDiv.textContent = 'Resolving…';
+      if (existing && existing.intervalId) clearInterval(existing.intervalId);
+      return;
+    }
+    const mins = Math.floor(remaining / 60);
+    const secs = remaining % 60;
+    tDiv.textContent = `Time remaining: ${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+  update();
+  const iid = setInterval(update, 1000);
+  if (existing) existing.intervalId = iid; else activeWorkTimers.set(missionId, { endTime, intervalId: iid });
+}
+
 async function checkMissionCompletion(mission) {
   const assigned = await (await fetch(`/api/missions/${mission.id}/units`)).json();
   const onsceneByType = new Map();
   for (const u of assigned) if (u.status==='onscene') onsceneByType.set(u.type, (onsceneByType.get(u.type)||0)+1);
   const req = Array.isArray(mission.required_units) ? mission.required_units : [];
   const allMet = req.every(r => (onsceneByType.get(r.type)||0) >= (r.quantity ?? r.count ?? 1));
-  if (!allMet) { const t = activeWorkTimers.get(mission.id); if (t){ clearTimeout(t); activeWorkTimers.delete(mission.id); } return; }
+  const existing = activeWorkTimers.get(mission.id);
+  if (!allMet) {
+    if (existing) {
+      if (existing.timeoutId) clearTimeout(existing.timeoutId);
+      if (existing.intervalId) clearInterval(existing.intervalId);
+      activeWorkTimers.delete(mission.id);
+      const tDiv = document.getElementById('missionTimerArea');
+      if (tDiv) tDiv.textContent = '';
+    }
+    return;
+  }
 
-  if (!activeWorkTimers.has(mission.id)) {
+  if (!existing) {
     const minutes = Number.isFinite(mission.timing) ? mission.timing : 10;
     const ms = Math.max(5, minutes*60)*1000;
+    const endTime = Date.now() + ms;
     const tid = setTimeout(async ()=>{
+      const cur = activeWorkTimers.get(mission.id);
+      if (cur && cur.intervalId) clearInterval(cur.intervalId);
       activeWorkTimers.delete(mission.id);
       const assignedBefore = await (await fetch(`/api/missions/${mission.id}/units`)).json();
       await fetch(`/api/missions/${mission.id}/resolve`, { method:'POST' });
@@ -1246,7 +1290,8 @@ async function checkMissionCompletion(mission) {
       const area = document.getElementById('manualDispatchArea');
       if (area) area.innerHTML = '<strong>Mission resolved.</strong>';
     }, ms);
-    activeWorkTimers.set(mission.id, tid);
+    activeWorkTimers.set(mission.id, { timeoutId: tid, endTime });
+    startMissionCountdown(mission.id, endTime);
   }
 }
 
