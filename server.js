@@ -817,6 +817,20 @@ app.patch('/api/units/:id/status', (req, res) => {
   });
 });
 
+// Cancel unit: free it from any mission and set available
+app.post('/api/units/:id/cancel', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'invalid id' });
+  db.serialize(() => {
+    db.run('DELETE FROM mission_units WHERE unit_id=?', [id]);
+    db.run('DELETE FROM unit_travel WHERE unit_id=?', [id]);
+    db.run('UPDATE units SET status=? WHERE id=?', ['available', id], function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    });
+  });
+});
+
 /* =========================
    Personnel
    ========================= */

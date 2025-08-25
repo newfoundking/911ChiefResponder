@@ -728,8 +728,9 @@ async function showStationDetails(station) {
     <ul id="unit-list">
       ${units.map(u=>`
         <li>
-          <strong style="cursor:pointer; color:blue;" onclick="showUnitDetails(${u.id})">${u.name}</strong> (${u.type})
+          <strong style="cursor:pointer; color:blue;" onclick="showUnitDetails(${u.id})">${u.name}</strong> (${u.type}) - ${u.status}
           <button onclick="openAssignModal(${u.id}, ${station.id})">Assign</button>
+          ${u.status !== 'available' ? `<button onclick="cancelUnit(${u.id}, ${station.id})">Cancel</button>` : ''}
         </li>`).join('')}
     </ul>`;
         async function refreshBayInfo(stationId) {
@@ -1077,6 +1078,17 @@ async function openAssignModal(unitId, stationId) {
   };
 
   modal.style.display = "block";
+}
+
+async function cancelUnit(unitId, stationId) {
+  if (!confirm('Cancel this unit?')) return;
+  const res = await fetch(`/api/units/${unitId}/cancel`, { method: 'POST' });
+  if (!res.ok) {
+    const msg = await res.text();
+    alert(`Failed: ${msg}`);
+    return;
+  }
+  refreshStationPanelNoCache(stationId);
 }
 
 async function showUnitDetails(unitId) {
