@@ -570,6 +570,13 @@ function renderPatientInfo(mission) {
   const pts = Array.isArray(mission.patients) ? mission.patients : [];
   if (!pts.length) return '';
   const items = pts.map(p => {
+    if (typeof p.count === 'number') {
+      const codes = Array.isArray(p.codes) ? p.codes.join(', ') : (p.codes || '');
+      const parts = [String(p.count)];
+      if (codes) parts.push(`Codes: ${codes}`);
+      return `<li>${parts.join(', ')}</li>`;
+    }
+    // Fallback for legacy structure
     const codes = Array.isArray(p.codes) ? p.codes.join(', ') : (p.codes || '');
     const chance = Number.isFinite(p.chance) ? `Chance: ${Math.round(p.chance * 100)}%` : '';
     const parts = [`${p.min ?? 0}-${p.max ?? 0}`];
@@ -584,6 +591,12 @@ function renderPrisonerInfo(mission) {
   const prs = Array.isArray(mission.prisoners) ? mission.prisoners : [];
   if (!prs.length) return '';
   const items = prs.map(p => {
+    if (typeof p.count === 'number') {
+      const parts = [String(p.count)];
+      if (Number.isFinite(p.transport)) parts.push(`Transport: ${p.transport}`);
+      return `<li>${parts.join(', ')}</li>`;
+    }
+    // Fallback for legacy structure
     const chance = Number.isFinite(p.chance) ? `Chance: ${Math.round(p.chance * 100)}%` : '';
     const transport = Number.isFinite(p.transportChance) ? `Transport: ${Math.round(p.transportChance * 100)}%` : '';
     const parts = [`${p.min ?? 0}-${p.max ?? 0}`];
@@ -943,6 +956,32 @@ map.on("click", async (e) => {
   fetchStations();
 });
 
+function randomCount({min=0, max=0, chance=1}) {
+  min = Math.floor(min); max = Math.floor(max);
+  if (max <= min) return min;
+  if (Math.random() < chance) return max;
+  return min + Math.floor(Math.random() * (max - min));
+}
+
+function instantiatePatients(arr) {
+  return (arr || []).map(p => {
+    const count = randomCount(p);
+    return { count, codes: p.codes };
+  }).filter(p => p.count > 0);
+}
+
+function instantiatePrisoners(arr) {
+  return (arr || []).map(p => {
+    const count = randomCount(p);
+    const transportChance = Number(p.transportChance) || 0;
+    let transport = 0;
+    for (let i = 0; i < count; i++) {
+      if (Math.random() < transportChance) transport++;
+    }
+    return { count, transport };
+  }).filter(p => p.count > 0);
+}
+
 // Generate Mission
 document.getElementById('generateMission').addEventListener('click', async ()=>{
   if (poiCache.length===0 || missionTemplates.length===0) { alert("No POIs or mission templates loaded."); return; }
@@ -955,8 +994,8 @@ document.getElementById('generateMission').addEventListener('click', async ()=>{
     required_units: template.required_units,
     required_training: template.required_training || [],
     equipment_required: template.equipment_required || [],
-    patients: template.patients || [],
-    prisoners: template.prisoners || [],
+    patients: instantiatePatients(template.patients),
+    prisoners: instantiatePrisoners(template.prisoners),
     modifiers: template.modifiers || [],
     timing: template.timing ?? 10
   };
