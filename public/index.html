@@ -232,7 +232,9 @@ function ensureUnitMarker(unit) {
   let entry = unitMarkers.get(unit.id);
   if (!entry) {
     const icon = unitMarkerIcons[unit.class] || unitMarkerIcons.fire;
-    const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
+    const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 })
+      .addTo(map)
+      .on('click', () => showUnitDetails(unit.id));
     entry = { marker, animId: null };
     unitMarkers.set(unit.id, entry);
   }
@@ -974,37 +976,53 @@ async function showUnitDetails(unitId) {
   const modal = document.getElementById("unitDetailModal");
   const content = document.getElementById("unitDetailContent");
 
-  const res = await fetch(`/api/personnel`);
+  const unit = _unitById.get(unitId);
+  const station = unit ? _stationById.get(unit.station_id) : null;
+
+  const res = await fetch(`/api/personnel?station_id=${unit?.station_id ?? ''}`);
   const personnel = await res.json();
   const assigned = personnel.filter(p => p.unit_id === unitId);
 
-  if (!assigned.length) {
-    content.innerHTML = "<p>No personnel assigned to this unit.</p>";
-  } else {
-    content.innerHTML = `
-      <ul>
-        ${assigned.map(p => `
+  const eqNames = Array.isArray(unit?.equipment)
+    ? unit.equipment.map(e => typeof e === 'string' ? e : e?.name).filter(Boolean)
+    : [];
+
+  const equipmentHtml = eqNames.length
+    ? `<ul>${eqNames.map(n => `<li>${n}</li>`).join('')}</ul>`
+    : '<em>No equipment</em>';
+
+  const personnelHtml = assigned.length
+    ? `<ul>${assigned.map(p => `
           <li>
             ${p.name || '(no name)'} ${Array.isArray(p.training) && p.training.length ? `(${p.training.join(', ')})` : ''}
             <button class="unassign-btn" data-person-id="${p.id}" data-station-id="${p.station_id}">Unassign</button>
           </li>
-        `).join('')}
-      </ul>
-    `;
-    content.querySelectorAll('.unassign-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const pid = parseInt(btn.dataset.personId, 10);
-        const sid = parseInt(btn.dataset.stationId, 10);
-        await fetch(`/api/personnel/${pid}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ unit_id: null })
-        });
-        modal.style.display = "none";
-        showStationDetails({ id: sid });
+        `).join('')}</ul>`
+    : '<p>No personnel assigned to this unit.</p>';
+
+  content.innerHTML = `
+    <p><strong>Name:</strong> ${unit?.name || 'Unknown'}</p>
+    <p><strong>Station:</strong> ${station?.name || 'Unknown'}</p>
+    <p><strong>Vehicle Class:</strong> ${unit?.class || 'Unknown'} (${unit?.type || ''})</p>
+    <h4>Equipment Aboard</h4>
+    ${equipmentHtml}
+    <h4>Assigned Personnel</h4>
+    ${personnelHtml}
+  `;
+
+  content.querySelectorAll('.unassign-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const pid = parseInt(btn.dataset.personId, 10);
+      const sid = parseInt(btn.dataset.stationId, 10);
+      await fetch(`/api/personnel/${pid}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unit_id: null })
       });
+      modal.style.display = "none";
+      showStationDetails({ id: sid });
     });
-  }
+  });
 
   modal.style.display = "block";
 }
