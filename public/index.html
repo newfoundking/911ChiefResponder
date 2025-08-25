@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Chief Responder</title>
+	<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+	<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+	<style>
+		body { margin: 0; display: flex; height: 100vh; font-family: sans-serif; }
+		#sidebar { max-width: 30%; width: 100%; overflow-y: auto; padding: 10px; box-sizing: border-box; }
+		#map { flex: 1; }
+		.mission { border-bottom: 1px solid #ccc; margin-bottom: 1em; padding-bottom: 0.5em; }
+		.tab-button { padding: 0.5em 1em; border: none; background: #ddd; cursor: pointer; }
+		.tab-button.active { background: #aaa; font-weight: bold; }
+		.tab-content { display: none; }
+		.tab-content.active { display: block; }
+		#stationDetails { max-width: 30%; overflow-y: auto; }
+		.popup { position: fixed; top: 10%; left: 30%; width: 40%; background: white; border: 2px solid black; padding: 20px; z-index: 9999; max-height: 80%; overflow-y: auto; }
+		.hidden { display: none; }
+		.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; overflow: auto; }
+		.modal-content { background: white; padding: 2rem; max-width: 90%; max-height: 90%; overflow-y: auto; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.3); }
+	</style>
+</head>
+<body>
+
+<div id="sidebar">
+	<h2>Mission Chief Clone</h2>
+	<div style="display: flex; gap: 1em; margin-bottom: 1em;">
+		<button class="tab-button active" data-tab="missions">Missions</button>
+		<button class="tab-button" data-tab="stations">Stations</button>
+	</div>
+	<div id="walletDisplay">Balance: $0</div>
+	<script>
+	async function refreshWallet(){
+	  const w = await fetch('/api/wallet').then(r=>r.json());
+	  document.getElementById('walletDisplay').textContent = `Balance: $${w.balance}`;
+	}
+	setInterval(refreshWallet, 5000);
+	refreshWallet();
+	</script>
+	<div id="tab-missions" class="tab-content active">
+		<button id="generateMission">Generate Mission</button>
+		<button id="clearMissions" style="background: darkred; color: white; margin-top: 1em;">DEBUG CLEAR ALL CALLS</button>
+		<button id="deleteAllStations">DEBUG DELETE ALL STATIONS</button>
+		<div id="missionList"></div>
+	</div>
+
+	<div id="tab-stations" class="tab-content">
+	  <button id="buildStation" style="margin-bottom: 1em;">Build New Station</button>
+	  <div id="stationList"></div>
+	</div>
+</div>
+
+<div id="map"></div>
+
+<!-- Modal for Mission & Station Details -->
+<div id="missionDetails" style="
+  position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
+  background: white; padding: 1em; border: 2px solid #444;
+  box-shadow: 0 0 10px rgba(0,0,0,0.3); z-index: 9999;
+  width: 420px; max-height: 80vh; overflow-y: auto; border-radius: 8px;">
+	<h3>Details</h3>
+	<div id="missionDetailsContent">Loading...</div>
+	<button onclick="document.getElementById('missionDetails').style.display = 'none';">Close</button>
+</div>
+
+<!-- Station Creation Form -->
+<div id="stationForm" style="
+	position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+	background: white; border: 2px solid #444; padding: 1em;
+	width: 300px; max-width: 30%; box-shadow: 0 0 10px rgba(0,0,0,0.3);
+	display: none; z-index: 10000;">
+	<h3>Create Station</h3>
+	<label for="stationName">Name:</label>
+	<input type="text" id="stationName" style="width: 100%;" />
+	<br><br>
+	<label for="stationType">Type:</label>
+	<select id="stationType" style="width: 100%;">
+		<option value="fire">Fire</option>
+		<option value="police">Police</option>
+		<option value="ambulance">Ambulance</option>
+	</select>
+	<br><br>
+	<button id="createStation">Create</button>
+	<button onclick="document.getElementById('stationForm').style.display = 'none';">Cancel</button>
+</div>
+
+<!-- Unit Assignment Modal -->
+<div id="assignPersonnelModal" style="
+	position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+	background: white; border: 2px solid #444; padding: 1em;
+	width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
+	display: none; z-index: 10001;">
+	<h3>Assign Personnel to Unit</h3>
+	<div id="assignModalContent">Loading...</div>
+	<button onclick="document.getElementById('assignPersonnelModal').style.display = 'none';">Close</button>
+</div>
+
+<!-- Edit Personnel Modal -->
+<div id="editPersonnelModal" style="
+	position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+	background: white; border: 2px solid #444; padding: 1em;
+	width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
+	display: none; z-index: 10001;">
+	<h3>Edit Personnel</h3>
+	<div id="editPersonnelContent">Loading...</div>
+	<button onclick="document.getElementById('editPersonnelModal').style.display = 'none';">Close</button>
+</div>
+
+<!-- Unit Detail Modal -->
+<div id="unitDetailModal" style="
+	position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+	background: white; border: 2px solid #444; padding: 1em;
+	width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
+	display: none; z-index: 10001;">
+	<h3>Unit Details</h3>
+	<div id="unitDetailContent">Loading...</div>
+	<button onclick="document.getElementById('unitDetailModal').style.display = 'none';">Close</button>
+</div>
+
+<div id="cadPopup" class="popup hidden">
+  <h3 id="cadTitle"></h3>
+  <p id="cadType"></p>
+  <p id="cadRequired"></p>
+  <button onclick="dispatchAuto()">Dispatch (Auto)</button>
+  <button onclick="dispatchRecommended()">Dispatch (Recommended)</button>
+  <button onclick="manualDispatch()">Manual Dispatch</button>
+  <button onclick="closeCad()">Close</button>
+</div>
+
+<div id="stationDetails"></div>
+<script src="/config/unitTypes.js"></script>
+<script src="/config/trainings.js"></script>
+<script src="/config/equipment.js"></script>
+
+<script>
+// ========= constants / helpers =========
+const TRAVEL_SPEED = { fire: 50, police: 75, ambulance: 60 }; // km/h used across UI
+
+function haversineKm(aLat, aLon, bLat, bLon) {
+  const R = 6371;
+  const dLat = (bLat - aLat) * Math.PI/180;
+  const dLon = (bLon - aLon) * Math.PI/180;
+  const la1 = aLat * Math.PI/180, la2 = bLat * Math.PI/180;
+  const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+// Force-fresh GETs to avoid 304s when we need updated data
+function fetchNoCache(url) {
+  const sep = url.includes('?') ? '&' : '?';
+  return fetch(`${url}${sep}t=${Date.now()}`, { cache: 'no-store' });
+}
+
+// Refresh a single station panel with fresh data (no cache)
+async function refreshStationPanelNoCache(stationId) {
+  const stations = await fetchNoCache('/api/stations').then(r=>r.json());
+  const st = stations.find(s => s.id === stationId);
+  if (st) showStationDetails(st);
+}
+
+const missionIcon = L.icon({ iconUrl: "/warning.png", iconSize: [30,30], iconAnchor: [15,30] });
+const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/star.png" };
+
+let poiCache = [];
+let missionMarkers = [];
+let stationMarkers = [];
+let buildStationMode = false;
+
+async function fetchPOIs() {
+  try {
+    const res = await fetch("/api/pois?lat=47.5646&lon=-52.7002&radius=5000");
+    poiCache = await res.json();
+  } catch (e) { console.warn("Failed to fetch POIs:", e); }
+}
+
+const map = L.map("map").setView([47.5646, -52.7002], 13);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+fetchPOIs();
+
+document.getElementById("deleteAllStations").addEventListener("click", async () => {
+  if (!confirm("Are you sure you want to delete ALL stations? This will also orphan units!")) return;
+  await fetch("/api/stations", { method: "DELETE" });
+  fetchStations();
+  alert("All stations deleted.");
+});
+
+function getTrainingsForClass(cls) {
+  const key = String(cls || '').trim().toLowerCase();
+  if (typeof trainingsByClass !== 'undefined' && trainingsByClass && trainingsByClass[key]) {
+    return trainingsByClass[key];
+  }
+  return [];
+}
+
+// Tabs
+document.querySelectorAll(".tab-button").forEach(button => {
+  button.addEventListener("click", () => {
+    document.querySelectorAll(".tab-button").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+    button.classList.add("active");
+    document.getElementById(`tab-${button.dataset.tab}`).classList.add("active");
+  });
+});
+
+// Unit icons
+const unitMarkerIcons = {
+  fire: L.icon({ iconUrl: stationIcons.fire, iconSize: [24,24], iconAnchor: [12,24] }),
+  police: L.icon({ iconUrl: stationIcons.police, iconSize: [24,24], iconAnchor: [12,24] }),
+  ambulance: L.icon({ iconUrl: stationIcons.ambulance, iconSize: [24,24], iconAnchor: [12,24] }),
+};
+
+// caches
+window._stationById = new Map();
+window._unitById = new Map();
+
+// registries
+const unitMarkers = new Map(); // unitId -> { marker, animId }
+const unitRoutes  = new Map(); // unitId -> L.Polyline
+
+function clearUnitEta(){ /* hook for later, no-op now */ }
+
+function cacheStations(stations){ _stationById = new Map(stations.map(s => [s.id, s])); }
+function cacheUnits(units){ _unitById = new Map(units.map(u => [u.id, u])); }
+
+function ensureUnitMarker(unit) {
+  const st = _stationById.get(unit.station_id);
+  if (!st) return null;
+  let entry = unitMarkers.get(unit.id);
+  if (!entry) {
+    const icon = unitMarkerIcons[unit.class] || unitMarkerIcons.fire;
+    const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 }).addTo(map);
+    entry = { marker, animId: null };
+    unitMarkers.set(unit.id, entry);
+  }
+  return entry.marker;
+}
+
+function animateMoveUnit(unitId, from, to, durationMs, onDone) {
+  const entry = unitMarkers.get(unitId);
+  if (!entry) return;
+  if (entry.animId) cancelAnimationFrame(entry.animId);
+  const marker = entry.marker;
+  const start = performance.now();
+  function step(now) {
+    const t = Math.min(1, (now - start) / durationMs);
+    const lat = from[0] + (to[0] - from[0]) * t;
+    const lon = from[1] + (to[1] - from[1]) * t;
+    marker.setLatLng([lat, lon]);
+    if (t < 1) entry.animId = requestAnimationFrame(step);
+    else { entry.animId = null; if (onDone) onDone(); }
+  }
+  entry.animId = requestAnimationFrame(step);
+}
+
+// helpers for resume
+function cumulative(segDurations){ const out=[0]; for(let i=0;i<segDurations.length;i++) out.push(out[i]+segDurations[i]); return out; }
+function segmentAtElapsed(segDurations, elapsedSec){
+  const cum = cumulative(segDurations);
+  const total = cum[cum.length-1];
+  const e = Math.max(0, Math.min(elapsedSec, total));
+  let i=0; while(i<segDurations.length && e>cum[i+1]) i++;
+  const segElapsed = e - cum[i];
+  const segDur = Math.max(0.001, segDurations[i] || 0.001);
+  const t = segElapsed / segDur;
+  return { index: i, t, total };
+}
+
+function animateAlongRouteOffset(unitId, coords, segDurations, onDone, startOffsetSec = 0) {
+  const entry = unitMarkers.get(unitId);
+  if (!entry) return;
+  if (entry.animId) cancelAnimationFrame(entry.animId);
+  const marker = entry.marker;
+
+  const { index: startIdx, t: t0 } = segmentAtElapsed(segDurations, startOffsetSec);
+  let segIdx = startIdx;
+  let segRemainingMs = (1 - t0) * Math.max(1, (segDurations[segIdx] || 0.001)) * 1000;
+
+  const placeAt = (idx, t) => {
+    const a = coords[idx], b = coords[idx+1] || coords[idx];
+    const lat = a[0] + (b[0] - a[0]) * t;
+    const lon = a[1] + (b[1] - a[1]) * t;
+    marker.setLatLng([lat, lon]);
+  };
+  placeAt(segIdx, t0);
+
+  let segStart = performance.now();
+  let segEnd   = segStart + segRemainingMs;
+
+  function step(now) {
+    if (segIdx >= segDurations.length || segIdx >= coords.length - 1) {
+      if (onDone) onDone();
+      entry.animId = null;
+      return;
+    }
+    const a = coords[segIdx], b = coords[segIdx+1];
+    const t = Math.min(1, (now - segStart) / (segEnd - segStart));
+    const lat = a[0] + (b[0] - a[0]) * t;
+    const lon = a[1] + (b[1] - a[1]) * t;
+    marker.setLatLng([lat, lon]);
+
+    if (t >= 1) {
+      segIdx++;
+      if (segIdx < segDurations.length && segIdx < coords.length - 1) {
+        segStart = now;
+        segEnd   = segStart + Math.max(1, segDurations[segIdx]) * 1000;
+      }
+    }
+    entry.animId = requestAnimationFrame(step);
+  }
+  entry.animId = requestAnimationFrame(step);
+}
+
+// OSRM fetch
+async function fetchRouteOSRM(from, to) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson&annotations=duration,distance&steps=false`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`OSRM ${res.status}`);
+  const json = await res.json();
+  if (!json.routes?.length) throw new Error('No route');
+  const route = json.routes[0];
+  const coords = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+  const duration = route.duration;
+  const annotations = route.legs?.[0]?.annotation || null;
+  return { coords, duration, annotations };
+}
+
+function drawRoute(unitId, coords) {
+  try {
+    const existing = unitRoutes.get(unitId);
+    if (existing) { map.removeLayer(existing); unitRoutes.delete(unitId); }
+    const poly = L.polyline(coords, { weight: 3, opacity: 0.35 });
+    poly.addTo(map);
+    unitRoutes.set(unitId, poly);
+  } catch {}
+}
+
+async function routeAndAnimateUnit(unitId, from, to, speedClassKmh, onArrive, resumeOpts) {
+  try {
+    // Resume with saved travel (from backend)
+    if (resumeOpts?.saved) {
+      const { coords, seg_durations, started_at } = resumeOpts.saved;
+      drawRoute(unitId, coords);
+      const u = _unitById.get(unitId) || { id: unitId, class: 'fire', station_id: 0 };
+      ensureUnitMarker(u);
+      const elapsedSec = Math.max(0, (Date.now() - new Date(started_at).getTime()) / 1000);
+      animateAlongRouteOffset(unitId, coords, seg_durations, onArrive, elapsedSec);
+      return;
+    }
+
+    // Fresh route
+    const { coords, duration, annotations } = await fetchRouteOSRM(from, to);
+    const seg_durations = (annotations?.duration?.length === coords.length - 1)
+      ? annotations.duration
+      : Array.from({ length: coords.length - 1 }, () => duration / Math.max(1, coords.length - 1));
+
+    // Light “emergency” multiplier
+    const speedMultiplier = { fire: 1.2, police: 1.3, ambulance: 1.25 };
+    const u = _unitById.get(unitId);
+    const mult = u ? (speedMultiplier[u.class] || 1.0) : 1.0;
+    const adjustedTotal = Math.max(5, duration / mult);
+
+    // Persist to backend so we can resume on refresh
+    try {
+      await fetch('/api/unit-travel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          unit_id: unitId,
+          mission_id: resumeOpts?.mission_id,
+          phase: resumeOpts?.phase || 'to_scene',
+          started_at: new Date().toISOString(),
+          from, to,
+          coords,
+          seg_durations,
+          total_duration: adjustedTotal
+        })
+      });
+    } catch (e) { console.warn('Failed to persist travel:', e); }
+
+    drawRoute(unitId, coords);
+    ensureUnitMarker(u || { id: unitId, station_id: 0, class: 'fire' });
+    animateAlongRouteOffset(unitId, coords, seg_durations, onArrive, 0);
+  } catch (err) {
+    console.warn('OSRM route failed; straight-line fallback:', err);
+    const R = 6371;
+    const dLat = (to[0]-from[0]) * Math.PI/180, dLon = (to[1]-to[0]) * Math.PI/180;
+    const la1 = from[0] * Math.PI/180, la2 = to[0] * Math.PI/180;
+    const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
+    const distKm = 2*R*Math.asin(Math.sqrt(h));
+    const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 45)) * 3600));
+    animateMoveUnit(unitId, from, to, etaSec * 1000, onArrive);
+  }
+}
+
+let missionTemplates = [];
+fetch('/api/mission-templates')
+  .then(r => r.json())
+  .then(data => { missionTemplates = data; })
+  .catch(err => console.error('Failed to load mission templates:', err));
+
+// UI helpers
+function closeModal(){ const m = document.querySelector(".modal-overlay"); if (m) m.remove(); }
+
+async function fetchMissions() {
+  try {
+    const res = await fetch("/api/missions");
+    let missions = await res.json();
+
+    // Remove resolved missions from display
+    missions = missions.filter(m => m.status !== 'resolved');
+
+    missionMarkers.forEach(m => map.removeLayer(m));
+    missionMarkers = [];
+
+    const missionList = document.getElementById("missionList");
+    missionList.innerHTML = "";
+
+    const valid = missions.filter(m => Number.isFinite(m.lat) && Number.isFinite(m.lon));
+    valid.forEach(m => {
+      const marker = L.marker([m.lat, m.lon], { icon: missionIcon })
+        .addTo(map)
+        .on("click", () => showMissionDetails(m));
+
+      missionMarkers.push(marker);
+
+      const el = document.createElement("div");
+      el.className = "mission";
+      el.innerHTML = `
+        <strong class="focus-mission" data-lat="${m.lat}" data-lon="${m.lon}" style="cursor:pointer;">${m.type}</strong>
+        <button onclick='showMissionDetails(${JSON.stringify(m)})' style="margin-left:8px;">Details</button><br>
+        Lat: ${m.lat.toFixed(4)}<br>Lon: ${m.lon.toFixed(4)}<br>`;
+      missionList.appendChild(el);
+    });
+  } catch (err) {
+    console.error("Failed to fetch missions:", err);
+  }
+}
+
+async function generateMissionAtPOI(poi) {
+  const res = await fetch('/api/random-mission');
+  const mission = await res.json();
+  const { name, required_units } = mission;
+  document.getElementById("cadTitle").textContent = name;
+  document.getElementById("cadType").textContent = `POI: ${poi.tags.amenity || poi.tags.name}`;
+  document.getElementById("cadRequired").textContent = required_units.map(r => `${r.count}x ${r.type}`).join(', ');
+  document.getElementById("cadPopup").classList.remove('hidden');
+  window.currentMission = mission;
+}
+
+// ===== Station list / details =====
+async function fetchStations() {
+  const res = await fetch("/api/stations");
+  const stations = await res.json();
+  cacheStations(stations);
+  stationMarkers.forEach(m => map.removeLayer(m));
+  stationMarkers = [];
+  const list = document.getElementById("stationList");
+  list.innerHTML = "";
+  stations.forEach(st => {
+    const iconUrl = stationIcons[st.type] || stationIcons.fire;
+    const icon = L.icon({ iconUrl, iconSize: [30,30], iconAnchor: [15,30] });
+    const marker = L.marker([st.lat, st.lon], { icon }).addTo(map).on("click", () => showStationDetails(st));
+    stationMarkers.push(marker);
+    const el = document.createElement("div");
+    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>
+      <button onclick='showStationDetails(${JSON.stringify(st)})'>Details</button>`;
+    list.appendChild(el);
+  });
+}
+
+async function refreshAssignedUnitsUI(missionId) {
+  const div = document.getElementById('assignedUnitsArea');
+  if (!div) return [];
+  try {
+    div.innerHTML = 'Loading assigned units…';
+    const res = await fetch(`/api/missions/${missionId}/units`);
+    const assigned = await res.json();
+    if (!Array.isArray(assigned) || !assigned.length) {
+      div.innerHTML = '<em>No units assigned yet.</em>';
+      return [];
+    }
+    div.innerHTML = `
+      <strong>Assigned Units:</strong>
+      <ul style="list-style:none; padding-left:0;">
+        ${assigned.map(u => `
+          <li style="display:flex; align-items:center; gap:6px; margin:4px 0;">
+            <span>${u.name} (${u.type}) — ${u.status || 'enroute'}</span>
+            <button data-unitid="${u.id}" data-missionid="${missionId}" class="clear-unit-btn">Clear</button>
+          </li>
+        `).join('')}
+      </ul>`;
+    div.querySelectorAll('.clear-unit-btn').forEach(btn => {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try { await clearAssignedUnit(parseInt(btn.dataset.missionid,10), parseInt(btn.dataset.unitid,10)); }
+        finally { btn.disabled = false; }
+      };
+    });
+    return assigned;
+  } catch (e) {
+    console.error(e);
+    div.innerHTML = '<span style="color:#b00;">Failed to load assigned units.</span>';
+    return [];
+  }
+}
+
+// ===== Dynamic requirements =====
+function renderRequirementsDynamic(mission, assigned) {
+  const req = Array.isArray(mission.required_units) ? mission.required_units : [];
+  if (!req.length) return '<em>No specific unit requirements.</em>';
+  const counts = { enroute: new Map(), onscene: new Map() };
+  for (const u of assigned || []) {
+    if (u.status === 'onscene') counts.onscene.set(u.type, (counts.onscene.get(u.type)||0)+1);
+    else if (u.status === 'enroute') counts.enroute.set(u.type, (counts.enroute.get(u.type)||0)+1);
+  }
+  const items = [];
+  for (const r of req) {
+    const need = r.quantity ?? r.count ?? 1;
+    const onscene = counts.onscene.get(r.type) || 0;
+    const enroute = counts.enroute.get(r.type) || 0;
+    const remaining = Math.max(0, need - onscene);
+    if (remaining <= 0) continue;
+    const badges = [];
+    if (enroute) badges.push(`${enroute} en route`);
+    if (onscene) badges.push(`${onscene} on scene`);
+    const badgeTxt = badges.length ? ` <small>(${badges.join(', ')})</small>` : '';
+    items.push(`<li>${remaining} × ${r.type}${badgeTxt}</li>`);
+  }
+  return items.length ? `<ul>${items.join('')}</ul>` : '<em>All required units are on scene.</em>';
+}
+
+// ===== Mission details =====
+function showMissionDetails(mission) {
+  const container = document.getElementById("missionDetailsContent");
+  container.innerHTML = `
+    <h3>${mission.type}</h3>
+    <p><strong>Status:</strong> ${mission.status}</p>
+    <p><strong>Requirements:</strong></p>
+    <div id="reqDynamic">Loading…</div>
+    <div id="assignedUnitsArea" style="margin-top:8px;"></div>
+    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button></div>
+    <div id="manualDispatchArea" style="margin-top:8px;"></div>
+  `;
+  document.getElementById('manualDispatchBtn').onclick = () => openManualDispatch(mission);
+  refreshAssignedUnitsUI(mission.id);
+  fetch(`/api/missions/${mission.id}/units`).then(r=>r.json()).then(assigned=>{
+    const reqDiv = document.getElementById('reqDynamic');
+    if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned);
+  }).catch(()=>{});
+  document.getElementById("missionDetails").style.display = "block";
+}
+
+// ===== Station details =====
+async function showStationDetails(station) {
+  const res = await fetchNoCache(`/api/units?station_id=${station.id}`);
+  const units = await res.json();
+  const detail = document.getElementById('stationDetails');
+  const unitOptions = unitTypes.filter(u=>u.class===station.type).map(u=>`<option value="${u.type}">${u.type}</option>`).join('');
+  window.currentStation = station;
+  detail.innerHTML = `
+    <div style="text-align:right;">
+      <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
+    </div>
+    <h2>${station.name}</h2>
+    <p>Type: ${station.type}</p>
+    <h3>Create Unit</h3>
+    <select id="unit-type">${unitOptions}</select>
+    <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
+    <button id="create-unit">Create Unit</button>
+    <h3>Add Personnel</h3>
+    <input id="personnel-name" placeholder="Name (e.g., John Doe)" />
+    <div id="personnel-training">
+      ${
+        (getTrainingsForClass(station.type).length
+          ? getTrainingsForClass(station.type)
+          : ['general']
+        ).map((t,idx)=>`<label><input type="checkbox" value="${t}" ${idx===0?"checked":""}/> ${t}</label><br>`).join('')
+      }
+    </div>
+	<div id="bay-info"></div>
+	<div>
+	  <label>Add bays:
+		<input id="add-bays-count" type="number" min="1" value="1">
+	  </label>
+	  <button id="add-bays-btn">Add Bays</button>
+	</div>
+
+	const costForInitialBays = priceBays(initialBayCount, /* isExpansion= */ false);
+	<button id="create-personnel">Add Personnel</button>
+    <h3>Assigned Units</h3>
+    <h3>Personnel</h3>
+    <ul id="personnel-list"></ul>
+    <ul id="unit-list">
+      ${units.map(u=>`
+        <li>
+          <strong style="cursor:pointer; color:blue;" onclick="showUnitDetails(${u.id})">${u.name}</strong> (${u.type})
+          <button onclick="openAssignModal(${u.id}, ${station.id})">Assign</button>
+        </li>`).join('')}
+    </ul>`;
+	async function refreshBayInfo(stationId) {
+	  const s = await (await fetch(`/api/stations/${stationId}`, { cache: 'no-store' })).json();
+	  const el = document.getElementById('bay-info');
+	  el.textContent = `Bays: ${s.bay_count} (1 bay = 1 unit)`;
+	}
+
+	document.getElementById('add-bays-btn')?.addEventListener('click', async () => {
+	  const n = Number(document.getElementById('add-bays-count').value || 1);
+	  const stationId = currentStationId; // however you track the opened station
+	  const res = await fetch(`/api/stations/${stationId}/bays`, {
+		method: 'PATCH',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ add: n })
+	  });
+	  const data = await res.json();
+	  if (!res.ok || !data.success) {
+		alert(`Failed: ${data.error || res.statusText}`);
+		return;
+	  }
+	  // Optionally show cost until wallet is wired:
+	  alert(`Added ${data.added} bay(s). Cost: $${data.cost}`);
+	  refreshBayInfo(stationId);
+	});
+  // Replace inline openAssignModal with safe listeners
+	detail.querySelectorAll('button').forEach(btn => {
+	  const m = btn.getAttribute('onclick');
+	  if (m && m.startsWith('openAssignModal(')) {
+		btn.removeAttribute('onclick');
+		const args = m.match(/openAssignModal\((\d+),\s*(\d+)\)/);
+		if (args) {
+		  const [_, unitId, stationId] = args.map(Number);
+		  btn.addEventListener('click', () => openAssignModal(unitId, stationId));
+		}
+	  }
+	});
+
+	// Replace inline editPersonnel with safe listener
+	detail.querySelectorAll('#personnel-list button').forEach(btn => {
+	  const m = btn.getAttribute('onclick');
+	  if (m && m.startsWith('editPersonnel(')) {
+		btn.removeAttribute('onclick');
+		const id = parseInt(m.match(/editPersonnel\((\d+)\)/)[1], 10);
+		btn.addEventListener('click', () => window.editPersonnel(id));
+	  }
+	});
+	window.editPersonnel = editPersonnel;
+
+  // ==== Edit Personnel Modal (prefill + robust save) ====
+	function openPersonnelModal(person) {
+	  const modal = document.getElementById('editPersonnelModal');
+	  const content = document.getElementById('editPersonnelContent');
+
+	  const st = station || window.currentStation || {};
+	  const availableTrainings = getTrainingsForClass(st.type);
+
+	  const currentName = (person && person.name) ? person.name : '';
+	  const currentTraining = Array.isArray(person?.training) ? person.training : [];
+	  const curSet = new Set(currentTraining.map(t => String(t).toLowerCase()));
+
+	  content.innerHTML = `
+		<div style="display:flex; flex-direction:column; gap:10px;">
+		  <label>
+			<div>Name</div>
+			<input id="edit-personnel-name" type="text" style="width:100%;" value="${currentName.replace(/"/g, '&quot;')}" />
+		  </label>
+
+		  <div>
+			<div>Training</div>
+			<div id="edit-training-list" style="max-height:160px; overflow:auto; padding:6px; border:1px solid #ddd; border-radius:6px;">
+			  ${
+				availableTrainings.length
+				  ? availableTrainings.map(t => {
+					  const checked = curSet.has(String(t).toLowerCase()) ? 'checked' : '';
+					  return `<label style="display:block;"><input type="checkbox" value="${t}" ${checked}> ${t}</label>`;
+					}).join('')
+				  : '<em>No training list available for this station type.</em>'
+			  }
+			</div>
+		  </div>
+
+		  <div style="display:flex; gap:8px; justify-content:flex-end;">
+			<button id="edit-personnel-cancel" type="button">Cancel</button>
+			<button id="edit-personnel-save" type="button" style="background:#0b5; color:#fff;">Save</button>
+		  </div>
+		</div>
+	  `;
+
+	  // Wire buttons
+	  content.querySelector('#edit-personnel-cancel').onclick = () => { modal.style.display = 'none'; };
+
+	  content.querySelector('#edit-personnel-save').onclick = async () => {
+	    const nameEl = content.querySelector('#edit-personnel-name');
+	    const name = (nameEl?.value || '').trim();
+
+	    const selectedTrainings = Array.from(
+		  content.querySelectorAll('#edit-training-list input[type=checkbox]:checked')
+	    ).map(cb => cb.value);
+
+      // Build a payload that many backends accept
+      const payload = {
+        id: person.id,
+        station_id: (station && station.id) || person.station_id,
+        name,
+        training: selectedTrainings
+      };
+      const urlBase = `/api/personnel/${person.id}`;
+
+      // Try common update styles until one succeeds
+      const attempts = [
+        { method: 'PATCH', url: urlBase, body: payload },
+        { method: 'PUT',   url: urlBase, body: payload },
+        { method: 'POST',  url: `${urlBase}?_method=PATCH`, body: payload },
+        { method: 'POST',  url: `${urlBase}?_method=PUT`,   body: payload },
+        { method: 'POST',  url: urlBase, body: payload, headers: { 'X-HTTP-Method-Override': 'PATCH' } },
+        { method: 'POST',  url: urlBase, body: payload, headers: { 'X-HTTP-Method-Override': 'PUT' } },
+        { method: 'POST',  url: `/api/personnel/update`, body: payload },
+      ];
+
+      let ok = false, lastStatus = 0, lastText = '';
+      for (const a of attempts) {
+        try {
+          const res = await fetch(a.url, {
+            method: a.method,
+            headers: { 'Content-Type': 'application/json', ...(a.headers || {}) },
+            body: JSON.stringify(a.body),
+            cache: 'no-store'
+          });
+          lastStatus = res.status;
+          lastText = await res.text().catch(()=>'');
+
+          if (res.ok || [200,201,202,204].includes(res.status)) {
+            ok = true;
+            console.log(`[save] Success via ${a.method} ${a.url} — status ${res.status}`, lastText.slice(0,120));
+            break;
+          } else {
+            console.warn(`[save] Failed via ${a.method} ${a.url} — status ${res.status}`, lastText.slice(0,120));
+          }
+        } catch (e) {
+          lastText = e?.message || String(e);
+          console.warn(`[save] Network error via ${a.method} ${a.url}:`, lastText);
+        }
+      }
+
+      if (!ok) {
+        alert(`Failed to save personnel changes.\nLast response (${lastStatus}): ${lastText}`);
+        return;
+      }
+
+      // Close and refresh the station panel with uncached GETs
+      modal.style.display = 'none';
+      await refreshStationPanelNoCache(station.id);
+	  };
+
+    modal.style.display = 'block';
+	}
+
+	// expose globally for inline paths
+	window.openPersonnelModal = openPersonnelModal;
+
+	function editPersonnel(id) {
+	  fetch(`/api/personnel/${id}`)
+		.then(res => res.json())
+		.then(person => {
+		  openPersonnelModal(person);
+		});
+	}
+
+  document.getElementById('create-unit').addEventListener('click', async ()=>{
+    const type = document.getElementById('unit-type').value;
+    const name = document.getElementById('unit-name').value;
+    if (!type || !name) return alert("Missing name or type");
+    await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:station.type,type,name})});
+    showStationDetails(station);
+  });
+  document.getElementById('create-personnel').addEventListener('click', async ()=>{
+    const name = document.getElementById('personnel-name').value;
+    const training = Array.from(document.querySelectorAll('#personnel-training input[type=checkbox]:checked')).map(cb=>cb.value);
+    if (!name) return alert("Missing name");
+    await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, station_id: station.id, training })});
+    showStationDetails(station);
+  });
+
+  // Load personnel (no-cache so edits show immediately)
+  const personnel = await fetchNoCache(`/api/personnel?station_id=${station.id}`).then(r=>r.json());
+  const personnelList = document.getElementById("personnel-list");
+  personnelList.innerHTML = '';
+  personnel.forEach(p=>{
+    const li = document.createElement("li");
+    li.innerHTML = `<strong>${p.name}</strong> (${(p.training||[]).join(', ')}) <button onclick="editPersonnel(${p.id})" style="margin-left:10px;">Edit</button>`;
+    personnelList.appendChild(li);
+  });
+}
+
+// Build station
+document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; alert("Click the map to place your new station"); });
+map.on("click", async (e) => {
+  if (!buildStationMode) return;
+  const name = prompt("Station Name?");
+  const type = prompt("Type (fire, police, ambulance)?", "fire")?.toLowerCase();
+  if (!name || !["fire","police","ambulance"].includes(type)) { alert("Cancelled or invalid type."); buildStationMode=false; return; }
+  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, lat:e.latlng.lat, lon:e.latlng.lng }) });
+  buildStationMode = false;
+  fetchStations();
+});
+
+// Generate Mission
+document.getElementById('generateMission').addEventListener('click', async ()=>{
+  if (poiCache.length===0 || missionTemplates.length===0) { alert("No POIs or mission templates loaded."); return; }
+  const validPOIs = poiCache.filter(p=> p && typeof p.lat==="number" && typeof p.lon==="number");
+  if (!validPOIs.length){ alert("No valid POIs loaded."); return; }
+  const poi = validPOIs[Math.floor(Math.random()*validPOIs.length)];
+  const template = missionTemplates[Math.floor(Math.random()*missionTemplates.length)];
+  const missionData = {
+    type: template.name, lat: poi.lat, lon: poi.lon,
+    required_units: template.required_units,
+    required_training: template.required_training || [],
+    equipment_required: template.equipment_required || [],
+    patients: template.patients || [],
+    prisoners: template.prisoners || [],
+    modifiers: template.modifiers || [],
+    timing: template.timing ?? 10
+  };
+  try {
+    const res = await fetch('/api/missions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(missionData)});
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await fetchMissions();
+  } catch (err) { console.error("Failed to create mission:", err); alert("Failed to create mission."); }
+});
+
+// Clear Missions
+document.getElementById("clearMissions").addEventListener("click", async ()=>{
+  if (!confirm("Clear ALL missions?")) return;
+  await fetch("/api/missions", { method:"DELETE" });
+  fetchMissions();
+});
+
+// Focus
+document.addEventListener("click", (e)=>{
+  if (e.target.classList.contains("focus-mission") || e.target.classList.contains("focus-station")) {
+    const lat = parseFloat(e.target.dataset.lat);
+    const lon = parseFloat(e.target.dataset.lon);
+    map.setView([lat, lon], 16);
+  }
+});
+
+// Assign personnel modal
+async function openAssignModal(unitId, stationId) {
+  const modal = document.getElementById("assignPersonnelModal");
+  const content = document.getElementById("assignModalContent");
+
+  const res = await fetch(`/api/personnel?station_id=${stationId}`);
+  const personnel = await res.json();
+
+  const unassigned = personnel.filter(p => !p.unit_id);
+
+  if (!unassigned.length) {
+    content.innerHTML = "<p>No available personnel to assign.</p>";
+    modal.style.display = "block";
+    return;
+  }
+
+  content.innerHTML = `
+    <select id="assign-personnel-select" style="width:100%;">
+      ${unassigned.map(p => `
+        <option value="${p.id}">${p.name || '(no name)'}${Array.isArray(p.training) && p.training.length ? ` (${p.training.join(', ')})` : ''}</option>
+      `).join('')}
+    </select>
+    <br><br>
+    <button id="assignPersonnelConfirm">Assign</button>
+  `;
+
+  document.getElementById("assignPersonnelConfirm").onclick = async () => {
+    const select = document.getElementById("assign-personnel-select");
+    const pid = parseInt(select.value, 10);
+    if (!pid) return;
+    await assignPersonnel(pid, unitId, stationId);
+  };
+
+  modal.style.display = "block";
+}
+
+async function showUnitDetails(unitId) {
+  const modal = document.getElementById("unitDetailModal");
+  const content = document.getElementById("unitDetailContent");
+
+  const res = await fetch(`/api/personnel`);
+  const personnel = await res.json();
+  const assigned = personnel.filter(p => p.unit_id === unitId);
+
+  if (!assigned.length) {
+    content.innerHTML = "<p>No personnel assigned to this unit.</p>";
+  } else {
+    content.innerHTML = `
+      <ul>
+        ${assigned.map(p => `
+          <li>
+            ${p.name || '(no name)'} ${Array.isArray(p.training) && p.training.length ? `(${p.training.join(', ')})` : ''}
+            <button class="unassign-btn" data-person-id="${p.id}" data-station-id="${p.station_id}">Unassign</button>
+          </li>
+        `).join('')}
+      </ul>
+    `;
+    content.querySelectorAll('.unassign-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const pid = parseInt(btn.dataset.personId, 10);
+        const sid = parseInt(btn.dataset.stationId, 10);
+        await fetch(`/api/personnel/${pid}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ unit_id: null })
+        });
+        modal.style.display = "none";
+        showStationDetails({ id: sid });
+      });
+    });
+  }
+
+  modal.style.display = "block";
+}
+
+async function unassignPersonnel(personnelId, stationId) {
+  await fetch(`/api/personnel/${personnelId}`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ unit_id: null }) });
+  document.getElementById("unitDetailModal").style.display = "none";
+  showStationDetails({ id: stationId });
+}
+
+async function assignPersonnel(personnelId, unitId, stationId) {
+  await fetch(`/api/personnel/${personnelId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ unit_id: unitId })
+  });
+  await showStationDetails({ id: stationId });
+  const m = document.getElementById("assignPersonnelModal");
+  if (m) m.style.display = "none";
+}
+
+function openUnitCreationForm(station) {
+  const allowedTypes = unitTypes.filter(u => u.class === station.type);
+  const unitName = prompt("Enter unit name (e.g., Engine 1):");
+  if (!unitName) return;
+  const typeOptions = allowedTypes.map(u => u.type).join(', ');
+  const selectedType = prompt(`Choose unit type (${typeOptions}):`);
+  if (!allowedTypes.find(u => u.type === selectedType)) { alert("Invalid type for this station."); return; }
+  fetch("/api/units", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ station_id: station.id, class: station.type, type: selectedType, name: unitName })
+  }).then(res => res.json()).then(() => showStationDetails(station))
+    .catch(err => { console.error("Failed to add unit:", err); alert("Error adding unit."); });
+}
+
+async function assignPersonnelToUnit(unitId, stationId) {
+  const modal = document.getElementById('assignPersonnelModal');
+  const content = document.getElementById('assignPersonnelContent');
+  modal.style.display = 'block';
+  const res = await fetch(`/api/personnel?station_id=${stationId}`);
+  const personnel = await res.json();
+  const available = personnel.filter(p => !p.unit_id);
+  if (!available.length) { content.innerHTML = "<p>No unassigned personnel at this station.</p>"; return; }
+  content.innerHTML = available.map(p => `
+    <div><label><input type="checkbox" value="${p.id}" /> ${p.name} (${(p.training||[]).join(', ')})</label></div>`).join('');
+  const assignBtn = document.createElement("button");
+  assignBtn.textContent = "Assign Selected";
+  assignBtn.onclick = async () => {
+    const selected = Array.from(content.querySelectorAll("input[type=checkbox]:checked")).map(c => parseInt(c.value));
+    for (const id of selected) {
+      await fetch(`/api/personnel/${id}`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ unit_id: unitId }) });
+    }
+    modal.style.display = 'none';
+    showStationDetails({ id: stationId });
+  };
+  content.appendChild(assignBtn);
+}
+
+// ===== manual dispatch with busy lockout + sort/filter =====
+async function getBusyUnitIds() {
+  const units = await (await fetch('/api/units')).json();
+  return new Set(units.filter(u => u.status && u.status !== 'available').map(u => u.id));
+}
+
+function renderManualList(stations, unitsByStation, busyIds, mission) {
+  const selectSort = document.getElementById('md-sort');
+  const selectClass = document.getElementById('md-class');
+  const inputType = document.getElementById('md-type');
+  const sortVal = selectSort ? selectSort.value : 'name';
+  const classVal = selectClass ? selectClass.value : '';
+  const typeFilter = (inputType ? inputType.value : '').toLowerCase();
+
+  const flat = [];
+  for (const st of stations) {
+    const units = unitsByStation[st.id] || [];
+    for (const u of units) flat.push({ st, u });
+  }
+
+  const filtered = flat.filter(({u}) => {
+    if (classVal && u.class !== classVal) return false;
+    if (typeFilter && !u.type?.toLowerCase().includes(typeFilter)) return false;
+    return true;
+  });
+
+  const mLL = [mission.lat, mission.lon];
+  filtered.sort((a,b)=>{
+    if (sortVal==='distance') {
+      const da = haversineKm(a.st.lat, a.st.lon, mLL[0], mLL[1]);
+      const db = haversineKm(b.st.lat, b.st.lon, mLL[0], mLL[1]);
+      return da-db;
+    } else if (sortVal==='type') {
+      return (a.u.type||'').localeCompare(b.u.type||'') || (a.u.name||'').localeCompare(b.u.name||'');
+    }
+    return (a.u.name||'').localeCompare(b.u.name||'');
+  });
+
+  const byStation = new Map();
+  for (const row of filtered) {
+    if (!byStation.has(row.st.id)) byStation.set(row.st.id, []);
+    byStation.get(row.st.id).push(row.u);
+  }
+
+  const html = Array.from(byStation.entries()).map(([sid, units])=>{
+    const st = stations.find(s=>s.id===sid);
+    return `
+      <div style="margin:8px 0; padding:8px; border:1px solid #ddd; border-radius:8px;">
+        <strong>${st.name} (${st.type})</strong>
+        <div style="display:grid; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); gap:6px; margin-top:6px;">
+          ${units.map(u=>{
+            const isBusy = busyIds.has(u.id);
+            const disabled = isBusy ? 'disabled' : '';
+            const note = isBusy ? ' <em>(busy)</em>' : '';
+            return `<label style="display:block; border:1px solid #eee; padding:6px; border-radius:6px;">
+                <input type="checkbox" value="${u.id}" ${disabled}>
+                ${u.name} — ${u.type}${note}
+              </label>`;
+          }).join('')}
+        </div>
+      </div>`;
+  }).join('');
+
+  return html || '<em>No units match your filters.</em>';
+}
+
+async function openManualDispatch(mission) {
+  const area = document.getElementById('manualDispatchArea');
+  area.innerHTML = 'Loading units…';
+
+  try {
+    const stations = await fetch('/api/stations').then(r=>r.json());
+
+    // Try the all-units endpoint first
+    let allUnits = [];
+    try {
+      const r = await fetch('/api/units');
+      if (r.ok) allUnits = await r.json();
+    } catch {}
+
+    // Fallback: pull per-station if the all-units call is empty or failed
+    if (!Array.isArray(allUnits) || allUnits.length === 0) {
+      const perStation = await Promise.all(
+        stations.map(st => fetch(`/api/units?station_id=${st.id}`).then(r=>r.ok ? r.json() : []))
+      );
+      allUnits = perStation.flat();
+    }
+
+    if (!Array.isArray(allUnits) || allUnits.length === 0) {
+      area.innerHTML = '<span style="color:#b00;">No units found. (Backend returned no units.)</span>';
+      return;
+    }
+
+    const busyIds = new Set(
+      allUnits.filter(u => u.status && u.status !== 'available').map(u => u.id)
+    );
+
+    const unitsByStation = allUnits.reduce((acc,u)=>{
+      const sid = u.station_id;
+      if (!acc[sid]) acc[sid] = [];
+      acc[sid].push(u);
+      return acc;
+    },{});
+
+    area.innerHTML = `
+      <div style="display:flex; gap:8px; align-items:center; margin:6px 0; flex-wrap: wrap;">
+        <label>Sort:
+          <select id="md-sort">
+            <option value="name">Name (A–Z)</option>
+            <option value="distance">Distance to call</option>
+            <option value="type">Type</option>
+          </select>
+        </label>
+        <label>Filter class:
+          <select id="md-class">
+            <option value="">All</option>
+            <option value="fire">Fire</option>
+            <option value="police">Police</option>
+            <option value="ambulance">Ambulance</option>
+          </select>
+        </label>
+        <label>Filter type:
+          <input id="md-type" placeholder="e.g. Engine" style="width:120px;">
+        </label>
+        <button id="md-reset" type="button">Reset Filters</button>
+      </div>
+      <div id="md-list">Building list…</div>
+      <div style="margin-top:10px;">
+        <button id="dispatchSelectedBtn">Dispatch Selected Units</button>
+      </div>`;
+
+    const mdList = document.getElementById('md-list');
+    const redraw = ()=>{ mdList.innerHTML = renderManualList(stations, unitsByStation, busyIds, mission); };
+    document.getElementById('md-sort').onchange = redraw;
+    document.getElementById('md-class').onchange = redraw;
+    document.getElementById('md-type').oninput = redraw;
+    document.getElementById('md-reset').onclick = ()=>{
+      document.getElementById('md-sort').value = 'name';
+      document.getElementById('md-class').value = '';
+      document.getElementById('md-type').value = '';
+      redraw();
+    };
+    redraw();
+
+    document.getElementById('dispatchSelectedBtn').onclick = () => dispatchSelectedUnits(mission.id);
+  } catch (e) {
+    console.error(e);
+    area.innerHTML = '<span style="color:#b00;">Failed to load units.</span>';
+  }
+}
+
+async function dispatchSelectedUnits(missionId) {
+  const area = document.getElementById('manualDispatchArea');
+  const ids = Array.from(area.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>parseInt(cb.value,10));
+  if (!ids.length){ alert('Select at least one unit to dispatch.'); return; }
+  try {
+    await Promise.all(ids.map(id => fetch('/api/mission-units',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mission_id: missionId, unit_id: id }) })));
+    area.innerHTML = `<strong>Dispatched ${ids.length} unit(s) to mission #${missionId}.</strong>`;
+    await refreshAssignedUnitsUI(missionId);
+
+    const missions = await (await fetch('/api/missions')).json();
+    const mission = missions.find(m=>m.id===missionId);
+    openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon });
+
+    const allUnits = await (await fetch('/api/units')).json();
+    cacheUnits(allUnits);
+
+    for (const uid of ids) {
+      const u = _unitById.get(uid);
+      if (!u) continue;
+      const st = _stationById.get(u.station_id);
+      if (!st) continue;
+      const marker = ensureUnitMarker(u);
+      if (!marker) continue;
+
+      fetch(`/api/units/${uid}/status`, { method:'PATCH', headers:{ 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'enroute' }) });
+
+      const from = [st.lat, st.lon];
+      const to   = [mission.lat, mission.lon];
+      const spd  = TRAVEL_SPEED[u.class] || 45;
+
+      routeAndAnimateUnit(
+        uid, from, to, spd,
+        async () => {
+			await fetch(`/api/units/${uid}/status`, {
+			  method: 'PATCH',
+			  headers: { 'Content-Type': 'application/json' },
+			  body: JSON.stringify({ status: 'onscene' })
+			});
+
+			const entry = unitMarkers.get(uid);
+			if (entry) { try { map.removeLayer(entry.marker); } catch {} unitMarkers.delete(uid); }
+
+			if (window.unitRoutes && unitRoutes.has(uid)) {
+			  try { map.removeLayer(unitRoutes.get(uid)); } catch {}
+			  unitRoutes.delete(uid);
+			}
+			if (typeof clearUnitEta === 'function') clearUnitEta(uid);
+
+			await refreshAssignedUnitsUI(missionId);
+			checkMissionCompletion(mission);
+        },
+        { mission_id: missionId, phase: 'to_scene' }
+      );
+    }
+  } catch (e) {
+    console.error(e);
+    alert('Failed to dispatch one or more units.');
+  }
+}
+
+async function clearAssignedUnit(missionId, unitId) {
+  const res = await fetch('/api/mission-units',{ method:'DELETE', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mission_id: missionId, unit_id: unitId }) });
+  if (!res.ok) { const t = await res.text().catch(()=> ''); console.error('Unassign failed:', res.status, t); alert('Failed to clear unit from mission.'); return; }
+
+  const [units, missions] = await Promise.all([ fetch('/api/units').then(r=>r.json()), fetch('/api/missions').then(r=>r.json()) ]);
+  cacheUnits(units);
+  const u = _unitById.get(unitId);
+  const mission = missions.find(m=>m.id===missionId);
+  const st = u && _stationById.get(u.station_id);
+  if (u && mission && st) {
+    ensureUnitMarker(u);
+    const entry = unitMarkers.get(u.id);
+    const current = entry?.marker.getLatLng() || L.latLng(mission.lat, mission.lon);
+    const from = [current.lat, current.lng];
+    const to   = [st.lat, st.lon];
+    routeAndAnimateUnit(
+      u.id, from, to, TRAVEL_SPEED[u.class] || 45,
+      () => { const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); } fetch(`/api/unit-travel/${u.id}`,{method:'DELETE'}).catch(()=>{}); },
+      { phase: 'return' }
+    );
+  }
+  await refreshAssignedUnitsUI(missionId);
+  if (document.getElementById('manualDispatchArea')) openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon });
+  fetch(`/api/missions/${missionId}/units`).then(r=>r.json()).then(assigned=>{
+    const reqDiv = document.getElementById('reqDynamic');
+    if (reqDiv) { const missionsSnap = missions.find(m=>m.id===missionId); if (missionsSnap) reqDiv.innerHTML = renderRequirementsDynamic(missionsSnap, assigned); }
+  }).catch(()=>{});
+}
+
+// Work timer / resolve
+const activeWorkTimers = new Map();
+async function checkMissionCompletion(mission) {
+  const assigned = await (await fetch(`/api/missions/${mission.id}/units`)).json();
+  const onsceneByType = new Map();
+  for (const u of assigned) if (u.status==='onscene') onsceneByType.set(u.type, (onsceneByType.get(u.type)||0)+1);
+  const req = Array.isArray(mission.required_units) ? mission.required_units : [];
+  const allMet = req.every(r => (onsceneByType.get(r.type)||0) >= (r.quantity ?? r.count ?? 1));
+  if (!allMet) { const t = activeWorkTimers.get(mission.id); if (t){ clearTimeout(t); activeWorkTimers.delete(mission.id); } return; }
+
+  if (!activeWorkTimers.has(mission.id)) {
+    const minutes = Number.isFinite(mission.timing) ? mission.timing : 10;
+    const ms = Math.max(5, minutes*60)*1000;
+    const tid = setTimeout(async ()=>{
+      activeWorkTimers.delete(mission.id);
+      const assignedBefore = await (await fetch(`/api/missions/${mission.id}/units`)).json();
+      await fetch(`/api/missions/${mission.id}/resolve`, { method:'POST' });
+      if (!_stationById || _stationById.size===0) { const stations = await (await fetch('/api/stations')).json(); cacheStations(stations); }
+      for (const u of assignedBefore) {
+        const st = _stationById.get(u.station_id);
+        if (!st) continue;
+        ensureUnitMarker(u);
+        const entry = unitMarkers.get(u.id);
+        const current = entry?.marker.getLatLng() || L.latLng(mission.lat, mission.lon);
+        routeAndAnimateUnit(u.id, [current.lat, current.lng], [st.lat, st.lon], TRAVEL_SPEED[u.class] || 45, ()=>{
+          const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); }
+        });
+      }
+      await refreshAssignedUnitsUI(mission.id);
+      await fetchMissions();
+      const area = document.getElementById('manualDispatchArea');
+      if (area) area.innerHTML = '<strong>Mission resolved.</strong>';
+    }, ms);
+    activeWorkTimers.set(mission.id, tid);
+  }
+}
+
+// Rebuild en-route after reload (using backend unit-travel)
+async function rebuildEnrouteMarkers() {
+  const [stations, allUnits] = await Promise.all([ fetch('/api/stations').then(r=>r.json()), fetch('/api/units').then(r=>r.json()) ]);
+  cacheStations(stations);
+  cacheUnits(allUnits);
+
+  let travels = [];
+  try { travels = await (await fetch('/api/unit-travel/active')).json(); }
+  catch(e){ console.warn('No /api/unit-travel/active; fallback to old behavior.'); }
+
+  if (Array.isArray(travels) && travels.length) {
+    for (const t of travels) {
+      const u = _unitById.get(t.unit_id);
+      if (!u) continue;
+      ensureUnitMarker(u);
+      routeAndAnimateUnit(
+        t.unit_id, t.from, t.to, TRAVEL_SPEED[u.class] || 45,
+        async () => {
+          if (t.phase === 'to_scene') {
+            await fetch(`/api/units/${t.unit_id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'onscene' }) });
+          }
+          const entry = unitMarkers.get(t.unit_id);
+          if (t.phase === 'to_scene' && entry) { try{ map.removeLayer(entry.marker); }catch{} unitMarkers.delete(t.unit_id); }
+          const rp = unitRoutes.get(t.unit_id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(t.unit_id); }
+          clearUnitEta(t.unit_id);
+          fetch(`/api/unit-travel/${t.unit_id}`, { method:'DELETE' }).catch(()=>{});
+        },
+        { saved: t }
+      );
+    }
+    return;
+  }
+
+  // Fallback: naive restart-from-station if travel store is empty
+  try {
+    const missions = await (await fetch('/api/missions')).json();
+    const active = missions.filter(m => m.status !== 'resolved');
+    for (const m of active) {
+      const assigned = await (await fetch(`/api/missions/${m.id}/units`)).json();
+      for (const u of assigned) {
+        if (u.status === 'enroute') {
+          const st = _stationById.get(u.station_id);
+          if (!st) continue;
+          ensureUnitMarker(u);
+          routeAndAnimateUnit(u.id, [st.lat, st.lon], [m.lat, m.lon], TRAVEL_SPEED[u.class] || 45, async ()=>{
+            await fetch(`/api/units/${u.id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'onscene' }) });
+            const entry = unitMarkers.get(u.id); if (entry){ try{ map.removeLayer(entry.marker); }catch{} unitMarkers.delete(u.id); }
+            const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); }
+            clearUnitEta(u.id);
+            await refreshAssignedUnitsUI(m.id);
+            checkMissionCompletion(m);
+          });
+        }
+      }
+    }
+  } catch(e){ console.warn('Fallback rebuild failed:', e); }
+}
+
+// Init
+fetchPOIs().then(async () => {
+  await fetchStations();
+  await fetchMissions();
+  rebuildEnrouteMarkers();
+});
+</script>
+
+</body>
+</html>
