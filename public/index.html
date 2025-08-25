@@ -533,14 +533,72 @@ function renderRequirementsDynamic(mission, assigned) {
   return items.length ? `<ul>${items.join('')}</ul>` : '<em>All required units are on scene.</em>';
 }
 
+function renderTrainingRequirements(mission) {
+  const req = Array.isArray(mission.required_training) ? mission.required_training : [];
+  if (!req.length) return '';
+  const items = req.map(r => {
+    const qty = r.qty ?? r.quantity ?? r.count ?? 1;
+    const name = r.training || r.name || r;
+    return `<li>${qty} × ${name}</li>`;
+  });
+  return `<ul>${items.join('')}</ul>`;
+}
+
+function renderEquipmentRequirements(mission) {
+  const req = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
+  if (!req.length) return '';
+  const items = req.map(r => {
+    const qty = r.qty ?? r.quantity ?? r.count ?? 1;
+    const name = r.name || r.type || r;
+    return `<li>${qty} × ${name}</li>`;
+  });
+  return `<ul>${items.join('')}</ul>`;
+}
+
+function renderPatientInfo(mission) {
+  const pts = Array.isArray(mission.patients) ? mission.patients : [];
+  if (!pts.length) return '';
+  const items = pts.map(p => {
+    const codes = Array.isArray(p.codes) ? p.codes.join(', ') : (p.codes || '');
+    const chance = Number.isFinite(p.chance) ? `Chance: ${Math.round(p.chance * 100)}%` : '';
+    const parts = [`${p.min ?? 0}-${p.max ?? 0}`];
+    if (chance) parts.push(chance);
+    if (codes) parts.push(`Codes: ${codes}`);
+    return `<li>${parts.join(', ')}</li>`;
+  });
+  return `<ul>${items.join('')}</ul>`;
+}
+
+function renderPrisonerInfo(mission) {
+  const prs = Array.isArray(mission.prisoners) ? mission.prisoners : [];
+  if (!prs.length) return '';
+  const items = prs.map(p => {
+    const chance = Number.isFinite(p.chance) ? `Chance: ${Math.round(p.chance * 100)}%` : '';
+    const transport = Number.isFinite(p.transportChance) ? `Transport: ${Math.round(p.transportChance * 100)}%` : '';
+    const parts = [`${p.min ?? 0}-${p.max ?? 0}`];
+    if (chance) parts.push(chance);
+    if (transport) parts.push(transport);
+    return `<li>${parts.join(', ')}</li>`;
+  });
+  return `<ul>${items.join('')}</ul>`;
+}
+
 // ===== Mission details =====
 function showMissionDetails(mission) {
   const container = document.getElementById("missionDetailsContent");
+  const trainingHtml = renderTrainingRequirements(mission);
+  const equipmentHtml = renderEquipmentRequirements(mission);
+  const patientHtml = renderPatientInfo(mission);
+  const prisonerHtml = renderPrisonerInfo(mission);
   container.innerHTML = `
     <h3>${mission.type}</h3>
     <p><strong>Status:</strong> ${mission.status}</p>
-    <p><strong>Requirements:</strong></p>
+    <p><strong>Unit Requirements:</strong></p>
     <div id="reqDynamic">Loading…</div>
+    ${trainingHtml ? '<p><strong>Training Requirements:</strong></p>' + trainingHtml : ''}
+    ${equipmentHtml ? '<p><strong>Equipment Required:</strong></p>' + equipmentHtml : ''}
+    ${patientHtml ? '<p><strong>Patients:</strong></p>' + patientHtml : ''}
+    ${prisonerHtml ? '<p><strong>Prisoners:</strong></p>' + prisonerHtml : ''}
     <div id="assignedUnitsArea" style="margin-top:8px;"></div>
     <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button></div>
     <div id="manualDispatchArea" style="margin-top:8px;"></div>
