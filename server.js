@@ -143,24 +143,6 @@ db.run(`
 `, () => { /* ignore if exists */ });
 db.run(`INSERT OR IGNORE INTO wallet (id, balance) VALUES (1, 100000)`);
 
-const missionTimers = new Map(); // mission_id -> timeout
-
-function startMissionTimer(missionId) {
-  if (missionTimers.has(missionId)) return; // already running
-
-  db.get('SELECT timing FROM missions WHERE id=?', [missionId], (e, row) => {
-    if (e || !row) return;
-    const minutes = Number(row.timing || 0);
-    const durationMs = Math.max(0, minutes) * 60 * 1000;
-
-    const to = setTimeout(() => {
-      missionTimers.delete(missionId);
-      resolveMissionById(missionId, () => {});
-    }, durationMs);
-
-    missionTimers.set(missionId, to);
-  });
-}
 
 function resolveMissionById(missionId, cb) {
   db.serialize(() => {
@@ -192,7 +174,7 @@ function resolveMissionById(missionId, cb) {
                 try {
                   if (reward > 0) await adjustBalance(+reward);
                   const bal = await getBalance();
-                  cancelMissionTimer(missionId);
+                  clearMissionClock(missionId);
                   cb && cb(null, { freed: ids.length, reward, balance: bal });
                 } catch (eAdj) {
                   cb && cb(eAdj);
@@ -208,10 +190,20 @@ function resolveMissionById(missionId, cb) {
   });
 }
 
-function cancelMissionTimer(missionId) {
-  const to = missionTimers.get(missionId);
-  if (to) clearTimeout(to);
-  missionTimers.delete(missionId);
+const missionClocks = new Map(); // mission_id -> { startedAt: number(ms), durationMs: number }
+
+function beginMissionClock(missionId) {
+  if (missionClocks.has(missionId)) return; // already running
+  db.get('SELECT timing FROM missions WHERE id=?', [missionId], (e, row) => {
+    if (e || !row) return;
+    const minutes = Number(row.timing || 0);
+    const durationMs = Math.max(0, minutes) * 60 * 1000; // minutes -> ms
+    missionClocks.set(missionId, { startedAt: Date.now(), durationMs });
+  });
+}
+
+function clearMissionClock(missionId) {
+  missionClocks.delete(missionId);
 }
 
 function findUnitCostByType(t) {
@@ -1047,7 +1039,7 @@ app.post('/api/unit-travel', (req, res) => {
         db.run('DELETE FROM unit_travel WHERE unit_id=?', [unit_id], () => {});
         if (mission_id) {
           db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', mission_id], () => {});
-          startMissionTimer(mission_id);
+			beginMissionClock(mission_id);
         }
       } else if (phase === 'return') {
         db.run('UPDATE units SET status=? WHERE id=?', ['available', unit_id], () => {});
@@ -1082,7 +1074,7 @@ app.get('/api/unit-travel/active', (req, res) => {
               db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => {
                 if (r.mission_id) {
                   db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', r.mission_id], () => {
-                    startMissionTimer(r.mission_id);
+                    beginMissionClock(r.mission_id);
                     resolve();
                   });
                 } else resolve();
@@ -1113,10 +1105,31 @@ app.get('/api/unit-travel/active', (req, res) => {
       });
     }
 
-    // After applying side effects, return current active travels
-    Promise.all(afterOps).then(() => res.json(toReturn))
-                         .catch(e => res.status(500).json({ error: e.message }));
+Promise.all(afterOps).then(() => {
+  // After arrivals/returns have been applied, check any mission clocks
+  const now = Date.now();
+  const toResolve = [];
+  for (const [missionId, clk] of missionClocks.entries()) {
+    if (clk && now - clk.startedAt >= (clk.durationMs || 0)) {
+      toResolve.push(missionId);
+    }
+  }
+
+  if (!toResolve.length) {
+    return res.json(toReturn);
+  }
+
+  // Resolve any that are due, then respond
+  let pending = toResolve.length;
+  toResolve.forEach(id => {
+    resolveMissionById(id, () => {
+      // Always clear the clock (resolver also clears, but safe to ensure)
+      clearMissionClock(id);
+      if (--pending === 0) res.json(toReturn);
+    });
   });
+}).catch(e => res.status(500).json({ error: e.message }));
+	});
 });
 
 
