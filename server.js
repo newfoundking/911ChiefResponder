@@ -505,7 +505,7 @@ app.post('/api/missions/:id/resolve', (req, res) => {
       const placeholders = ids.map(() => '?').join(',');
       const free = ids.length
         ? new Promise((resolve, reject) => {
-            db.run(`UPDATE units SET status='available' WHERE id IN (${placeholders})`, ids, (e) => e ? reject(e) : resolve());
+           db.run(`UPDATE units SET status='return' WHERE id IN (${placeholders})`, ids, (e) => e ? reject(e) : resolve());
           })
         : Promise.resolve();
 
