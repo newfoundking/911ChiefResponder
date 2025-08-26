@@ -66,6 +66,7 @@ db.serialize(() => {
       type TEXT,
       lat REAL,
       lon REAL,
+      department TEXT,
       required_units TEXT,
       required_training TEXT DEFAULT '[]',
       equipment_required TEXT DEFAULT '[]',
@@ -79,6 +80,7 @@ db.serialize(() => {
 
   // Add timing column if not present
   db.run(`ALTER TABLE missions ADD COLUMN timing INTEGER DEFAULT 10`, () => { /* ignore if exists */ });
+  db.run(`ALTER TABLE missions ADD COLUMN department TEXT`, () => { /* ignore if exists */ });
 
   // Mission ↔ Units link
   db.run(`
@@ -1343,6 +1345,7 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
     name: b.name || '',
     trigger_type: b.trigger_type || '',
     trigger_filter: b.trigger_filter || '',
+    department: b.department || '',
     timing: Number(b.timing) || 0,
     required_units: JSON.stringify(b.required_units || []),
     patients: JSON.stringify(b.patients || []),
@@ -1354,10 +1357,10 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
   };
   db.run(
     `INSERT INTO mission_templates
-     (name, trigger_type, trigger_filter, timing,
+     (name, trigger_type, trigger_filter, department, timing,
       required_units, patients, prisoners, required_training, modifiers, equipment_required, rewards)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [fields.name, fields.trigger_type, fields.trigger_filter, fields.department, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
      fields.modifiers, fields.equipment_required, fields.rewards],
     function(err){
@@ -1374,6 +1377,7 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
     name: b.name || '',
     trigger_type: b.trigger_type || '',
     trigger_filter: b.trigger_filter || '',
+    department: b.department || '',
     timing: Number(b.timing) || 0,
     required_units: JSON.stringify(b.required_units || []),
     patients: JSON.stringify(b.patients || []),
@@ -1385,11 +1389,11 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
   };
   db.run(
     `UPDATE mission_templates SET
-      name=?, trigger_type=?, trigger_filter=?, timing=?,
+      name=?, trigger_type=?, trigger_filter=?, department=?, timing=?,
       required_units=?, patients=?, prisoners=?, required_training=?,
       modifiers=?, equipment_required=?, rewards=?
      WHERE id=?`,
-    [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
+    [fields.name, fields.trigger_type, fields.trigger_filter, fields.department, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
      fields.modifiers, fields.equipment_required, fields.rewards, id],
     function(err){

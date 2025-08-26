@@ -41,6 +41,7 @@ function appendMissionRow(mission) {
     <td>${mission.name}</td>
     <td>${mission.trigger_type}</td>
     <td>${mission.trigger_filter}</td>
+    <td>${mission.department || ''}</td>
     <td>${mission.timing}</td>
     <td>${(mission.required_units || []).map(u => `${u.quantity ?? u.count}×${u.type}`).join(", ")}</td>
     <td>${(mission.required_training || []).map(t => `${t.qty ?? t.quantity ?? t.count ?? 1}×${t.training ?? t.name ?? t}`).join(", ")}</td>
@@ -49,7 +50,7 @@ function appendMissionRow(mission) {
     <td>${(mission.patients || []).map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
     <td>${(mission.prisoners || []).map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
     <td>${Number.isFinite(mission.rewards) ? mission.rewards : 0}</td>
-    <td><button onclick="editMission(${mission.id})">Edit</button> <button onclick='editRunCard(${JSON.stringify(mission.name)})'>Run Card</button></td>
+    <td><button onclick="editMission(${mission.id})">Edit</button> <button onclick='editRunCard(${JSON.stringify(mission.name)}, ${JSON.stringify(mission.department || '')})'>Run Card</button></td>
   `;
   tbody.appendChild(row);
 }
@@ -77,6 +78,7 @@ async function openMissionForm(existing = null) {
       </select>
     </label><br>
     <label>Trigger Filter: <span id="trigger-filter-container"></span></label><br>
+    <label>Department: <input id="mission-department" value="${existing?.department || ''}"></label><br>
     <label>Timing (minutes): <input id="timing" type="number" value="${existing?.timing ?? 0}"></label><br>
     <label>Rewards (currency): <input id="rewards" type="number" value="${existing?.rewards ?? 0}"></label><br>
 
@@ -138,7 +140,9 @@ async function openMissionForm(existing = null) {
   // Populate run card if editing existing mission
   if (existing?.name) {
     try {
-      const rcRes = await fetch(`/api/run-cards/${encodeURIComponent(existing.name)}`);
+      let rcUrl = `/api/run-cards/${encodeURIComponent(existing.name)}`;
+      if (existing.department) rcUrl += `?department=${encodeURIComponent(existing.department)}`;
+      const rcRes = await fetch(rcUrl);
       if (rcRes.ok) {
         const rc = await rcRes.json();
         (rc.units || []).forEach(u => addRCUnitRow(u.type, u.quantity ?? u.count ?? 1));
@@ -382,6 +386,7 @@ async function submitMission() {
     name: document.getElementById("mission-name").value,
     trigger_type: triggerType,
     trigger_filter: triggerFilter,
+    department: document.getElementById("mission-department").value,
     timing: Number(document.getElementById("timing").value),
     rewards: Number(document.getElementById("rewards").value) || 0, // <-- NEW
     required_units: collectRows("#unit-req-container") || [],
@@ -414,7 +419,9 @@ async function submitMission() {
     training: collectRows('#rc-training-container') || [],
     equipment: collectRows('#rc-equipment-container') || []
   };
-  await fetch(`/api/run-cards/${encodeURIComponent(mission.name)}`, {
+  let rcUrl = `/api/run-cards/${encodeURIComponent(mission.name)}`;
+  if (mission.department) rcUrl += `?department=${encodeURIComponent(mission.department)}`;
+  await fetch(rcUrl, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(runCard)
@@ -440,7 +447,7 @@ function collectRows(containerSel) {
 }
 
 // ----- Run card management -----
-async function editRunCard(name) {
+async function editRunCard(name, department = '') {
   // hide any open mission form to avoid duplicate element IDs
   const missionForm = document.getElementById('mission-form-container');
   if (missionForm) {
@@ -452,12 +459,14 @@ async function editRunCard(name) {
   container.style.display = 'block';
   let existing = null;
   try {
-    const res = await fetch(`/api/run-cards/${encodeURIComponent(name)}`);
+    let url = `/api/run-cards/${encodeURIComponent(name)}`;
+    if (department) url += `?department=${encodeURIComponent(department)}`;
+    const res = await fetch(url);
     if (res.ok) existing = await res.json();
   } catch {}
 
   container.innerHTML = `
-    <h3>Run Card for ${name}</h3>
+    <h3>Run Card for ${name}${department ? ` (${department})` : ''}</h3>
     <div><strong>Units</strong></div>
     <div id="rc-unit-container"></div>
     <button type="button" onclick="addRCUnitRow()">Add Unit</button><br>
@@ -467,7 +476,7 @@ async function editRunCard(name) {
     <div><strong>Equipment</strong></div>
     <div id="rc-equipment-container"></div>
     <button type="button" onclick="addRCEquipmentRow()">Add Equipment</button><br>
-    <button onclick='saveRunCard(${JSON.stringify(name)})'>Save</button>
+    <button onclick='saveRunCard(${JSON.stringify(name)}, ${JSON.stringify(department)})'>Save</button>
     <button onclick="document.getElementById('runcard-form-container').style.display='none'">Close</button>
   `;
 
@@ -557,11 +566,13 @@ function addRCEquipmentRow(selected = "", qty = 1) {
   container.appendChild(row);
 }
 
-async function saveRunCard(name) {
+async function saveRunCard(name, department = '') {
   const units = collectRows('#rc-unit-container');
   const training = collectRows('#rc-training-container');
   const equipment = collectRows('#rc-equipment-container');
-  await fetch(`/api/run-cards/${encodeURIComponent(name)}`, {
+  let url = `/api/run-cards/${encodeURIComponent(name)}`;
+  if (department) url += `?department=${encodeURIComponent(department)}`;
+  await fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ units, training, equipment })
