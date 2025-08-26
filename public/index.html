@@ -467,7 +467,11 @@ async function fetchStations() {
   list.innerHTML = "";
 
   const unitCounts = await Promise.all(
-    stations.map(st => fetch(`/api/units?station_id=${st.id}`).then(r=>r.json()).then(arr=>arr.length).catch(()=>0))
+    stations.map(st => {
+      if (st.type === 'hospital' || st.type === 'jail') return 0;
+      return fetch(`/api/units?station_id=${st.id}`)
+        .then(r=>r.json()).then(arr=>arr.length).catch(()=>0);
+    })
   );
 
   stations.forEach((st, idx) => {
@@ -478,7 +482,22 @@ async function fetchStations() {
     const marker = L.marker([st.lat, st.lon], { icon }).addTo(map).on("click", () => showStationDetails(st));
     stationMarkers.push(marker);
     const el = document.createElement("div");
-    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>Bays: ${used}/${st.bay_count || 0} (Free: ${free})<br>
+    let info = '';
+    if (st.type === 'hospital') {
+      const occ = Number(st.occupied_beds || 0);
+      const cap = Number(st.bed_capacity || 0);
+      info = `Beds: ${occ}/${cap} (Free: ${cap - occ})`;
+    } else if (st.type === 'jail' || (st.type === 'police' && Number(st.holding_cells) > 0)) {
+      const occ = Number(st.occupied_cells || 0);
+      const cap = Number(st.holding_cells || 0);
+      info = `Cells: ${occ}/${cap} (Free: ${cap - occ})`;
+      if (st.type === 'police') {
+        info += `<br>Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
+      }
+    } else {
+      info = `Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
+    }
+    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>${info}<br>
       <button onclick='showStationDetails(${JSON.stringify(st)})'>Details</button>`;
     list.appendChild(el);
   });
@@ -670,12 +689,27 @@ function showMissionDetails(mission) {
 
 // ===== Station details =====
 async function showStationDetails(station) {
+  station = await fetchNoCache(`/api/stations/${station.id}`).then(r=>r.json());
+  const detail = document.getElementById('stationDetails');
+  window.currentStation = station;
+  if (station.type === 'hospital' || station.type === 'jail') {
+    const isHospital = station.type === 'hospital';
+    const occ = isHospital ? Number(station.occupied_beds || 0) : Number(station.occupied_cells || 0);
+    const cap = isHospital ? Number(station.bed_capacity || 0) : Number(station.holding_cells || 0);
+    detail.innerHTML = `
+      <div style="text-align:right;">
+        <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
+      </div>
+      <h2>${station.name}</h2>
+      <p>Type: ${station.type}</p>
+      <div>${isHospital ? 'Beds' : 'Holding Cells'}: ${occ}/${cap} (Free: ${cap - occ})</div>
+    `;
+    return;
+  }
   const res = await fetchNoCache(`/api/units?station_id=${station.id}`);
   const units = await res.json();
   units.forEach(u => _unitById.set(u.id, u));
-  const detail = document.getElementById('stationDetails');
   const unitOptions = unitTypes.filter(u=>u.class===station.type).map(u=>`<option value="${u.type}">${u.type}</option>`).join('');
-  window.currentStation = station;
   const usedBays = units.length;
   const freeBays = (station.bay_count || 0) - usedBays;
   const equipOptions = (equipment[station.type] || []).map(e=>{
@@ -684,6 +718,9 @@ async function showStationDetails(station) {
     return `<option value="${name}" data-cost="${cost}">${name}${cost?` ($${cost})`:''}</option>`;
   }).join('');
   const stationEquip = Array.isArray(station.equipment) ? station.equipment : [];
+  const holdingInfo = (station.type === 'police' && Number(station.holding_cells) > 0)
+    ? `<div id="holding-info">Holding Cells: ${Number(station.occupied_cells || 0)}/${Number(station.holding_cells || 0)} (Free: ${Number(station.holding_cells || 0) - Number(station.occupied_cells || 0)})</div>`
+    : '';
   detail.innerHTML = `
     <div style="text-align:right;">
       <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
@@ -710,6 +747,7 @@ async function showStationDetails(station) {
     </div>
     <div id="personnel-cost"></div>
     <div id="bay-info">Bays: ${usedBays}/${station.bay_count || 0} (Free: ${freeBays})</div>
+    ${holdingInfo}
     <div>
       <label>Add bays:
         <input id="add-bays-count" type="number" min="1" value="1">
@@ -744,6 +782,10 @@ async function showStationDetails(station) {
           const used = Array.isArray(us) ? us.length : 0;
           const el = document.getElementById('bay-info');
           el.textContent = `Bays: ${used}/${s.bay_count} (Free: ${s.bay_count - used})`;
+          if (s.type === 'police' && Number(s.holding_cells) > 0) {
+            const hc = document.getElementById('holding-info');
+            if (hc) hc.textContent = `Holding Cells: ${Number(s.occupied_cells||0)}/${Number(s.holding_cells||0)} (Free: ${Number(s.holding_cells||0) - Number(s.occupied_cells||0)})`;
+          }
         }
 
         const BASE_PERSON_COST = 100;
