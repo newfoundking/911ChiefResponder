@@ -77,12 +77,16 @@
 	width: 300px; max-width: 30%; box-shadow: 0 0 10px rgba(0,0,0,0.3);
 	display: none; z-index: 10000;">
 	<h3>Create Station</h3>
-	<label for="stationName">Name:</label>
-	<input type="text" id="stationName" style="width: 100%;" />
-	<br><br>
-	<label for="stationType">Type:</label>
-	<select id="stationType" style="width: 100%;">
-		<option value="fire">Fire</option>
+
+        <label for="stationName">Name:</label>
+        <input type="text" id="stationName" style="width: 100%;" />
+        <br><br>
+        <label for="stationDept">Department:</label>
+        <input type="text" id="stationDept" style="width: 100%;" />
+        <br><br>
+        <label for="stationType">Type:</label>
+        <select id="stationType" style="width: 100%;">
+                <option value="fire">Fire</option>
 		<option value="police">Police</option>
 		<option value="ambulance">Ambulance</option>
 	</select>
@@ -197,79 +201,11 @@ const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/st
 let missionMarkers = [];
 let stationMarkers = [];
 let buildStationMode = false;
+let pendingStationCoords = null;
 let openMissionId = null;
 
 const map = L.map("map").setView([47.5646, -52.7002], 13);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
-
-const urlParams = new URLSearchParams(window.location.search);
-const isAdmin = urlParams.get('admin') === 'true';
-
-const zoneLayers = L.featureGroup().addTo(map);
-
-async function loadResponseZones(){
-  try{
-    const zones = await fetch('/api/response-zones').then(r=>r.json());
-    zoneLayers.clearLayers();
-    zones.forEach(z=>{
-      const layer = L.geoJSON(z.polygon).getLayers()[0];
-      layer._zoneId = z.id;
-      layer._zoneName = z.name;
-      layer._department = z.department;
-      layer._stationId = z.station_id;
-      zoneLayers.addLayer(layer);
-    });
-  }catch(e){ console.warn('Failed to load zones', e); }
-}
-loadResponseZones();
-
-if(isAdmin){
-  const drawControl = new L.Control.Draw({
-    edit:{ featureGroup: zoneLayers },
-    draw:{ polygon:true, rectangle:false, polyline:false, circle:false, marker:false, circlemarker:false }
-  });
-  map.addControl(drawControl);
-
-  map.on(L.Draw.Event.CREATED, async (e) => {
-    const layer = e.layer;
-    zoneLayers.addLayer(layer);
-    const name = prompt('Zone name?') || 'Unnamed Zone';
-    const department = prompt('Department (fire, police, ambulance)?','fire') || 'fire';
-    const stationId = prompt('Station ID?') || '';
-    const geojson = layer.toGeoJSON();
-    try{
-      const res = await fetch('/api/response-zones', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ name, department, station_id: Number(stationId)||null, polygon: geojson })
-      });
-      const data = await res.json();
-      layer._zoneId = data.id;
-      layer._zoneName = name;
-      layer._department = department;
-      layer._stationId = Number(stationId)||null;
-    }catch(err){ console.error(err); }
-  });
-
-  map.on(L.Draw.Event.EDITED, (e) => {
-    e.layers.eachLayer(async (layer) => {
-      const name = prompt('Zone name?', layer._zoneName || '') || layer._zoneName || '';
-      const department = prompt('Department?', layer._department || '') || layer._department || '';
-      const stationId = prompt('Station ID?', layer._stationId || '') || layer._stationId || '';
-      const geojson = layer.toGeoJSON();
-      try{
-        await fetch(`/api/response-zones/${layer._zoneId}`, {
-          method:'PUT',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ name, department, station_id: Number(stationId)||null, polygon: geojson })
-        });
-        layer._zoneName = name;
-        layer._department = department;
-        layer._stationId = Number(stationId)||null;
-      }catch(err){ console.error(err); }
-    });
-  });
-}
 
 document.getElementById("deleteAllStations").addEventListener("click", async () => {
   if (!confirm("Are you sure you want to delete ALL stations? This will also orphan units!")) return;
@@ -322,7 +258,9 @@ const unitRoutes  = new Map(); // unitId -> L.Polyline
 
 function clearUnitEta(){ /* hook for later, no-op now */ }
 
-function cacheStations(stations){ _stationById = new Map(stations.map(s => [s.id, s])); }
+function cacheStations(stations){
+  _stationById = new Map(stations.map(s => [s.id, { ...s, department: s.department ?? null }]));
+}
 function cacheUnits(units){ _unitById = new Map(units.map(u => [u.id, u])); }
 
 function ensureUnitMarker(unit) {
@@ -600,7 +538,7 @@ async function fetchStations() {
     } else {
       info = `Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
     }
-    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>${info}<br>
+    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>Department: ${st.department || ''}<br>${info}<br>
       <button onclick='showStationDetails(${JSON.stringify(st)})'>Details</button>`;
     list.appendChild(el);
   });
@@ -814,8 +752,10 @@ async function showStationDetails(station) {
         <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
       </div>
       <h2>${station.name}</h2>
-	  <button id="change-station-icon">Change Icon</button>
+          <button id="change-station-icon">Change Icon</button>
       <p>Type: ${station.type}</p>
+
+      <p>Department: ${station.department || ''}</p>
       <div>${isHospital ? 'Beds' : 'Holding Cells'}: ${occ}/${cap} (Free: ${cap - occ})</div>
     `;
 	  const iconBtn = detail.querySelector('#change-station-icon');
@@ -852,8 +792,9 @@ async function showStationDetails(station) {
       <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
     </div>
     <h2>${station.name}</h2>
-	<button id="change-station-icon">Change Icon</button>
+        <button id="change-station-icon">Change Icon</button>
     <p>Type: ${station.type}</p>
+    <p>Department: ${station.department || ''}</p>
     <h3>Create Unit</h3>
     <select id="unit-type">${unitOptions}</select>
     <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
@@ -1218,10 +1159,11 @@ window.editUnit = editUnit;
 
 // Build station
 document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; alert("Click the map to place your new station"); });
-map.on("click", async (e) => {
+map.on("click", (e) => {
   if (!buildStationMode) return;
   const name = prompt("Station Name?");
   const type = prompt("Type (fire, police, ambulance, hospital, jail)?", "fire")?.toLowerCase();
+  const department = prompt("Department?") || null;
   if (!name || !["fire","police","ambulance","hospital","jail"].includes(type)) { alert("Cancelled or invalid type."); buildStationMode=false; return; }
   let holding_cells = 0, beds = 0;
   if (type === "police" || type === "jail") {
@@ -1230,8 +1172,9 @@ map.on("click", async (e) => {
   if (type === "hospital") {
     beds = Number(prompt("Beds?", "0")) || 0;
   }
-  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, lat:e.latlng.lat, lon:e.latlng.lng, holding_cells, beds }) });
+  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, department, lat:e.latlng.lat, lon:e.latlng.lng, holding_cells, beds }) });
   buildStationMode = false;
+  pendingStationCoords = null;
   fetchStations();
 });
 
