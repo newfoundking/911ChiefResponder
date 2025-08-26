@@ -10,6 +10,20 @@ let equipment = {};
 try { trainingsByClass = require('./trainings'); } catch { /* falls back to {} */ }
 try { equipment = require('./equipment'); } catch { /* falls back to {} */ }
 
+// Safely parse JSON fields that should be arrays. Some legacy rows may have
+// stored objects instead of arrays. This helper normalizes the output so the
+// rest of the code can rely on getting an array every time.
+function parseArrayField(str) {
+  try {
+    const val = JSON.parse(str || '[]');
+    if (Array.isArray(val)) return val;
+    if (val && typeof val === 'object') return [val];
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 const TRAVEL_SPEED = { fire: 50, police: 75, ambulance: 60 }; // km/h
 function haversine(aLat, aLon, bLat, bLon) {
   const R = 6371;
@@ -1080,13 +1094,13 @@ app.get('/api/mission-templates', (req, res) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     const parsed = rows.map(row => ({
       ...row,
-      required_units: JSON.parse(row.required_units || '[]'),
-      patients: JSON.parse(row.patients || '[]'),
-      prisoners: JSON.parse(row.prisoners || '[]'),
-      modifiers: JSON.parse(row.modifiers || '[]'),
-      required_training: JSON.parse(row.required_training || '[]'),
-      equipment_required: JSON.parse(row.equipment_required || '[]'),
-	  rewards: Number.isFinite(row.rewards) ? row.rewards : 0
+      required_units: parseArrayField(row.required_units),
+      patients: parseArrayField(row.patients),
+      prisoners: parseArrayField(row.prisoners),
+      modifiers: parseArrayField(row.modifiers),
+      required_training: parseArrayField(row.required_training),
+      equipment_required: parseArrayField(row.equipment_required),
+      rewards: Number.isFinite(row.rewards) ? row.rewards : 0
     }));
     res.json(parsed);
   });
@@ -1162,13 +1176,13 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
           FROM mission_templates WHERE id=?`, [req.params.id], (err, r) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!r)   return res.status(404).json({ error: "Not found" });
-        try { r.required_units = JSON.parse(r.required_units || '[]'); } catch { r.required_units = []; }
-        try { r.patients = JSON.parse(r.patients || '[]'); } catch { r.patients = []; }
-        try { r.prisoners = JSON.parse(r.prisoners || '[]'); } catch { r.prisoners = []; }
-        try { r.required_training = JSON.parse(r.required_training || '[]'); } catch { r.required_training = []; }
-        try { r.modifiers = JSON.parse(r.modifiers || '[]'); } catch { r.modifiers = []; }
-        try { r.equipment_required = JSON.parse(r.equipment_required || '[]'); } catch { r.equipment_required = []; }
-        r.rewards = Number.isFinite(r.rewards) ? r.rewards : 0;
+    r.required_units = parseArrayField(r.required_units);
+    r.patients = parseArrayField(r.patients);
+    r.prisoners = parseArrayField(r.prisoners);
+    r.required_training = parseArrayField(r.required_training);
+    r.modifiers = parseArrayField(r.modifiers);
+    r.equipment_required = parseArrayField(r.equipment_required);
+    r.rewards = Number.isFinite(r.rewards) ? r.rewards : 0;
     res.json(r);
   });
 });
@@ -1178,10 +1192,9 @@ app.get('/api/run-cards/:name', (req, res) => {
   db.get('SELECT units, training, equipment FROM run_cards WHERE mission_name=?', [req.params.name], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!row) return res.status(404).json({ error: 'Not found' });
-    let units = [], training = [], equipment = [];
-    try { units = JSON.parse(row.units || '[]'); } catch {}
-    try { training = JSON.parse(row.training || '[]'); } catch {}
-    try { equipment = JSON.parse(row.equipment || '[]'); } catch {}
+    const units = parseArrayField(row.units);
+    const training = parseArrayField(row.training);
+    const equipment = parseArrayField(row.equipment);
     res.json({ units, training, equipment });
   });
 });
