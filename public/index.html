@@ -165,7 +165,7 @@ async function refreshStationPanelNoCache(stationId) {
 }
 
 const missionIcon = L.icon({ iconUrl: "/warning.png", iconSize: [30,30], iconAnchor: [15,30] });
-const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/star.png" };
+const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/star.png", hospital: "/star.png", jail: "/police.png" };
 
 let poiCache = [];
 let missionMarkers = [];
@@ -972,9 +972,16 @@ document.getElementById("buildStation").addEventListener("click", () => { buildS
 map.on("click", async (e) => {
   if (!buildStationMode) return;
   const name = prompt("Station Name?");
-  const type = prompt("Type (fire, police, ambulance)?", "fire")?.toLowerCase();
-  if (!name || !["fire","police","ambulance"].includes(type)) { alert("Cancelled or invalid type."); buildStationMode=false; return; }
-  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, lat:e.latlng.lat, lon:e.latlng.lng }) });
+  const type = prompt("Type (fire, police, ambulance, hospital, jail)?", "fire")?.toLowerCase();
+  if (!name || !["fire","police","ambulance","hospital","jail"].includes(type)) { alert("Cancelled or invalid type."); buildStationMode=false; return; }
+  let holding_cells = 0, beds = 0;
+  if (type === "police" || type === "jail") {
+    holding_cells = Number(prompt("Holding cells?", "0")) || 0;
+  }
+  if (type === "hospital") {
+    beds = Number(prompt("Beds?", "0")) || 0;
+  }
+  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, lat:e.latlng.lat, lon:e.latlng.lng, holding_cells, beds }) });
   buildStationMode = false;
   fetchStations();
 });
