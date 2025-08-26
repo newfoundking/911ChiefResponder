@@ -10,6 +10,16 @@ let equipment = {};
 try { trainingsByClass = require('./trainings'); } catch { /* falls back to {} */ }
 try { equipment = require('./equipment'); } catch { /* falls back to {} */ }
 
+const TRAVEL_SPEED = { fire: 50, police: 75, ambulance: 60 }; // km/h
+function haversine(aLat, aLon, bLat, bLon) {
+  const R = 6371;
+  const dLat = (bLat - aLat) * Math.PI / 180;
+  const dLon = (bLon - aLon) * Math.PI / 180;
+  const la1 = aLat * Math.PI / 180, la2 = bLat * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 const app = express();
 const PORT = 911;
 
@@ -151,8 +161,122 @@ db.run(`
 db.run(`
   ALTER TABLE stations ADD COLUMN equipment TEXT DEFAULT '[]'
 `, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE stations ADD COLUMN bed_capacity INTEGER DEFAULT 0
+`, () => { /* ignore if exists */ });
+db.run(`
+  CREATE TABLE IF NOT EXISTS facility_load (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    station_id INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    FOREIGN KEY (station_id) REFERENCES stations(id)
+  )
+`);
 db.run(`INSERT OR IGNORE INTO wallet (id, balance) VALUES (1, 100000)`);
 
+
+function getFacilityOccupancy(stationId, type) {
+  return new Promise((resolve, reject) => {
+    const now = Date.now();
+    db.get(
+      `SELECT COUNT(*) AS cnt, MIN(expires_at) AS next FROM facility_load WHERE station_id=? AND type=? AND expires_at>?`,
+      [stationId, type, now],
+      (err, row) => {
+        if (err) return reject(err);
+        resolve({ count: row?.cnt || 0, nextFree: row?.next || 0 });
+      }
+    );
+  });
+}
+
+function addFacilityLoad(stationId, type, expiresAt) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO facility_load (station_id, type, expires_at) VALUES (?,?,?)`,
+      [stationId, type, expiresAt],
+      err => (err ? reject(err) : resolve())
+    );
+  });
+}
+
+async function hasTransportUnit(missionId, attr) {
+  return new Promise((resolve, reject) => {
+    db.all(
+      `SELECT u.type FROM mission_units mu JOIN units u ON mu.unit_id = u.id WHERE mu.mission_id=?`,
+      [missionId],
+      (err, rows) => {
+        if (err) return reject(err);
+        const ok = rows.some(r => {
+          const ut = unitTypes.find(t => t.type === r.type);
+          return ut && Array.isArray(ut.attributes) && ut.attributes.includes(attr);
+        });
+        resolve(ok);
+      }
+    );
+  });
+}
+
+async function allocateTransport(kind, lat, lon, unitClass) {
+  const facilities = await new Promise((resolve, reject) => {
+    if (kind === 'patient') {
+      db.all(
+        `SELECT id, lat, lon, bed_capacity AS capacity FROM stations WHERE type='hospital' AND bed_capacity>0`,
+        (err, rows) => (err ? reject(err) : resolve(rows || []))
+      );
+    } else {
+      db.all(
+        `SELECT id, lat, lon, holding_cells AS capacity FROM stations WHERE (type='jail' OR (type='police' AND holding_cells>0))`,
+        (err, rows) => (err ? reject(err) : resolve(rows || []))
+      );
+    }
+  });
+  if (!facilities.length) return null;
+  facilities.forEach(f => {
+    f.distance = haversine(lat, lon, f.lat, f.lon);
+  });
+  facilities.sort((a, b) => a.distance - b.distance);
+  const speed = TRAVEL_SPEED[unitClass] || 50;
+  const now = Date.now();
+  for (let i = 0; i < facilities.length; i++) {
+    const f = facilities[i];
+    const occ = await getFacilityOccupancy(f.id, kind);
+    if (occ.count < f.capacity) {
+      await addFacilityLoad(f.id, kind, now + 10 * 60 * 1000);
+      return f.id;
+    }
+    const nextFree = occ.nextFree || now;
+    const timeUntilFree = nextFree - now;
+    const next = facilities[i + 1];
+    const travelToNext = next ? (haversine(lat, lon, next.lat, next.lon) / speed) * 3600 * 1000 : Infinity;
+    if (timeUntilFree < travelToNext) {
+      await addFacilityLoad(f.id, kind, nextFree + 10 * 60 * 1000);
+      return f.id;
+    }
+  }
+  const first = facilities[0];
+  const occ = await getFacilityOccupancy(first.id, kind);
+  const expiry = (occ.nextFree || now) + 10 * 60 * 1000;
+  await addFacilityLoad(first.id, kind, expiry);
+  return first.id;
+}
+
+async function handleTransports(missionId, lat, lon, patients, prisoners) {
+  let patientCount = 0;
+  for (const p of patients) patientCount += Number(p.count || 0);
+  let prisonerCount = 0;
+  for (const p of prisoners) prisonerCount += Number(p.transport || 0);
+  if (patientCount > 0 && await hasTransportUnit(missionId, 'medicaltransport')) {
+    for (let i = 0; i < patientCount; i++) {
+      await allocateTransport('patient', lat, lon, 'ambulance');
+    }
+  }
+  if (prisonerCount > 0 && await hasTransportUnit(missionId, 'prisonerTransport')) {
+    for (let i = 0; i < prisonerCount; i++) {
+      await allocateTransport('prisoner', lat, lon, 'police');
+    }
+  }
+}
 
 function resolveMissionById(missionId, cb) {
   db.serialize(() => {
@@ -174,15 +298,18 @@ function resolveMissionById(missionId, cb) {
           db.run('DELETE FROM mission_units WHERE mission_id=?', [missionId], (e2) => {
             if (e2) return cb && cb(e2);
 
-            // reward from mission_templates.name == missions.type
-            db.get('SELECT type FROM missions WHERE id=?', [missionId], (e3, m) => {
+            db.get('SELECT type, lat, lon, patients, prisoners FROM missions WHERE id=?', [missionId], (e3, m) => {
               if (e3) return cb && cb(e3);
               const missionName = m?.type || '';
+              let pats = []; let pris = [];
+              try { pats = JSON.parse(m?.patients || '[]'); } catch {}
+              try { pris = JSON.parse(m?.prisoners || '[]'); } catch {}
               db.get('SELECT rewards FROM mission_templates WHERE name=?', [missionName], async (e4, trow) => {
                 if (e4) return cb && cb(e4);
                 const reward = Number(trow?.rewards || 0);
                 try {
                   if (reward > 0) await adjustBalance(+reward);
+                  await handleTransports(missionId, m.lat, m.lon, pats, pris);
                   const bal = await getBalance();
                   clearMissionClock(missionId);
                   cb && cb(null, { freed: ids.length, reward, balance: bal });
@@ -609,19 +736,21 @@ app.patch('/api/stations/:id/bays', async (req, res) => {
 
 app.post('/api/stations', async (req, res) => {
   try {
-    const { name, type, lat, lon } = req.body || {};
+    const { name, type, lat, lon, beds = 0, holding_cells = 0 } = req.body || {};
     const BUILD_COST = 50000;
+    const holdingCost = (type === 'police' || type === 'jail') ? priceHolding(holding_cells, false) : 0;
+    const totalCost = BUILD_COST + holdingCost;
 
-    const ok = await requireFunds(BUILD_COST);
-    if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: BUILD_COST });
+    const ok = await requireFunds(totalCost);
+    if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: totalCost });
 
-    db.run('INSERT INTO stations (name, type, lat, lon, bay_count, equipment_slots, holding_cells) VALUES (?, ?, ?, ?, 0, 0, 0)',
-      [name, type, lat, lon],
+    db.run('INSERT INTO stations (name, type, lat, lon, bay_count, equipment_slots, holding_cells, bed_capacity) VALUES (?, ?, ?, ?, 0, 0, ?, ?)',
+      [name, type, lat, lon, holding_cells, beds],
       async function (err) {
         if (err) return res.status(500).send('Failed to insert station');
-        await adjustBalance(-BUILD_COST);
+        await adjustBalance(-totalCost);
         const balance = await getBalance();
-        res.json({ id: this.lastID, name, type, lat, lon, bay_count: 0, equipment_slots: 0, holding_cells: 0, equipment: [], charged: BUILD_COST, balance });
+        res.json({ id: this.lastID, name, type, lat, lon, bay_count: 0, equipment_slots: 0, holding_cells, bed_capacity: beds, equipment: [], charged: totalCost, balance });
       }
     );
   } catch (e) {
@@ -1272,6 +1401,11 @@ app.get('/api/unit-types', (req, res) => res.json({ unitTypes }));
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
+
+setInterval(() => {
+  const now = Date.now();
+  db.run('DELETE FROM facility_load WHERE expires_at <= ?', [now]);
+}, 60000);
 
 setInterval(() => {
   if (missionClocks.size === 0) return;
