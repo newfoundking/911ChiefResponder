@@ -25,6 +25,20 @@ function parseArrayField(str) {
   }
 }
 
+// Simple point in polygon check for [lat, lon] coordinate arrays
+function pointInPolygon(lat, lon, poly) {
+  const pts = Array.isArray(poly?.coordinates) ? poly.coordinates : [];
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][1], yi = pts[i][0];
+    const xj = pts[j][1], yj = pts[j][0];
+    const intersect = ((yi > lat) !== (yj > lat)) &&
+      (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 const TRAVEL_SPEED = { fire: 50, police: 75, ambulance: 60 }; // km/h
 function haversine(aLat, aLon, bLat, bLon) {
   const R = 6371;
@@ -591,16 +605,12 @@ app.post('/api/missions', (req, res) => {
   db.all('SELECT * FROM response_zones', (err, zones) => {
     if (err) return res.status(500).json({ error: err.message });
 
-    let zone_id = null;
-    let zone_department = null;
-    let zone_station_ids = [];
+    let department = null;
     zones.some(z => {
       try {
         const poly = JSON.parse(z.polygon || '{}');
         if (pointInPolygon(lat, lon, poly)) {
-          zone_id = z.id;
-          zone_department = z.department;
-          zone_station_ids = parseArrayField(z.station_ids);
+          department = z.department;
           return true;
         }
       } catch {}
@@ -609,34 +619,30 @@ app.post('/api/missions', (req, res) => {
 
     db.run(`
       INSERT INTO missions
-      (type, lat, lon, required_units, required_training, equipment_required, patients, prisoners, modifiers, status, timing, zone_id, zone_department, zone_station_ids)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (type, lat, lon, department, required_units, required_training, equipment_required, patients, prisoners, modifiers, status, timing)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       type, lat, lon,
+      department,
       JSON.stringify(required_units),
       JSON.stringify(required_training),
       JSON.stringify(equipment_required),
       JSON.stringify(patients),
       JSON.stringify(prisoners),
       JSON.stringify(modifiers),
-      "active",
-      timing,
-      zone_id,
-      zone_department,
-      JSON.stringify(zone_station_ids)
+      'active',
+      timing
     ],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({
         id: this.lastID,
         type, lat, lon,
+        department,
         required_units, required_training, equipment_required, patients, prisoners, modifiers,
-        status: "active",
-        timing,
-        zone_id,
-        zone_department,
-        zone_station_ids
+        status: 'active',
+        timing
       });
     });
   });
@@ -958,68 +964,6 @@ app.delete('/api/stations', (req, res) => {
   db.run('DELETE FROM stations', err => {
     if (err) return res.status(500).send('Error deleting stations.');
     res.send('All stations deleted.');
-  });
-});
-
-/* =========================
-   Response Zones
-   ========================= */
-app.get('/api/response-zones', (req, res) => {
-  db.all('SELECT * FROM response_zones', (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const parsed = rows.map(z => ({
-      ...z,
-      polygon: (()=>{ try { return JSON.parse(z.polygon || '{}'); } catch { return {}; } })(),
-      station_ids: parseArrayField(z.station_ids)
-    }));
-    res.json(parsed);
-  });
-});
-
-app.get('/api/response-zones/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  db.get('SELECT * FROM response_zones WHERE id=?', [id], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!row) return res.status(404).json({ error: 'Not found' });
-    const zone = {
-      ...row,
-      polygon: (()=>{ try { return JSON.parse(row.polygon || '{}'); } catch { return {}; } })(),
-      station_ids: parseArrayField(row.station_ids)
-    };
-    res.json(zone);
-  });
-});
-
-app.post('/api/response-zones', (req, res) => {
-  const { name, department, polygon, station_ids = [] } = req.body;
-  db.run(
-    `INSERT INTO response_zones (name, department, polygon, station_ids) VALUES (?,?,?,?)`,
-    [name, department, JSON.stringify(polygon), JSON.stringify(station_ids)],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ id: this.lastID, name, department, polygon, station_ids });
-    }
-  );
-});
-
-app.put('/api/response-zones/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const { name, department, polygon, station_ids = [] } = req.body;
-  db.run(
-    `UPDATE response_zones SET name=?, department=?, polygon=?, station_ids=? WHERE id=?`,
-    [name, department, JSON.stringify(polygon), JSON.stringify(station_ids), id],
-    function (err) {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ id, name, department, polygon, station_ids });
-    }
-  );
-});
-
-app.delete('/api/response-zones/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  db.run(`DELETE FROM response_zones WHERE id=?`, [id], function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true });
   });
 });
 
@@ -1348,7 +1292,6 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
     name: b.name || '',
     trigger_type: b.trigger_type || '',
     trigger_filter: b.trigger_filter || '',
-    department: b.department || '',
     timing: Number(b.timing) || 0,
     required_units: JSON.stringify(b.required_units || []),
     patients: JSON.stringify(b.patients || []),
@@ -1360,10 +1303,10 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
   };
   db.run(
     `INSERT INTO mission_templates
-     (name, trigger_type, trigger_filter, department, timing,
+     (name, trigger_type, trigger_filter, timing,
       required_units, patients, prisoners, required_training, modifiers, equipment_required, rewards)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [fields.name, fields.trigger_type, fields.trigger_filter, fields.department, fields.timing,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
      fields.modifiers, fields.equipment_required, fields.rewards],
     function(err){
@@ -1380,7 +1323,6 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
     name: b.name || '',
     trigger_type: b.trigger_type || '',
     trigger_filter: b.trigger_filter || '',
-    department: b.department || '',
     timing: Number(b.timing) || 0,
     required_units: JSON.stringify(b.required_units || []),
     patients: JSON.stringify(b.patients || []),
@@ -1392,11 +1334,11 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
   };
   db.run(
     `UPDATE mission_templates SET
-      name=?, trigger_type=?, trigger_filter=?, department=?, timing=?,
+      name=?, trigger_type=?, trigger_filter=?, timing=?,
       required_units=?, patients=?, prisoners=?, required_training=?,
       modifiers=?, equipment_required=?, rewards=?
      WHERE id=?`,
-    [fields.name, fields.trigger_type, fields.trigger_filter, fields.department, fields.timing,
+    [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
      fields.modifiers, fields.equipment_required, fields.rewards, id],
     function(err){
@@ -1653,13 +1595,13 @@ app.get('/api/response-zones', (req, res) => {
 });
 
 app.post('/api/response-zones', (req, res) => {
-  const { name, department, station_id, polygon } = req.body;
+  const { name, department, polygon } = req.body;
   if (!name || !department || !polygon) {
     return res.status(400).json({ error: 'Missing fields' });
   }
   db.run(
     `INSERT INTO response_zones (name, department, station_id, polygon) VALUES (?,?,?,?)`,
-    [name, department, station_id || null, JSON.stringify(polygon)],
+    [name, department, null, JSON.stringify(polygon)],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID });
@@ -1669,11 +1611,11 @@ app.post('/api/response-zones', (req, res) => {
 
 app.put('/api/response-zones/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { name, department, station_id, polygon } = req.body;
+  const { name, department, polygon } = req.body;
   if (!id) return res.status(400).json({ error: 'Invalid id' });
   db.run(
-    `UPDATE response_zones SET name=?, department=?, station_id=?, polygon=? WHERE id=?`,
-    [name, department, station_id || null, JSON.stringify(polygon), id],
+    `UPDATE response_zones SET name=?, department=?, polygon=? WHERE id=?`,
+    [name, department, JSON.stringify(polygon), id],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id });

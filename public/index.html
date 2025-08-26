@@ -8,6 +8,7 @@
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
         <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 	<style>
 		body { margin: 0; display: flex; height: 100vh; font-family: sans-serif; }
 		#sidebar { max-width: 30%; width: 100%; overflow-y: auto; padding: 10px; box-sizing: border-box; }
@@ -29,8 +30,9 @@
 <div id="sidebar">
 	<h2>Mission Chief Clone</h2>
 	<div style="display: flex; gap: 1em; margin-bottom: 1em;">
-		<button class="tab-button active" data-tab="missions">Missions</button>
-		<button class="tab-button" data-tab="stations">Stations</button>
+                <button class="tab-button active" data-tab="missions">Missions</button>
+                <button class="tab-button" data-tab="stations">Stations</button>
+                <button class="tab-button" data-tab="zones">Zones</button>
 	</div>
 	<div id="walletDisplay">Balance: $0</div>
 	<script>
@@ -48,10 +50,15 @@
 		<div id="missionList"></div>
 	</div>
 
-	<div id="tab-stations" class="tab-content">
-	  <button id="buildStation" style="margin-bottom: 1em;">Build New Station</button>
-	  <div id="stationList"></div>
-	</div>
+        <div id="tab-stations" class="tab-content">
+          <button id="buildStation" style="margin-bottom: 1em;">Build New Station</button>
+          <div id="stationList"></div>
+        </div>
+        <div id="tab-zones" class="tab-content">
+          <button id="addZoneBtn">Add Zone</button>
+          <button id="saveZoneEditBtn" style="display:none;">Save Zone</button>
+          <div id="zoneList"></div>
+        </div>
 </div>
 
 <div id="map"></div>
@@ -206,6 +213,16 @@ let openMissionId = null;
 
 const map = L.map("map").setView([47.5646, -52.7002], 13);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
+
+const zoneLayerGroup = L.featureGroup().addTo(map);
+const zoneLayers = new Map();
+let responseZones = [];
+const deptColors = {};
+const colorPalette = ['red','blue','green','purple','orange','brown','pink','gray'];
+function colorForDept(d){
+  if(!deptColors[d]) deptColors[d] = colorPalette[Object.keys(deptColors).length % colorPalette.length];
+  return deptColors[d];
+}
 
 document.getElementById("deleteAllStations").addEventListener("click", async () => {
   if (!confirm("Are you sure you want to delete ALL stations? This will also orphan units!")) return;
@@ -543,6 +560,102 @@ async function fetchStations() {
     list.appendChild(el);
   });
 }
+
+async function fetchZones() {
+  const res = await fetch('/api/response-zones');
+  responseZones = await res.json();
+  zoneLayerGroup.clearLayers();
+  zoneLayers.clear();
+  const list = document.getElementById('zoneList');
+  if (list) list.innerHTML = '';
+  responseZones.forEach(z => {
+    const coords = (z.polygon?.coordinates || []).map(c => [c[0], c[1]]);
+    const layer = L.polygon(coords, { color: colorForDept(z.department) }).addTo(zoneLayerGroup);
+    layer.bindPopup(`${z.name} (${z.department})`);
+    layer.on('click', () => startEditZone(z.id));
+    zoneLayers.set(z.id, layer);
+    if (list) {
+      const el = document.createElement('div');
+      el.innerHTML = `${z.name} (${z.department}) <button class="edit-zone" data-id="${z.id}">Edit</button> <button class="delete-zone" data-id="${z.id}">Delete</button>`;
+      list.appendChild(el);
+    }
+  });
+  if (list) {
+    list.querySelectorAll('.delete-zone').forEach(btn => {
+      btn.onclick = async () => {
+        await fetch(`/api/response-zones/${btn.dataset.id}`, { method: 'DELETE' });
+        fetchZones();
+      };
+    });
+    list.querySelectorAll('.edit-zone').forEach(btn => {
+      btn.onclick = () => startEditZone(btn.dataset.id);
+    });
+  }
+}
+
+let editingZoneId = null;
+function startEditZone(id) {
+  const layer = zoneLayers.get(Number(id));
+  if (!layer) return;
+  editingZoneId = Number(id);
+  layer.editing.enable();
+  document.getElementById('saveZoneEditBtn').style.display = 'inline';
+}
+
+document.getElementById('saveZoneEditBtn').addEventListener('click', async () => {
+  const id = editingZoneId;
+  const layer = zoneLayers.get(id);
+  if (!layer) return;
+  layer.editing.disable();
+  const latlngs = layer.getLatLngs()[0].map(p => [p.lat, p.lng]);
+  const z = responseZones.find(r => r.id == id);
+  const name = prompt('Zone name:', z?.name || '') || (z?.name || '');
+  const dept = prompt('Department:', z?.department || '') || (z?.department || '');
+  await fetch(`/api/response-zones/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, department: dept, polygon: { coordinates: latlngs } })
+  });
+  editingZoneId = null;
+  document.getElementById('saveZoneEditBtn').style.display = 'none';
+  fetchZones();
+});
+
+document.getElementById('addZoneBtn').addEventListener('click', () => {
+  new L.Draw.Polygon(map).enable();
+});
+
+map.on('draw:created', async e => {
+  const latlngs = e.layer.getLatLngs()[0].map(p => [p.lat, p.lng]);
+  const stations = await fetch('/api/stations').then(r => r.json());
+  const depts = [...new Set(stations.map(s => s.department).filter(Boolean))];
+  const name = prompt('Zone name?') || 'Zone';
+  const dept = prompt(`Department (${depts.join(', ')})?`) || '';
+  const newPoly = turf.polygon([latlngs.map(([lat, lng]) => [lng, lat])]);
+  for (const z of [...responseZones]) {
+    const existing = turf.polygon([z.polygon.coordinates.map(([lat, lng]) => [lng, lat])]);
+    const inter = turf.intersect(existing, newPoly);
+    if (inter) {
+      const diff = turf.difference(existing, newPoly);
+      if (diff && diff.geometry && diff.geometry.coordinates.length) {
+        const newCoords = diff.geometry.coordinates[0].map(([lng, lat]) => [lat, lng]);
+        await fetch(`/api/response-zones/${z.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: z.name, department: z.department, polygon: { coordinates: newCoords } })
+        });
+      } else {
+        await fetch(`/api/response-zones/${z.id}`, { method: 'DELETE' });
+      }
+    }
+  }
+  await fetch('/api/response-zones', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, department: dept, polygon: { coordinates: latlngs } })
+  });
+  fetchZones();
+});
 
 async function refreshAssignedUnitsUI(missionId) {
   const div = document.getElementById('assignedUnitsArea');
@@ -1750,11 +1863,16 @@ async function autoDispatch(mission) {
     ]);
     cacheStations(stations);
     const stMap = new Map(stations.map(s=>[s.id,s]));
-    const allUnits = allUnitsRaw.map(u=>{
-      const st = stMap.get(u.station_id);
-      const dist = st ? haversineKm(st.lat, st.lon, mission.lat, mission.lon) : Infinity;
-      return { ...u, _dist: dist };
-    });
+    const allUnits = allUnitsRaw
+      .filter(u=>{
+        const st = stMap.get(u.station_id);
+        return !mission.department || (st && st.department === mission.department);
+      })
+      .map(u=>{
+        const st = stMap.get(u.station_id);
+        const dist = st ? haversineKm(st.lat, st.lon, mission.lat, mission.lon) : Infinity;
+        return { ...u, _dist: dist };
+      });
     const selected = [];
     const selectedIds = new Set();
 
@@ -2088,6 +2206,7 @@ async function rebuildEnrouteMarkers() {
 (async () => {
   await fetchStations();
   await fetchMissions();
+  await fetchZones();
   rebuildEnrouteMarkers();
 })();
 </script>
