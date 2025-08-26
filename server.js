@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
+
 const db = require('./db');             // your sqlite3 instance
 const unitTypes = require('./unitTypes');
 let trainingsByClass = {};
@@ -53,7 +54,8 @@ db.serialize(() => {
       name TEXT,
       type TEXT,
       lat REAL,
-      lon REAL
+      lon REAL,
+      department TEXT
     )
   `);
 
@@ -97,7 +99,6 @@ db.serialize(() => {
           name TEXT,
           trigger_type TEXT,
           trigger_filter TEXT,
-          department TEXT,
           timing INTEGER,
           required_units TEXT,
           patients TEXT,
@@ -112,17 +113,12 @@ db.serialize(() => {
   // Run cards
   db.run(`
     CREATE TABLE IF NOT EXISTS run_cards (
-      mission_name TEXT NOT NULL,
-      department TEXT,
+      mission_name TEXT PRIMARY KEY,
       units TEXT,
       training TEXT,
-      equipment TEXT,
-      PRIMARY KEY (mission_name, department)
+      equipment TEXT
     )
   `);
-  db.run(`ALTER TABLE mission_templates ADD COLUMN department TEXT`, () => { /* ignore if exists */ });
-  db.run(`ALTER TABLE run_cards ADD COLUMN department TEXT`, () => { /* ignore if exists */ });
-  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_run_cards_name_dept ON run_cards(mission_name, department)`);
 
   // Units
   db.run(`
@@ -172,6 +168,17 @@ db.serialize(() => {
       FOREIGN KEY (unit_id) REFERENCES units(id)
     )
   `);
+
+  // Response zones
+  db.run(`
+    CREATE TABLE IF NOT EXISTS response_zones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      department TEXT,
+      station_id INTEGER,
+      polygon TEXT
+    )
+  `);
 });
 db.run(`
   CREATE TABLE IF NOT EXISTS wallet (
@@ -185,6 +192,9 @@ db.run(`
   ALTER TABLE stations ADD COLUMN equipment_slots INTEGER DEFAULT 0
 `, () => { /* ignore if exists */ });
 db.run(`
+  ALTER TABLE stations ADD COLUMN department TEXT
+`, () => { /* ignore if exists */ });
+db.run(`
   ALTER TABLE stations ADD COLUMN bay_count INTEGER DEFAULT 0
 `, () => { /* ignore if exists */ });
 db.run(`
@@ -195,6 +205,9 @@ db.run(`
 `, () => { /* ignore if exists */ });
 db.run(`
   ALTER TABLE stations ADD COLUMN bed_capacity INTEGER DEFAULT 0
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE stations ADD COLUMN department TEXT
 `, () => { /* ignore if exists */ });
 db.run(`
   ALTER TABLE stations ADD COLUMN icon TEXT
@@ -555,7 +568,6 @@ app.get('/api/missions', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     const parsed = rows.map(m => ({
       ...m,
-      department: m.department || null,
       required_units: JSON.parse(m.required_units || "[]"),
       required_training: JSON.parse(m.required_training || "[]"),
       equipment_required: JSON.parse(m.equipment_required || "[]"),
@@ -570,36 +582,70 @@ app.get('/api/missions', (req, res) => {
 
 app.post('/api/missions', (req, res) => {
   const {
-    type, lat, lon, department,
+    type, lat, lon,
     required_units = [], required_training = [],
     equipment_required = [], patients = [], prisoners = [], modifiers = [],
     timing = 10
   } = req.body;
 
-  db.run(`
-    INSERT INTO missions
-    (type, lat, lon, department, required_units, required_training, equipment_required, patients, prisoners, modifiers, status, timing)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `,
-  [
-    type, lat, lon, department,
-    JSON.stringify(required_units),
-    JSON.stringify(required_training),
-    JSON.stringify(equipment_required),
-    JSON.stringify(patients),
-    JSON.stringify(prisoners),
-    JSON.stringify(modifiers),
-    "active",
-    timing
-  ],
-  function (err) {
+app.post('/api/missions', (req, res) => {
+  const {
+    type, lat, lon,
+    required_units = [], required_training = [],
+    equipment_required = [], patients = [], prisoners = [], modifiers = [],
+    timing = 10
+  } = req.body;
+
+  db.all('SELECT * FROM response_zones', (err, zones) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({
-      id: this.lastID,
-      type, lat, lon, department,
-      required_units, required_training, equipment_required, patients, prisoners, modifiers,
-      status: "active",
-      timing
+
+    let zone_id = null;
+    let zone_department = null;
+    let zone_station_ids = [];
+    zones.some(z => {
+      try {
+        const poly = JSON.parse(z.polygon || '{}');
+        if (pointInPolygon(lat, lon, poly)) {
+          zone_id = z.id;
+          zone_department = z.department;
+          zone_station_ids = parseArrayField(z.station_ids);
+          return true;
+        }
+      } catch {}
+      return false;
+    });
+
+    db.run(`
+      INSERT INTO missions
+      (type, lat, lon, required_units, required_training, equipment_required, patients, prisoners, modifiers, status, timing, zone_id, zone_department, zone_station_ids)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      type, lat, lon,
+      JSON.stringify(required_units),
+      JSON.stringify(required_training),
+      JSON.stringify(equipment_required),
+      JSON.stringify(patients),
+      JSON.stringify(prisoners),
+      JSON.stringify(modifiers),
+      "active",
+      timing,
+      zone_id,
+      zone_department,
+      JSON.stringify(zone_station_ids)
+    ],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({
+        id: this.lastID,
+        type, lat, lon,
+        required_units, required_training, equipment_required, patients, prisoners, modifiers,
+        status: "active",
+        timing,
+        zone_id,
+        zone_department,
+        zone_station_ids
+      });
     });
   });
 });
@@ -662,7 +708,6 @@ app.get('/api/missions/:id', (req, res) => {
     if (!row) return res.status(404).json({ error: 'Not found' });
     const mission = {
       ...row,
-      department: row.department || null,
       required_units: parseArrayField(row.required_units),
       required_training: parseArrayField(row.required_training),
       equipment_required: parseArrayField(row.equipment_required),
@@ -818,7 +863,7 @@ app.patch('/api/stations/:id/bays', async (req, res) => {
 
 app.post('/api/stations', async (req, res) => {
   try {
-    const { name, type, lat, lon, beds = 0, holding_cells = 0 } = req.body || {};
+    const { name, type, lat, lon, department = null, beds = 0, holding_cells = 0 } = req.body || {};
     const BUILD_COST = 50000;
     const holdingCost = (type === 'police' || type === 'jail') ? priceHolding(holding_cells, false) : 0;
     const totalCost = BUILD_COST + holdingCost;
@@ -826,13 +871,14 @@ app.post('/api/stations', async (req, res) => {
     const ok = await requireFunds(totalCost);
     if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: totalCost });
 
-    db.run('INSERT INTO stations (name, type, lat, lon, bay_count, equipment_slots, holding_cells, bed_capacity) VALUES (?, ?, ?, ?, 0, 0, ?, ?)',
-      [name, type, lat, lon, holding_cells, beds],
+    db.run('INSERT INTO stations (name, type, lat, lon, department, bay_count, equipment_slots, holding_cells, bed_capacity) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)',
+      [name, type, lat, lon, department, holding_cells, beds],
       async function (err) {
         if (err) return res.status(500).send('Failed to insert station');
         await adjustBalance(-totalCost);
         const balance = await getBalance();
-        res.json({ id: this.lastID, name, type, lat, lon, bay_count: 0, equipment_slots: 0, holding_cells, bed_capacity: beds, equipment: [], charged: totalCost, balance });
+        res.json({ id: this.lastID, name, type, lat, lon, department, bay_count: 0, equipment_slots: 0, holding_cells, bed_capacity: beds, equipment: [], charged: totalCost, balance });
+
       }
     );
   } catch (e) {
@@ -909,6 +955,68 @@ app.delete('/api/stations', (req, res) => {
   db.run('DELETE FROM stations', err => {
     if (err) return res.status(500).send('Error deleting stations.');
     res.send('All stations deleted.');
+  });
+});
+
+/* =========================
+   Response Zones
+   ========================= */
+app.get('/api/response-zones', (req, res) => {
+  db.all('SELECT * FROM response_zones', (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const parsed = rows.map(z => ({
+      ...z,
+      polygon: (()=>{ try { return JSON.parse(z.polygon || '{}'); } catch { return {}; } })(),
+      station_ids: parseArrayField(z.station_ids)
+    }));
+    res.json(parsed);
+  });
+});
+
+app.get('/api/response-zones/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  db.get('SELECT * FROM response_zones WHERE id=?', [id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const zone = {
+      ...row,
+      polygon: (()=>{ try { return JSON.parse(row.polygon || '{}'); } catch { return {}; } })(),
+      station_ids: parseArrayField(row.station_ids)
+    };
+    res.json(zone);
+  });
+});
+
+app.post('/api/response-zones', (req, res) => {
+  const { name, department, polygon, station_ids = [] } = req.body;
+  db.run(
+    `INSERT INTO response_zones (name, department, polygon, station_ids) VALUES (?,?,?,?)`,
+    [name, department, JSON.stringify(polygon), JSON.stringify(station_ids)],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ id: this.lastID, name, department, polygon, station_ids });
+    }
+  );
+});
+
+app.put('/api/response-zones/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { name, department, polygon, station_ids = [] } = req.body;
+  db.run(
+    `UPDATE response_zones SET name=?, department=?, polygon=?, station_ids=? WHERE id=?`,
+    [name, department, JSON.stringify(polygon), JSON.stringify(station_ids), id],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ id, name, department, polygon, station_ids });
+    }
+  );
+});
+
+app.delete('/api/response-zones/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  db.run(`DELETE FROM response_zones WHERE id=?`, [id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true });
   });
 });
 
@@ -1219,7 +1327,6 @@ app.get('/api/mission-templates', (req, res) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     const parsed = rows.map(row => ({
       ...row,
-      department: row.department || null,
       required_units: parseArrayField(row.required_units),
       patients: parseArrayField(row.patients),
       prisoners: parseArrayField(row.prisoners),
@@ -1298,7 +1405,7 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
 
 
 app.get('/api/mission-templates/id/:id', (req, res) => {
-  db.get(`SELECT id, name, trigger_type, trigger_filter, department, timing,
+  db.get(`SELECT id, name, trigger_type, trigger_filter, timing,
                  required_units, patients, prisoners, required_training,
                  modifiers, equipment_required, rewards
           FROM mission_templates WHERE id=?`, [req.params.id], (err, r) => {
@@ -1317,38 +1424,29 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
 
 // Run card endpoints
 app.get('/api/run-cards/:name', (req, res) => {
-  const dept = req.query.department || null;
-  db.get(
-    `SELECT units, training, equipment FROM run_cards
-     WHERE mission_name=? AND (department=? OR department IS NULL)
-     ORDER BY department IS NULL
-     LIMIT 1`,
-    [req.params.name, dept],
-    (err, row) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (!row) return res.status(404).json({ error: 'Not found' });
-      const units = parseArrayField(row.units);
-      const training = parseArrayField(row.training);
-      const equipment = parseArrayField(row.equipment);
-      res.json({ units, training, equipment });
-    }
-  );
+  db.get('SELECT units, training, equipment FROM run_cards WHERE mission_name=?', [req.params.name], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const units = parseArrayField(row.units);
+    const training = parseArrayField(row.training);
+    const equipment = parseArrayField(row.equipment);
+    res.json({ units, training, equipment });
+  });
 });
 
 app.put('/api/run-cards/:name', express.json(), (req, res) => {
   const b = req.body || {};
-  const dept = req.query.department || b.department || null;
   const units = JSON.stringify(b.units || []);
   const training = JSON.stringify(b.training || []);
   const equipment = JSON.stringify(b.equipment || []);
   db.run(
-    `INSERT INTO run_cards (mission_name, department, units, training, equipment)
-     VALUES (?,?,?,?,?)
-     ON CONFLICT(mission_name, department) DO UPDATE SET
+    `INSERT INTO run_cards (mission_name, units, training, equipment)
+     VALUES (?,?,?,?)
+     ON CONFLICT(mission_name) DO UPDATE SET
        units=excluded.units,
        training=excluded.training,
        equipment=excluded.equipment`,
-    [req.params.name, dept, units, training, equipment],
+    [req.params.name, units, training, equipment],
     err => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ ok: true });
@@ -1538,6 +1636,46 @@ app.delete('/api/unit-travel/:unit_id', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ ok: true });
   });
+});
+
+app.get('/api/response-zones', (req, res) => {
+  db.all('SELECT * FROM response_zones', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const zones = rows.map(r => ({
+      ...r,
+      polygon: (() => { try { return JSON.parse(r.polygon || '{}'); } catch { return {}; } })()
+    }));
+    res.json(zones);
+  });
+});
+
+app.post('/api/response-zones', (req, res) => {
+  const { name, department, station_id, polygon } = req.body;
+  if (!name || !department || !polygon) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
+  db.run(
+    `INSERT INTO response_zones (name, department, station_id, polygon) VALUES (?,?,?,?)`,
+    [name, department, station_id || null, JSON.stringify(polygon)],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ id: this.lastID });
+    }
+  );
+});
+
+app.put('/api/response-zones/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { name, department, station_id, polygon } = req.body;
+  if (!id) return res.status(400).json({ error: 'Invalid id' });
+  db.run(
+    `UPDATE response_zones SET name=?, department=?, station_id=?, polygon=? WHERE id=?`,
+    [name, department, station_id || null, JSON.stringify(polygon), id],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ id });
+    }
+  );
 });
 
 function getStationById(id) {
