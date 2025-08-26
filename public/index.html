@@ -165,8 +165,11 @@ async function refreshStationPanelNoCache(stationId) {
   if (st) showStationDetails(st);
 }
 
-const missionIcon = L.icon({ iconUrl: "/warning.png", iconSize: [30,30], iconAnchor: [15,30] });
-const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/star.png", hospital: "/star.png", jail: "/police.png" };
+const missionIcons = {
+  none: L.icon({ iconUrl: "/warning1.png", iconSize: [30,30], iconAnchor: [15,30] }),
+  partial: L.icon({ iconUrl: "/warning2.png", iconSize: [30,30], iconAnchor: [15,30] }),
+  complete: L.icon({ iconUrl: "/warning3.png", iconSize: [30,30], iconAnchor: [15,30] })
+};const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/star.png", hospital: "/star.png", jail: "/police.png" };
 
 let poiCache = [];
 let missionMarkers = [];
@@ -210,12 +213,21 @@ document.querySelectorAll(".tab-button").forEach(button => {
   });
 });
 
-// Unit icons
-const unitMarkerIcons = {
-  fire: L.icon({ iconUrl: stationIcons.fire, iconSize: [24,24], iconAnchor: [12,24] }),
-  police: L.icon({ iconUrl: stationIcons.police, iconSize: [24,24], iconAnchor: [12,24] }),
-  ambulance: L.icon({ iconUrl: stationIcons.ambulance, iconSize: [24,24], iconAnchor: [12,24] }),
-};
+function unitIconFor(unit) {
+  const url = unit.icon || stationIcons[unit.class] || stationIcons.fire;
+  return L.icon({ iconUrl: url, iconSize: [24,24], iconAnchor: [12,24] });
+}
+
+function chooseMissionIcon(mission, assigned) {
+  if (!Array.isArray(assigned) || assigned.length === 0) return missionIcons.none;
+  const req = Array.isArray(mission.required_units) ? mission.required_units : [];
+  const counts = {};
+  for (const u of assigned) {
+    counts[u.type] = (counts[u.type] || 0) + 1;
+  }
+  const allMet = req.every(r => (counts[r.type] || 0) >= (r.quantity ?? r.count ?? 1));
+  return allMet ? missionIcons.complete : missionIcons.partial;
+}
 
 // caches
 window._stationById = new Map();
@@ -235,12 +247,14 @@ function ensureUnitMarker(unit) {
   if (!st) return null;
   let entry = unitMarkers.get(unit.id);
   if (!entry) {
-    const icon = unitMarkerIcons[unit.class] || unitMarkerIcons.fire;
+    const icon = unitIconFor(unit);
     const marker = L.marker([st.lat, st.lon], { icon, zIndexOffset: 1000 })
       .addTo(map)
       .on('click', () => showUnitDetails(unit.id));
     entry = { marker, animId: null };
     unitMarkers.set(unit.id, entry);
+  } else {
+    entry.marker.setIcon(unitIconFor(unit));
   }
   return entry.marker;
 }
@@ -426,8 +440,13 @@ async function fetchMissions() {
     missionList.innerHTML = "";
 
     const valid = missions.filter(m => Number.isFinite(m.lat) && Number.isFinite(m.lon));
-    valid.forEach(m => {
-      const marker = L.marker([m.lat, m.lon], { icon: missionIcon })
+    const assignedList = await Promise.all(
+      valid.map(m => fetch(`/api/missions/${m.id}/units`).then(r => r.json()).catch(() => []))
+    );
+    for (let i = 0; i < valid.length; i++) {
+      const m = valid[i];
+      const assigned = assignedList[i];
+      const marker = L.marker([m.lat, m.lon], { icon: chooseMissionIcon(m, assigned) })
         .addTo(map)
         .on("click", () => showMissionDetails(m));
 
@@ -440,7 +459,7 @@ async function fetchMissions() {
         <button onclick='showMissionDetails(${JSON.stringify(m)})' style="margin-left:8px;">Details</button><br>
         Lat: ${m.lat.toFixed(4)}<br>Lon: ${m.lon.toFixed(4)}<br>`;
       missionList.appendChild(el);
-    });
+    }
   } catch (err) {
     console.error("Failed to fetch missions:", err);
   }
@@ -478,7 +497,7 @@ async function fetchStations() {
   stations.forEach((st, idx) => {
     const used = unitCounts[idx];
     const free = (st.bay_count || 0) - used;
-    const iconUrl = stationIcons[st.type] || stationIcons.fire;
+    const iconUrl = st.icon || stationIcons[st.type] || stationIcons.fire;
     const icon = L.icon({ iconUrl, iconSize: [30,30], iconAnchor: [15,30] });
     const marker = L.marker([st.lat, st.lon], { icon }).addTo(map).on("click", () => showStationDetails(st));
     stationMarkers.push(marker);
@@ -708,9 +727,22 @@ async function showStationDetails(station) {
         <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
       </div>
       <h2>${station.name}</h2>
+	  <button id="change-station-icon">Change Icon</button>
       <p>Type: ${station.type}</p>
       <div>${isHospital ? 'Beds' : 'Holding Cells'}: ${occ}/${cap} (Free: ${cap - occ})</div>
     `;
+	  const iconBtn = detail.querySelector('#change-station-icon');
+      iconBtn?.addEventListener('click', async () => {
+      const url = prompt('Enter icon URL:');
+      if (!url) return;
+      const res = await fetch(`/api/stations/${station.id}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ icon: url }) });
+      const data = await res.json();
+      if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+      station.icon = url;
+      _stationById.set(station.id, station);
+      fetchStations();
+      showStationDetails(station);
+    });
     return;
   }
   const res = await fetchNoCache(`/api/units?station_id=${station.id}`);
@@ -733,6 +765,7 @@ async function showStationDetails(station) {
       <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
     </div>
     <h2>${station.name}</h2>
+	<button id="change-station-icon">Change Icon</button>
     <p>Type: ${station.type}</p>
     <h3>Create Unit</h3>
     <select id="unit-type">${unitOptions}</select>
@@ -781,6 +814,18 @@ async function showStationDetails(station) {
           ${u.status !== 'available' ? `<button onclick="cancelUnit(${u.id}, ${station.id})">Cancel</button>` : ''}
         </li>`).join('')}
     </ul>`;
+	  const iconBtn = detail.querySelector('#change-station-icon');
+	  iconBtn?.addEventListener('click', async () => {
+		const url = prompt('Enter icon URL:');
+		if (!url) return;
+		const res = await fetch(`/api/stations/${station.id}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ icon: url }) });
+		const data = await res.json();
+		if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+		station.icon = url;
+		_stationById.set(station.id, station);
+		fetchStations();
+		showStationDetails(station);
+	  });
         async function refreshBayInfo(stationId) {
           const [s, us] = await Promise.all([
             fetch(`/api/stations/${stationId}`, { cache: 'no-store' }).then(r=>r.json()),
@@ -1187,6 +1232,7 @@ async function showUnitDetails(unitId) {
     <p><strong>Name:</strong> ${unit?.name || 'Unknown'}</p>
     <p><strong>Station:</strong> ${station?.name || 'Unknown'}</p>
     <p><strong>Vehicle Class:</strong> ${unit?.class || 'Unknown'} (${unit?.type || ''})</p>
+    <button id="change-unit-icon">Change Icon</button>
     <h4>Equipment Aboard</h4>
     ${equipmentHtml}
     <h4>Assign Equipment from Station</h4>
@@ -1225,6 +1271,18 @@ async function showUnitDetails(unitId) {
       modal.style.display = 'none';
       refreshStationPanelNoCache(unit.station_id);
     });
+  });
+  content.querySelector('#change-unit-icon')?.addEventListener('click', async () => {
+    const url = prompt('Enter icon URL:');
+    if (!url) return;
+    const res = await fetch(`/api/units/${unitId}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ icon: url }) });
+    const data = await res.json();
+    if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+    _unitById.set(unitId, { ...unit, icon: url });
+    const entry = unitMarkers.get(unitId);
+    if (entry) entry.marker.setIcon(unitIconFor({ ...unit, icon: url }));
+    modal.style.display = 'none';
+    refreshStationPanelNoCache(unit.station_id);
   });
   const assignBtn = content.querySelector('#assign-equip-btn');
   assignBtn?.addEventListener('click', async () => {

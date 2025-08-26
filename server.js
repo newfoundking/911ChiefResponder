@@ -189,6 +189,12 @@ db.run(`
   ALTER TABLE stations ADD COLUMN bed_capacity INTEGER DEFAULT 0
 `, () => { /* ignore if exists */ });
 db.run(`
+  ALTER TABLE stations ADD COLUMN icon TEXT
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE units ADD COLUMN icon TEXT
+`, () => { /* ignore if exists */ });
+db.run(`
   CREATE TABLE IF NOT EXISTS facility_load (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     station_id INTEGER NOT NULL,
@@ -828,6 +834,17 @@ app.patch('/api/stations/:id/equipment-slots', (req, res) => {
     });
   });
 });
+// PATCH /api/stations/:id/icon  { icon: <string> }
+app.patch('/api/stations/:id/icon', (req, res) => {
+  const id = Number(req.params.id);
+  const icon = String(req.body?.icon || '').trim();
+  if (!id) return res.status(400).json({ error: 'Invalid station id' });
+  if (icon.length > 2048) return res.status(400).json({ error: 'Icon URL too long' });
+  db.run(`UPDATE stations SET icon=? WHERE id=?`, [icon, id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true, id, icon });
+  });
+});
 
 // POST /api/stations/:id/equipment  { name: <string> }
 app.post('/api/stations/:id/equipment', (req, res) => {
@@ -988,6 +1005,17 @@ app.patch('/api/units/:id/status', (req, res) => {
   db.run('UPDATE units SET status = ? WHERE id = ?', [status, id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ ok: true });
+  });
+});
+// PATCH /api/units/:id/icon  { icon: <string> }
+app.patch('/api/units/:id/icon', (req, res) => {
+  const id = Number(req.params.id);
+  const icon = String(req.body?.icon || '').trim();
+  if (!id) return res.status(400).json({ error: 'Invalid unit id' });
+  if (icon.length > 2048) return res.status(400).json({ error: 'Icon URL too long' });
+  db.run(`UPDATE units SET icon=? WHERE id=?`, [icon, id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true, id, icon });
   });
 });
 
