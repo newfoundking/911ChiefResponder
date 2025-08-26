@@ -1159,7 +1159,7 @@ window.editUnit = editUnit;
 
 // Build station
 document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; alert("Click the map to place your new station"); });
-map.on("click", (e) => {
+map.on("click", async (e) => {
   if (!buildStationMode) return;
   const name = prompt("Station Name?");
   const type = prompt("Type (fire, police, ambulance, hospital, jail)?", "fire")?.toLowerCase();
