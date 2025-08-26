@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
+
 const db = require('./db');             // your sqlite3 instance
 const unitTypes = require('./unitTypes');
 let trainingsByClass = {};
@@ -34,21 +35,6 @@ function haversine(aLat, aLon, bLat, bLon) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// Basic point in polygon check for GeoJSON Polygons
-function pointInPolygon(lat, lon, polygon) {
-  const coords = polygon?.coordinates?.[0];
-  if (!coords) return false;
-  let inside = false;
-  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
-    const xi = coords[i][0], yi = coords[i][1];
-    const xj = coords[j][0], yj = coords[j][1];
-    const intersect = ((yi > lat) !== (yj > lat)) &&
-      (lon < ((xj - xi) * (lat - yi) / (yj - yi) + xi));
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
 const app = express();
 const PORT = 911;
 
@@ -68,18 +54,8 @@ db.serialize(() => {
       name TEXT,
       type TEXT,
       lat REAL,
-      lon REAL
-    )
-  `);
-
-  // Response zones
-  db.run(`
-    CREATE TABLE IF NOT EXISTS response_zones (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT,
-      department TEXT,
-      polygon TEXT,
-      station_ids TEXT DEFAULT '[]'
+      lon REAL,
+      department TEXT
     )
   `);
 
@@ -96,19 +72,13 @@ db.serialize(() => {
       patients TEXT DEFAULT '[]',
       prisoners TEXT DEFAULT '[]',
       modifiers TEXT DEFAULT '[]',
-      status TEXT,
-      zone_id INTEGER,
-      zone_department TEXT,
-      zone_station_ids TEXT DEFAULT '[]'
+      status TEXT
       -- timing will be added via ALTER below if missing
     )
   `);
 
   // Add timing column if not present
   db.run(`ALTER TABLE missions ADD COLUMN timing INTEGER DEFAULT 10`, () => { /* ignore if exists */ });
-  db.run(`ALTER TABLE missions ADD COLUMN zone_id INTEGER`, () => { /* ignore if exists */ });
-  db.run(`ALTER TABLE missions ADD COLUMN zone_department TEXT`, () => { /* ignore if exists */ });
-  db.run(`ALTER TABLE missions ADD COLUMN zone_station_ids TEXT DEFAULT '[]'`, () => { /* ignore if exists */ });
 
   // Mission ↔ Units link
   db.run(`
@@ -209,6 +179,9 @@ db.run(`
   ALTER TABLE stations ADD COLUMN equipment_slots INTEGER DEFAULT 0
 `, () => { /* ignore if exists */ });
 db.run(`
+  ALTER TABLE stations ADD COLUMN department TEXT
+`, () => { /* ignore if exists */ });
+db.run(`
   ALTER TABLE stations ADD COLUMN bay_count INTEGER DEFAULT 0
 `, () => { /* ignore if exists */ });
 db.run(`
@@ -219,6 +192,9 @@ db.run(`
 `, () => { /* ignore if exists */ });
 db.run(`
   ALTER TABLE stations ADD COLUMN bed_capacity INTEGER DEFAULT 0
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE stations ADD COLUMN department TEXT
 `, () => { /* ignore if exists */ });
 db.run(`
   ALTER TABLE stations ADD COLUMN icon TEXT
@@ -585,12 +561,19 @@ app.get('/api/missions', (req, res) => {
       patients: JSON.parse(m.patients || "[]"),
       prisoners: JSON.parse(m.prisoners || "[]"),
       modifiers: JSON.parse(m.modifiers || "[]"),
-      timing: typeof m.timing === 'number' ? m.timing : 10,
-      zone_station_ids: parseArrayField(m.zone_station_ids)
+      timing: typeof m.timing === 'number' ? m.timing : 10
     }));
     res.json(parsed);
   });
 });
+
+app.post('/api/missions', (req, res) => {
+  const {
+    type, lat, lon,
+    required_units = [], required_training = [],
+    equipment_required = [], patients = [], prisoners = [], modifiers = [],
+    timing = 10
+  } = req.body;
 
 app.post('/api/missions', (req, res) => {
   const {
@@ -719,7 +702,6 @@ app.get('/api/missions/:id', (req, res) => {
       prisoners: parseArrayField(row.prisoners),
       modifiers: parseArrayField(row.modifiers),
       timing: typeof row.timing === 'number' ? row.timing : 10,
-      zone_station_ids: parseArrayField(row.zone_station_ids)
     };
     res.json(mission);
   });
@@ -868,7 +850,7 @@ app.patch('/api/stations/:id/bays', async (req, res) => {
 
 app.post('/api/stations', async (req, res) => {
   try {
-    const { name, type, lat, lon, beds = 0, holding_cells = 0 } = req.body || {};
+    const { name, type, lat, lon, department = null, beds = 0, holding_cells = 0 } = req.body || {};
     const BUILD_COST = 50000;
     const holdingCost = (type === 'police' || type === 'jail') ? priceHolding(holding_cells, false) : 0;
     const totalCost = BUILD_COST + holdingCost;
@@ -876,13 +858,14 @@ app.post('/api/stations', async (req, res) => {
     const ok = await requireFunds(totalCost);
     if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: totalCost });
 
-    db.run('INSERT INTO stations (name, type, lat, lon, bay_count, equipment_slots, holding_cells, bed_capacity) VALUES (?, ?, ?, ?, 0, 0, ?, ?)',
-      [name, type, lat, lon, holding_cells, beds],
+    db.run('INSERT INTO stations (name, type, lat, lon, department, bay_count, equipment_slots, holding_cells, bed_capacity) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)',
+      [name, type, lat, lon, department, holding_cells, beds],
       async function (err) {
         if (err) return res.status(500).send('Failed to insert station');
         await adjustBalance(-totalCost);
         const balance = await getBalance();
-        res.json({ id: this.lastID, name, type, lat, lon, bay_count: 0, equipment_slots: 0, holding_cells, bed_capacity: beds, equipment: [], charged: totalCost, balance });
+        res.json({ id: this.lastID, name, type, lat, lon, department, bay_count: 0, equipment_slots: 0, holding_cells, bed_capacity: beds, equipment: [], charged: totalCost, balance });
+
       }
     );
   } catch (e) {
