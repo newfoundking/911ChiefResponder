@@ -75,12 +75,15 @@
 	width: 300px; max-width: 30%; box-shadow: 0 0 10px rgba(0,0,0,0.3);
 	display: none; z-index: 10000;">
 	<h3>Create Station</h3>
-	<label for="stationName">Name:</label>
-	<input type="text" id="stationName" style="width: 100%;" />
-	<br><br>
-	<label for="stationType">Type:</label>
-	<select id="stationType" style="width: 100%;">
-		<option value="fire">Fire</option>
+        <label for="stationName">Name:</label>
+        <input type="text" id="stationName" style="width: 100%;" />
+        <br><br>
+        <label for="stationDept">Department:</label>
+        <input type="text" id="stationDept" style="width: 100%;" />
+        <br><br>
+        <label for="stationType">Type:</label>
+        <select id="stationType" style="width: 100%;">
+                <option value="fire">Fire</option>
 		<option value="police">Police</option>
 		<option value="ambulance">Ambulance</option>
 	</select>
@@ -251,7 +254,9 @@ const unitRoutes  = new Map(); // unitId -> L.Polyline
 
 function clearUnitEta(){ /* hook for later, no-op now */ }
 
-function cacheStations(stations){ _stationById = new Map(stations.map(s => [s.id, s])); }
+function cacheStations(stations){
+  _stationById = new Map(stations.map(s => [s.id, { ...s, department: s.department ?? null }]));
+}
 function cacheUnits(units){ _unitById = new Map(units.map(u => [u.id, u])); }
 
 function ensureUnitMarker(unit) {
@@ -529,7 +534,7 @@ async function fetchStations() {
     } else {
       info = `Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
     }
-    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>${info}<br>
+    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>Department: ${st.department || ''}<br>${info}<br>
       <button onclick='showStationDetails(${JSON.stringify(st)})'>Details</button>`;
     list.appendChild(el);
   });
@@ -743,8 +748,9 @@ async function showStationDetails(station) {
         <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
       </div>
       <h2>${station.name}</h2>
-	  <button id="change-station-icon">Change Icon</button>
+          <button id="change-station-icon">Change Icon</button>
       <p>Type: ${station.type}</p>
+      <p>Department: ${station.department || ''}</p>
       <div>${isHospital ? 'Beds' : 'Holding Cells'}: ${occ}/${cap} (Free: ${cap - occ})</div>
     `;
 	  const iconBtn = detail.querySelector('#change-station-icon');
@@ -781,8 +787,9 @@ async function showStationDetails(station) {
       <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
     </div>
     <h2>${station.name}</h2>
-	<button id="change-station-icon">Change Icon</button>
+        <button id="change-station-icon">Change Icon</button>
     <p>Type: ${station.type}</p>
+    <p>Department: ${station.department || ''}</p>
     <h3>Create Unit</h3>
     <select id="unit-type">${unitOptions}</select>
     <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
@@ -1151,6 +1158,7 @@ map.on("click", async (e) => {
   if (!buildStationMode) return;
   const name = prompt("Station Name?");
   const type = prompt("Type (fire, police, ambulance, hospital, jail)?", "fire")?.toLowerCase();
+  const department = prompt("Department?") || null;
   if (!name || !["fire","police","ambulance","hospital","jail"].includes(type)) { alert("Cancelled or invalid type."); buildStationMode=false; return; }
   let holding_cells = 0, beds = 0;
   if (type === "police" || type === "jail") {
@@ -1159,7 +1167,7 @@ map.on("click", async (e) => {
   if (type === "hospital") {
     beds = Number(prompt("Beds?", "0")) || 0;
   }
-  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, lat:e.latlng.lat, lon:e.latlng.lng, holding_cells, beds }) });
+  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, department, lat:e.latlng.lat, lon:e.latlng.lng, holding_cells, beds }) });
   buildStationMode = false;
   fetchStations();
 });
