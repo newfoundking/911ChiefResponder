@@ -75,6 +75,7 @@
 	width: 300px; max-width: 30%; box-shadow: 0 0 10px rgba(0,0,0,0.3);
 	display: none; z-index: 10000;">
 	<h3>Create Station</h3>
+
         <label for="stationName">Name:</label>
         <input type="text" id="stationName" style="width: 100%;" />
         <br><br>
@@ -198,6 +199,7 @@ const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/st
 let missionMarkers = [];
 let stationMarkers = [];
 let buildStationMode = false;
+let pendingStationCoords = null;
 let openMissionId = null;
 
 const map = L.map("map").setView([47.5646, -52.7002], 13);
@@ -750,6 +752,7 @@ async function showStationDetails(station) {
       <h2>${station.name}</h2>
           <button id="change-station-icon">Change Icon</button>
       <p>Type: ${station.type}</p>
+
       <p>Department: ${station.department || ''}</p>
       <div>${isHospital ? 'Beds' : 'Holding Cells'}: ${occ}/${cap} (Free: ${cap - occ})</div>
     `;
@@ -1154,7 +1157,7 @@ window.editUnit = editUnit;
 
 // Build station
 document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; alert("Click the map to place your new station"); });
-map.on("click", async (e) => {
+map.on("click", (e) => {
   if (!buildStationMode) return;
   const name = prompt("Station Name?");
   const type = prompt("Type (fire, police, ambulance, hospital, jail)?", "fire")?.toLowerCase();
@@ -1169,6 +1172,7 @@ map.on("click", async (e) => {
   }
   await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, department, lat:e.latlng.lat, lon:e.latlng.lng, holding_cells, beds }) });
   buildStationMode = false;
+  pendingStationCoords = null;
   fetchStations();
 });
 

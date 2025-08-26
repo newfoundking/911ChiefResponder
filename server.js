@@ -178,6 +178,9 @@ db.run(`
   ALTER TABLE stations ADD COLUMN equipment_slots INTEGER DEFAULT 0
 `, () => { /* ignore if exists */ });
 db.run(`
+  ALTER TABLE stations ADD COLUMN department TEXT
+`, () => { /* ignore if exists */ });
+db.run(`
   ALTER TABLE stations ADD COLUMN bay_count INTEGER DEFAULT 0
 `, () => { /* ignore if exists */ });
 db.run(`
@@ -827,6 +830,7 @@ app.post('/api/stations', async (req, res) => {
         await adjustBalance(-totalCost);
         const balance = await getBalance();
         res.json({ id: this.lastID, name, type, lat, lon, department, bay_count: 0, equipment_slots: 0, holding_cells, bed_capacity: beds, equipment: [], charged: totalCost, balance });
+
       }
     );
   } catch (e) {
