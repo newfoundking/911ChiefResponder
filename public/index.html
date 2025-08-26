@@ -1706,17 +1706,27 @@ async function autoDispatch(mission) {
   const area = document.getElementById('manualDispatchArea');
   area.innerHTML = 'Selecting units…';
   try {
-    const [stations, allUnitsRaw] = await Promise.all([
+    let dept = mission.department;
+    if (!dept) {
+      try {
+        const zr = await fetch(`/api/zones/lookup?lat=${mission.lat}&lon=${mission.lon}`);
+        if (zr.ok) { const z = await zr.json(); dept = z.department || dept; }
+      } catch {}
+    }
+    const [stationsRaw, allUnitsRaw] = await Promise.all([
       fetch('/api/stations').then(r=>r.json()),
       fetch('/api/units?status=available').then(r=>r.json())
     ]);
+    const stations = stationsRaw.filter(s => !dept || (s.department || s.type) === dept);
     cacheStations(stations);
     const stMap = new Map(stations.map(s=>[s.id,s]));
     const allUnits = allUnitsRaw.map(u=>{
       const st = stMap.get(u.station_id);
+      const stDept = st?.department || st?.type;
+      if (dept && stDept !== dept) return null;
       const dist = st ? haversineKm(st.lat, st.lon, mission.lat, mission.lon) : Infinity;
       return { ...u, _dist: dist };
-    });
+    }).filter(Boolean);
     const selected = [];
     const selectedIds = new Set();
 
@@ -1793,11 +1803,24 @@ async function runCardDispatch(mission) {
     tempArea = true;
   }
   try {
-    const res = await fetch(`/api/run-cards/${encodeURIComponent(mission.type)}`);
+    let dept = mission.department;
+    if (!dept) {
+      try {
+        const zr = await fetch(`/api/zones/lookup?lat=${mission.lat}&lon=${mission.lon}`);
+        if (zr.ok) { const z = await zr.json(); dept = z.department || dept; }
+      } catch {}
+    }
+    let url = `/api/run-cards/${encodeURIComponent(mission.type)}`;
+    if (dept) url += `?department=${encodeURIComponent(dept)}`;
+    let res = await fetch(url);
+    if (!res.ok && dept) {
+      res = await fetch(`/api/run-cards/${encodeURIComponent(mission.type)}`);
+    }
     if (!res.ok) { alert('No run card for this mission.'); return; }
     const rc = await res.json();
     const rcMission = {
       ...mission,
+      department: dept,
       required_units: rc.units || [],
       required_training: rc.training || [],
       equipment_required: rc.equipment || []

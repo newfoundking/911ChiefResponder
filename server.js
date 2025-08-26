@@ -64,6 +64,7 @@ db.serialize(() => {
       type TEXT,
       lat REAL,
       lon REAL,
+      department TEXT,
       required_units TEXT,
       required_training TEXT DEFAULT '[]',
       equipment_required TEXT DEFAULT '[]',
@@ -77,6 +78,7 @@ db.serialize(() => {
 
   // Add timing column if not present
   db.run(`ALTER TABLE missions ADD COLUMN timing INTEGER DEFAULT 10`, () => { /* ignore if exists */ });
+  db.run(`ALTER TABLE missions ADD COLUMN department TEXT`, () => { /* ignore if exists */ });
 
   // Mission ↔ Units link
   db.run(`
@@ -95,6 +97,7 @@ db.serialize(() => {
           name TEXT,
           trigger_type TEXT,
           trigger_filter TEXT,
+          department TEXT,
           timing INTEGER,
           required_units TEXT,
           patients TEXT,
@@ -109,12 +112,17 @@ db.serialize(() => {
   // Run cards
   db.run(`
     CREATE TABLE IF NOT EXISTS run_cards (
-      mission_name TEXT PRIMARY KEY,
+      mission_name TEXT NOT NULL,
+      department TEXT,
       units TEXT,
       training TEXT,
-      equipment TEXT
+      equipment TEXT,
+      PRIMARY KEY (mission_name, department)
     )
   `);
+  db.run(`ALTER TABLE mission_templates ADD COLUMN department TEXT`, () => { /* ignore if exists */ });
+  db.run(`ALTER TABLE run_cards ADD COLUMN department TEXT`, () => { /* ignore if exists */ });
+  db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_run_cards_name_dept ON run_cards(mission_name, department)`);
 
   // Units
   db.run(`
@@ -547,6 +555,7 @@ app.get('/api/missions', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     const parsed = rows.map(m => ({
       ...m,
+      department: m.department || null,
       required_units: JSON.parse(m.required_units || "[]"),
       required_training: JSON.parse(m.required_training || "[]"),
       equipment_required: JSON.parse(m.equipment_required || "[]"),
@@ -561,7 +570,7 @@ app.get('/api/missions', (req, res) => {
 
 app.post('/api/missions', (req, res) => {
   const {
-    type, lat, lon,
+    type, lat, lon, department,
     required_units = [], required_training = [],
     equipment_required = [], patients = [], prisoners = [], modifiers = [],
     timing = 10
@@ -569,11 +578,11 @@ app.post('/api/missions', (req, res) => {
 
   db.run(`
     INSERT INTO missions
-    (type, lat, lon, required_units, required_training, equipment_required, patients, prisoners, modifiers, status, timing)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (type, lat, lon, department, required_units, required_training, equipment_required, patients, prisoners, modifiers, status, timing)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   [
-    type, lat, lon,
+    type, lat, lon, department,
     JSON.stringify(required_units),
     JSON.stringify(required_training),
     JSON.stringify(equipment_required),
@@ -587,7 +596,7 @@ app.post('/api/missions', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({
       id: this.lastID,
-      type, lat, lon,
+      type, lat, lon, department,
       required_units, required_training, equipment_required, patients, prisoners, modifiers,
       status: "active",
       timing
@@ -653,6 +662,7 @@ app.get('/api/missions/:id', (req, res) => {
     if (!row) return res.status(404).json({ error: 'Not found' });
     const mission = {
       ...row,
+      department: row.department || null,
       required_units: parseArrayField(row.required_units),
       required_training: parseArrayField(row.required_training),
       equipment_required: parseArrayField(row.equipment_required),
@@ -1209,6 +1219,7 @@ app.get('/api/mission-templates', (req, res) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     const parsed = rows.map(row => ({
       ...row,
+      department: row.department || null,
       required_units: parseArrayField(row.required_units),
       patients: parseArrayField(row.patients),
       prisoners: parseArrayField(row.prisoners),
@@ -1227,6 +1238,7 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
     name: b.name || '',
     trigger_type: b.trigger_type || '',
     trigger_filter: b.trigger_filter || '',
+    department: b.department || '',
     timing: Number(b.timing) || 0,
     required_units: JSON.stringify(b.required_units || []),
     patients: JSON.stringify(b.patients || []),
@@ -1238,10 +1250,10 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
   };
   db.run(
     `INSERT INTO mission_templates
-     (name, trigger_type, trigger_filter, timing,
+     (name, trigger_type, trigger_filter, department, timing,
       required_units, patients, prisoners, required_training, modifiers, equipment_required, rewards)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-    [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [fields.name, fields.trigger_type, fields.trigger_filter, fields.department, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
      fields.modifiers, fields.equipment_required, fields.rewards],
     function(err){
@@ -1258,6 +1270,7 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
     name: b.name || '',
     trigger_type: b.trigger_type || '',
     trigger_filter: b.trigger_filter || '',
+    department: b.department || '',
     timing: Number(b.timing) || 0,
     required_units: JSON.stringify(b.required_units || []),
     patients: JSON.stringify(b.patients || []),
@@ -1269,11 +1282,11 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
   };
   db.run(
     `UPDATE mission_templates SET
-      name=?, trigger_type=?, trigger_filter=?, timing=?,
+      name=?, trigger_type=?, trigger_filter=?, department=?, timing=?,
       required_units=?, patients=?, prisoners=?, required_training=?,
       modifiers=?, equipment_required=?, rewards=?
      WHERE id=?`,
-    [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
+    [fields.name, fields.trigger_type, fields.trigger_filter, fields.department, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
      fields.modifiers, fields.equipment_required, fields.rewards, id],
     function(err){
@@ -1285,7 +1298,7 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
 
 
 app.get('/api/mission-templates/id/:id', (req, res) => {
-  db.get(`SELECT id, name, trigger_type, trigger_filter, timing,
+  db.get(`SELECT id, name, trigger_type, trigger_filter, department, timing,
                  required_units, patients, prisoners, required_training,
                  modifiers, equipment_required, rewards
           FROM mission_templates WHERE id=?`, [req.params.id], (err, r) => {
@@ -1304,29 +1317,38 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
 
 // Run card endpoints
 app.get('/api/run-cards/:name', (req, res) => {
-  db.get('SELECT units, training, equipment FROM run_cards WHERE mission_name=?', [req.params.name], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!row) return res.status(404).json({ error: 'Not found' });
-    const units = parseArrayField(row.units);
-    const training = parseArrayField(row.training);
-    const equipment = parseArrayField(row.equipment);
-    res.json({ units, training, equipment });
-  });
+  const dept = req.query.department || null;
+  db.get(
+    `SELECT units, training, equipment FROM run_cards
+     WHERE mission_name=? AND (department=? OR department IS NULL)
+     ORDER BY department IS NULL
+     LIMIT 1`,
+    [req.params.name, dept],
+    (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!row) return res.status(404).json({ error: 'Not found' });
+      const units = parseArrayField(row.units);
+      const training = parseArrayField(row.training);
+      const equipment = parseArrayField(row.equipment);
+      res.json({ units, training, equipment });
+    }
+  );
 });
 
 app.put('/api/run-cards/:name', express.json(), (req, res) => {
   const b = req.body || {};
+  const dept = req.query.department || b.department || null;
   const units = JSON.stringify(b.units || []);
   const training = JSON.stringify(b.training || []);
   const equipment = JSON.stringify(b.equipment || []);
   db.run(
-    `INSERT INTO run_cards (mission_name, units, training, equipment)
-     VALUES (?,?,?,?)
-     ON CONFLICT(mission_name) DO UPDATE SET
+    `INSERT INTO run_cards (mission_name, department, units, training, equipment)
+     VALUES (?,?,?,?,?)
+     ON CONFLICT(mission_name, department) DO UPDATE SET
        units=excluded.units,
        training=excluded.training,
        equipment=excluded.equipment`,
-    [req.params.name, units, training, equipment],
+    [req.params.name, dept, units, training, equipment],
     err => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ ok: true });
