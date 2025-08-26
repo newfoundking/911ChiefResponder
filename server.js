@@ -164,6 +164,17 @@ db.serialize(() => {
       FOREIGN KEY (unit_id) REFERENCES units(id)
     )
   `);
+
+  // Response zones
+  db.run(`
+    CREATE TABLE IF NOT EXISTS response_zones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      department TEXT,
+      station_id INTEGER,
+      polygon TEXT
+    )
+  `);
 });
 db.run(`
   CREATE TABLE IF NOT EXISTS wallet (
@@ -1516,6 +1527,46 @@ app.delete('/api/unit-travel/:unit_id', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ ok: true });
   });
+});
+
+app.get('/api/response-zones', (req, res) => {
+  db.all('SELECT * FROM response_zones', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const zones = rows.map(r => ({
+      ...r,
+      polygon: (() => { try { return JSON.parse(r.polygon || '{}'); } catch { return {}; } })()
+    }));
+    res.json(zones);
+  });
+});
+
+app.post('/api/response-zones', (req, res) => {
+  const { name, department, station_id, polygon } = req.body;
+  if (!name || !department || !polygon) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
+  db.run(
+    `INSERT INTO response_zones (name, department, station_id, polygon) VALUES (?,?,?,?)`,
+    [name, department, station_id || null, JSON.stringify(polygon)],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ id: this.lastID });
+    }
+  );
+});
+
+app.put('/api/response-zones/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { name, department, station_id, polygon } = req.body;
+  if (!id) return res.status(400).json({ error: 'Invalid id' });
+  db.run(
+    `UPDATE response_zones SET name=?, department=?, station_id=?, polygon=? WHERE id=?`,
+    [name, department, station_id || null, JSON.stringify(polygon), id],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ id });
+    }
+  );
 });
 
 function getStationById(id) {
