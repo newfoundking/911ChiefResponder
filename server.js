@@ -77,18 +77,28 @@ db.serialize(() => {
   // Mission templates
   db.run(`
     CREATE TABLE IF NOT EXISTS mission_templates (
-	  id INTEGER PRIMARY KEY AUTOINCREMENT,
-	  name TEXT,
-	  trigger_type TEXT,
-	  trigger_filter TEXT,
-	  timing INTEGER,
-	  required_units TEXT,
-	  patients TEXT,
-	  prisoners TEXT,
-	  required_training TEXT,
-	  modifiers TEXT,
-	  equipment_required TEXT,
-	  rewards INTEGER DEFAULT 0
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT,
+          trigger_type TEXT,
+          trigger_filter TEXT,
+          timing INTEGER,
+          required_units TEXT,
+          patients TEXT,
+          prisoners TEXT,
+          required_training TEXT,
+          modifiers TEXT,
+          equipment_required TEXT,
+          rewards INTEGER DEFAULT 0
+    )
+  `);
+
+  // Run cards
+  db.run(`
+    CREATE TABLE IF NOT EXISTS run_cards (
+      mission_name TEXT PRIMARY KEY,
+      units TEXT,
+      training TEXT,
+      equipment TEXT
     )
   `);
 
@@ -1152,15 +1162,48 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
           FROM mission_templates WHERE id=?`, [req.params.id], (err, r) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!r)   return res.status(404).json({ error: "Not found" });
-	try { r.required_units = JSON.parse(r.required_units || '[]'); } catch { r.required_units = []; }
-	try { r.patients = JSON.parse(r.patients || '[]'); } catch { r.patients = []; }
-	try { r.prisoners = JSON.parse(r.prisoners || '[]'); } catch { r.prisoners = []; }
-	try { r.required_training = JSON.parse(r.required_training || '[]'); } catch { r.required_training = []; }
-	try { r.modifiers = JSON.parse(r.modifiers || '[]'); } catch { r.modifiers = []; }
-	try { r.equipment_required = JSON.parse(r.equipment_required || '[]'); } catch { r.equipment_required = []; }
-	r.rewards = Number.isFinite(r.rewards) ? r.rewards : 0;
+        try { r.required_units = JSON.parse(r.required_units || '[]'); } catch { r.required_units = []; }
+        try { r.patients = JSON.parse(r.patients || '[]'); } catch { r.patients = []; }
+        try { r.prisoners = JSON.parse(r.prisoners || '[]'); } catch { r.prisoners = []; }
+        try { r.required_training = JSON.parse(r.required_training || '[]'); } catch { r.required_training = []; }
+        try { r.modifiers = JSON.parse(r.modifiers || '[]'); } catch { r.modifiers = []; }
+        try { r.equipment_required = JSON.parse(r.equipment_required || '[]'); } catch { r.equipment_required = []; }
+        r.rewards = Number.isFinite(r.rewards) ? r.rewards : 0;
     res.json(r);
   });
+});
+
+// Run card endpoints
+app.get('/api/run-cards/:name', (req, res) => {
+  db.get('SELECT units, training, equipment FROM run_cards WHERE mission_name=?', [req.params.name], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    let units = [], training = [], equipment = [];
+    try { units = JSON.parse(row.units || '[]'); } catch {}
+    try { training = JSON.parse(row.training || '[]'); } catch {}
+    try { equipment = JSON.parse(row.equipment || '[]'); } catch {}
+    res.json({ units, training, equipment });
+  });
+});
+
+app.put('/api/run-cards/:name', express.json(), (req, res) => {
+  const b = req.body || {};
+  const units = JSON.stringify(b.units || []);
+  const training = JSON.stringify(b.training || []);
+  const equipment = JSON.stringify(b.equipment || []);
+  db.run(
+    `INSERT INTO run_cards (mission_name, units, training, equipment)
+     VALUES (?,?,?,?)
+     ON CONFLICT(mission_name) DO UPDATE SET
+       units=excluded.units,
+       training=excluded.training,
+       equipment=excluded.equipment`,
+    [req.params.name, units, training, equipment],
+    err => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    }
+  );
 });
 
 /* =========================
