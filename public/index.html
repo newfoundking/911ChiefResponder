@@ -627,13 +627,23 @@ document.getElementById('addZoneBtn').addEventListener('click', () => {
 
 map.on('draw:created', async e => {
   const latlngs = e.layer.getLatLngs()[0].map(p => [p.lat, p.lng]);
+  const ring = latlngs.slice();
+  if (ring.length && (ring[0][0] !== ring[ring.length - 1][0] ||
+                      ring[0][1] !== ring[ring.length - 1][1])) {
+    ring.push(ring[0]);
+  }
   const stations = await fetch('/api/stations').then(r => r.json());
   const depts = [...new Set(stations.map(s => s.department).filter(Boolean))];
   const name = prompt('Zone name?') || 'Zone';
   const dept = prompt(`Department (${depts.join(', ')})?`) || '';
-  const newPoly = turf.polygon([latlngs.map(([lat, lng]) => [lng, lat])]);
+  const newPoly = turf.polygon([ring.map(([lat, lng]) => [lng, lat])]);
   for (const z of [...responseZones]) {
-    const existing = turf.polygon([z.polygon.coordinates.map(([lat, lng]) => [lng, lat])]);
+    const existingRing = z.polygon.coordinates.slice();
+    if (existingRing.length && (existingRing[0][0] !== existingRing[existingRing.length - 1][0] ||
+                                existingRing[0][1] !== existingRing[existingRing.length - 1][1])) {
+      existingRing.push(existingRing[0]);
+    }
+    const existing = turf.polygon([existingRing.map(([lat, lng]) => [lng, lat])]);
     const inter = turf.intersect(existing, newPoly);
     if (inter) {
       const diff = turf.difference(existing, newPoly);
