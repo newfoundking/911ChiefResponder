@@ -102,13 +102,24 @@
 
 <!-- Edit Personnel Modal -->
 <div id="editPersonnelModal" style="
-	position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
-	background: white; border: 2px solid #444; padding: 1em;
-	width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
-	display: none; z-index: 10001;">
-	<h3>Edit Personnel</h3>
-	<div id="editPersonnelContent">Loading...</div>
-	<button onclick="document.getElementById('editPersonnelModal').style.display = 'none';">Close</button>
+        position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+        background: white; border: 2px solid #444; padding: 1em;
+        width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        display: none; z-index: 10001;">
+        <h3>Edit Personnel</h3>
+        <div id="editPersonnelContent">Loading...</div>
+        <button onclick="document.getElementById('editPersonnelModal').style.display = 'none';">Close</button>
+</div>
+
+<!-- Edit Unit Modal -->
+<div id="editUnitModal" style="
+        position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+        background: white; border: 2px solid #444; padding: 1em;
+        width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        display: none; z-index: 10001;">
+        <h3>Edit Unit</h3>
+        <div id="editUnitContent">Loading...</div>
+        <button onclick="document.getElementById('editUnitModal').style.display = 'none';">Close</button>
 </div>
 
 <!-- Unit Detail Modal -->
@@ -531,6 +542,7 @@ async function refreshAssignedUnitsUI(missionId) {
     div.innerHTML = 'Loading assigned units…';
     const res = await fetch(`/api/missions/${missionId}/units`);
     const assigned = await res.json();
+    (assigned||[]).forEach(u => _unitById.set(u.id, u));
     if (!Array.isArray(assigned) || !assigned.length) {
       div.innerHTML = '<em>No units assigned yet.</em>';
       return [];
@@ -540,11 +552,14 @@ async function refreshAssignedUnitsUI(missionId) {
       <ul style="list-style:none; padding-left:0;">
         ${assigned.map(u => `
           <li style="display:flex; align-items:center; gap:6px; margin:4px 0;">
-            <span>${u.name} (${u.type}) — ${u.status || 'enroute'}</span>
+            <span class="unit-link" data-unitid="${u.id}" style="cursor:pointer; color:blue;">${u.name}</span> (${u.type}) — ${u.status || 'enroute'}
             <button data-unitid="${u.id}" data-missionid="${missionId}" class="clear-unit-btn">Clear</button>
           </li>
         `).join('')}
       </ul>`;
+    div.querySelectorAll('.unit-link').forEach(span => {
+      span.addEventListener('click', () => showUnitDetails(parseInt(span.dataset.unitid,10)));
+    });
     div.querySelectorAll('.clear-unit-btn').forEach(btn => {
       btn.onclick = async () => {
         btn.disabled = true;
@@ -813,6 +828,7 @@ async function showStationDetails(station) {
           <strong style="cursor:pointer; color:blue;" onclick="showUnitDetails(${u.id})">${u.name}</strong> (${u.type}) - ${u.status}
           <button onclick="openAssignModal(${u.id}, ${station.id})">Assign</button>
           ${u.status !== 'available' ? `<button onclick="cancelUnit(${u.id}, ${station.id})">Cancel</button>` : ''}
+          <button class="edit-unit-btn" data-unitid="${u.id}">Edit</button>
         </li>`).join('')}
     </ul>`;
 	  const iconBtn = detail.querySelector('#change-station-icon');
@@ -887,20 +903,29 @@ async function showStationDetails(station) {
           refreshStationPanelNoCache(station.id);
         });
   // Replace inline openAssignModal with safe listeners
-	detail.querySelectorAll('button').forEach(btn => {
-	  const m = btn.getAttribute('onclick');
-	  if (m && m.startsWith('openAssignModal(')) {
-		btn.removeAttribute('onclick');
-		const args = m.match(/openAssignModal\((\d+),\s*(\d+)\)/);
-		if (args) {
-		  const [_, unitId, stationId] = args.map(Number);
-		  btn.addEventListener('click', () => openAssignModal(unitId, stationId));
-		}
-	  }
-	});
+        detail.querySelectorAll('button').forEach(btn => {
+          const m = btn.getAttribute('onclick');
+          if (m && m.startsWith('openAssignModal(')) {
+                btn.removeAttribute('onclick');
+                const args = m.match(/openAssignModal\((\d+),\s*(\d+)\)/);
+                if (args) {
+                  const [_, unitId, stationId] = args.map(Number);
+                  btn.addEventListener('click', () => openAssignModal(unitId, stationId));
+                }
+          }
+        });
 
-	// Replace inline editPersonnel with safe listener
-	detail.querySelectorAll('#personnel-list button').forEach(btn => {
+        // Hook up unit edit buttons
+        detail.querySelectorAll('.edit-unit-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const id = parseInt(btn.dataset.unitid, 10);
+            const u = _unitById.get(id);
+            if (u) openUnitModal(u);
+          });
+        });
+
+        // Replace inline editPersonnel with safe listener
+        detail.querySelectorAll('#personnel-list button').forEach(btn => {
 	  const m = btn.getAttribute('onclick');
 	  if (m && m.startsWith('editPersonnel(')) {
 		btn.removeAttribute('onclick');
@@ -1064,6 +1089,62 @@ async function showStationDetails(station) {
   refreshBayInfo(station.id);
 }
 
+// ==== Edit Unit Modal ====
+function openUnitModal(unit) {
+  const modal = document.getElementById('editUnitModal');
+  const content = document.getElementById('editUnitContent');
+  const currentName = unit?.name || '';
+
+  content.innerHTML = `
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <label>
+        <div>Name</div>
+        <input id="edit-unit-name" type="text" style="width:100%;" value="${currentName.replace(/"/g,'&quot;')}" />
+      </label>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="edit-unit-cancel" type="button">Cancel</button>
+        <button id="edit-unit-save" type="button" style="background:#0b5; color:#fff;">Save</button>
+      </div>
+    </div>`;
+
+  content.querySelector('#edit-unit-cancel').onclick = () => { modal.style.display = 'none'; };
+
+  content.querySelector('#edit-unit-save').onclick = async () => {
+    const nameEl = content.querySelector('#edit-unit-name');
+    const name = (nameEl?.value || '').trim();
+    const payload = { name };
+    const urlBase = `/api/units/${unit.id}`;
+    const attempts = [
+      { method:'PATCH', url:urlBase, body:payload },
+      { method:'PUT', url:urlBase, body:payload },
+      { method:'POST', url:`${urlBase}?_method=PATCH`, body:payload },
+      { method:'POST', url:`${urlBase}?_method=PUT`, body:payload },
+      { method:'POST', url:urlBase, body:payload, headers:{'X-HTTP-Method-Override':'PATCH'} },
+      { method:'POST', url:urlBase, body:payload, headers:{'X-HTTP-Method-Override':'PUT'} },
+      { method:'POST', url:'/api/units/update', body:{ id:unit.id, ...payload } }
+    ];
+    let ok=false,lastStatus=0,lastText='';
+    for(const a of attempts){
+      try{
+        const res=await fetch(a.url,{method:a.method,headers:{'Content-Type':'application/json',...(a.headers||{})},body:JSON.stringify(a.body),cache:'no-store'});
+        lastStatus=res.status; lastText=await res.text().catch(()=> '');
+        if(res.ok||[200,201,202,204].includes(res.status)){ ok=true; break; }
+      }catch(e){ lastText=e?.message||String(e); }
+    }
+    if(!ok){ alert(`Failed to save unit changes.\nLast response (${lastStatus}): ${lastText}`); return; }
+    modal.style.display='none';
+    await refreshStationPanelNoCache(unit.station_id);
+  };
+
+  modal.style.display = 'block';
+}
+
+function editUnit(id){
+  const u=_unitById.get(id);
+  if(u) openUnitModal(u);
+}
+window.editUnit = editUnit;
+
 // Build station
 document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; alert("Click the map to place your new station"); });
 map.on("click", async (e) => {
@@ -1209,6 +1290,10 @@ async function showUnitDetails(unitId) {
 
   const unit = _unitById.get(unitId);
   const station = unit ? _stationById.get(unit.station_id) : null;
+  let mission = null;
+  try {
+    mission = await fetch(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
+  } catch {}
 
   const res = await fetch(`/api/personnel?station_id=${unit?.station_id ?? ''}`);
   const personnel = await res.json();
@@ -1236,10 +1321,15 @@ async function showUnitDetails(unitId) {
         `).join('')}</ul>`
     : '<p>No personnel assigned to this unit.</p>';
 
+  const missionHtml = mission && mission.id
+    ? `<p><strong>Current Mission:</strong> <span class="mission-link" data-missionid="${mission.id}" style="cursor:pointer; color:blue;">#${mission.id} ${mission.type}</span></p>`
+    : '<p><strong>Current Mission:</strong> None</p>';
+
   content.innerHTML = `
-    <p><strong>Name:</strong> ${unit?.name || 'Unknown'}</p>
+    <p><strong>Name:</strong> ${unit?.name || 'Unknown'} <button id="edit-unit-btn">Edit</button></p>
     <p><strong>Station:</strong> ${station?.name || 'Unknown'}</p>
     <p><strong>Vehicle Class:</strong> ${unit?.class || 'Unknown'} (${unit?.type || ''})</p>
+    ${missionHtml}
     <button id="change-unit-icon">Change Icon</button>
     <h4>Equipment Aboard</h4>
     ${equipmentHtml}
@@ -1308,6 +1398,16 @@ async function showUnitDetails(unitId) {
     _unitById.set(unitId, { ...unit, equipment: data.equipment });
     modal.style.display = 'none';
     refreshStationPanelNoCache(unit.station_id);
+  });
+
+  content.querySelector('#edit-unit-btn')?.addEventListener('click', () => openUnitModal(unit));
+
+  content.querySelector('.mission-link')?.addEventListener('click', async (e) => {
+    const mid = parseInt(e.target.dataset.missionid, 10);
+    try {
+      const m = await fetch(`/api/missions/${mid}`).then(r => r.json());
+      showMissionDetails(m);
+    } catch {}
   });
 
   modal.style.display = "block";
@@ -1423,7 +1523,7 @@ function renderManualList(stations, unitsByStation, busyIds, mission) {
             const note = isBusy ? ' <em>(busy)</em>' : '';
             return `<label style="display:block; border:1px solid #eee; padding:6px; border-radius:6px;">
                 <input type="checkbox" value="${u.id}" ${disabled}>
-                ${u.name} — ${u.type}${note}
+                <span class="unit-link" data-unitid="${u.id}" style="cursor:pointer; color:blue;">${u.name}</span> — ${u.type}${note}
               </label>`;
           }).join('')}
         </div>
@@ -1459,6 +1559,8 @@ async function openManualDispatch(mission) {
       area.innerHTML = '<span style="color:#b00;">No units found. (Backend returned no units.)</span>';
       return;
     }
+
+    cacheUnits(allUnits);
 
     const busyIds = new Set(
       allUnits.filter(u => u.status && u.status !== 'available').map(u => u.id)
@@ -1499,7 +1601,12 @@ async function openManualDispatch(mission) {
       <div id="md-list">Building list…</div>`;
 
     const mdList = document.getElementById('md-list');
-    const redraw = ()=>{ mdList.innerHTML = renderManualList(stations, unitsByStation, busyIds, mission); };
+    const attach = ()=>{
+      mdList.querySelectorAll('.unit-link').forEach(span=>{
+        span.addEventListener('click',()=>showUnitDetails(parseInt(span.dataset.unitid,10)));
+      });
+    };
+    const redraw = ()=>{ mdList.innerHTML = renderManualList(stations, unitsByStation, busyIds, mission); attach(); };
     document.getElementById('md-sort').onchange = redraw;
     document.getElementById('md-class').onchange = redraw;
     document.getElementById('md-type').oninput = redraw;
