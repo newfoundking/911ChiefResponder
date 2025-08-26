@@ -417,7 +417,7 @@ async function editRunCard(name) {
     <div><strong>Equipment</strong></div>
     <div id="rc-equipment-container"></div>
     <button type="button" onclick="addRCEquipmentRow()">Add Equipment</button><br>
-    <button onclick="saveRunCard(${JSON.stringify(name)})">Save</button>
+    <button onclick='saveRunCard(${JSON.stringify(name)})'>Save</button>
     <button onclick="document.getElementById('runcard-form-container').style.display='none'">Close</button>
   `;
 
