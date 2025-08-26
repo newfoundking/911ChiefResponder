@@ -78,15 +78,22 @@
 	<label for="stationName">Name:</label>
 	<input type="text" id="stationName" style="width: 100%;" />
 	<br><br>
-	<label for="stationType">Type:</label>
-	<select id="stationType" style="width: 100%;">
-		<option value="fire">Fire</option>
-		<option value="police">Police</option>
-		<option value="ambulance">Ambulance</option>
-	</select>
-	<br><br>
-	<button id="createStation">Create</button>
-	<button onclick="document.getElementById('stationForm').style.display = 'none';">Cancel</button>
+        <label for="stationType">Type:</label>
+        <select id="stationType" style="width: 100%;">
+                <option value="fire">Fire</option>
+                <option value="police">Police</option>
+                <option value="ambulance">Ambulance</option>
+        </select>
+        <br><br>
+        <label for="stationDept">Department:</label>
+        <select id="stationDept" style="width: 100%;">
+                <option value="fire">Fire</option>
+                <option value="police">Police</option>
+                <option value="ambulance">Ambulance</option>
+        </select>
+        <br><br>
+        <button id="createStation">Create</button>
+        <button onclick="document.getElementById('stationForm').style.display = 'none'; buildStationMode=false; pendingStationCoords=null;">Cancel</button>
 </div>
 
 <!-- Unit Assignment Modal -->
@@ -195,6 +202,7 @@ const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/st
 let missionMarkers = [];
 let stationMarkers = [];
 let buildStationMode = false;
+let pendingStationCoords = null;
 let openMissionId = null;
 
 const map = L.map("map").setView([47.5646, -52.7002], 13);
@@ -529,7 +537,7 @@ async function fetchStations() {
     } else {
       info = `Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
     }
-    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>${info}<br>
+    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>Department: ${st.department || 'N/A'}<br>${info}<br>
       <button onclick='showStationDetails(${JSON.stringify(st)})'>Details</button>`;
     list.appendChild(el);
   });
@@ -743,8 +751,9 @@ async function showStationDetails(station) {
         <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
       </div>
       <h2>${station.name}</h2>
-	  <button id="change-station-icon">Change Icon</button>
+          <button id="change-station-icon">Change Icon</button>
       <p>Type: ${station.type}</p>
+      <p>Department: ${station.department || 'N/A'}</p>
       <div>${isHospital ? 'Beds' : 'Holding Cells'}: ${occ}/${cap} (Free: ${cap - occ})</div>
     `;
 	  const iconBtn = detail.querySelector('#change-station-icon');
@@ -781,8 +790,9 @@ async function showStationDetails(station) {
       <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
     </div>
     <h2>${station.name}</h2>
-	<button id="change-station-icon">Change Icon</button>
+        <button id="change-station-icon">Change Icon</button>
     <p>Type: ${station.type}</p>
+    <p>Department: ${station.department || 'N/A'}</p>
     <h3>Create Unit</h3>
     <select id="unit-type">${unitOptions}</select>
     <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
@@ -1147,11 +1157,18 @@ window.editUnit = editUnit;
 
 // Build station
 document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; alert("Click the map to place your new station"); });
-map.on("click", async (e) => {
+map.on("click", (e) => {
   if (!buildStationMode) return;
-  const name = prompt("Station Name?");
-  const type = prompt("Type (fire, police, ambulance, hospital, jail)?", "fire")?.toLowerCase();
-  if (!name || !["fire","police","ambulance","hospital","jail"].includes(type)) { alert("Cancelled or invalid type."); buildStationMode=false; return; }
+  pendingStationCoords = e.latlng;
+  document.getElementById('stationForm').style.display = 'block';
+});
+
+document.getElementById("createStation").addEventListener("click", async () => {
+  if (!pendingStationCoords) return;
+  const name = document.getElementById('stationName').value.trim();
+  const type = document.getElementById('stationType').value;
+  const department = document.getElementById('stationDept').value;
+  if (!name || !["fire","police","ambulance","hospital","jail"].includes(type)) { alert('Cancelled or invalid type.'); return; }
   let holding_cells = 0, beds = 0;
   if (type === "police" || type === "jail") {
     holding_cells = Number(prompt("Holding cells?", "0")) || 0;
@@ -1159,8 +1176,11 @@ map.on("click", async (e) => {
   if (type === "hospital") {
     beds = Number(prompt("Beds?", "0")) || 0;
   }
-  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, lat:e.latlng.lat, lon:e.latlng.lng, holding_cells, beds }) });
+  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, department, lat:pendingStationCoords.lat, lon:pendingStationCoords.lng, holding_cells, beds }) });
+  document.getElementById('stationForm').style.display = 'none';
+  document.getElementById('stationName').value = '';
   buildStationMode = false;
+  pendingStationCoords = null;
   fetchStations();
 });
 

@@ -52,6 +52,7 @@ db.serialize(() => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
       type TEXT,
+      department TEXT,
       lat REAL,
       lon REAL
     )
@@ -175,6 +176,9 @@ db.run(`
 // Station upgrades / storage columns
 db.run(`
   ALTER TABLE stations ADD COLUMN equipment_slots INTEGER DEFAULT 0
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE stations ADD COLUMN department TEXT
 `, () => { /* ignore if exists */ });
 db.run(`
   ALTER TABLE stations ADD COLUMN bay_count INTEGER DEFAULT 0
@@ -808,7 +812,7 @@ app.patch('/api/stations/:id/bays', async (req, res) => {
 
 app.post('/api/stations', async (req, res) => {
   try {
-    const { name, type, lat, lon, beds = 0, holding_cells = 0 } = req.body || {};
+    const { name, type, department, lat, lon, beds = 0, holding_cells = 0 } = req.body || {};
     const BUILD_COST = 50000;
     const holdingCost = (type === 'police' || type === 'jail') ? priceHolding(holding_cells, false) : 0;
     const totalCost = BUILD_COST + holdingCost;
@@ -816,13 +820,13 @@ app.post('/api/stations', async (req, res) => {
     const ok = await requireFunds(totalCost);
     if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: totalCost });
 
-    db.run('INSERT INTO stations (name, type, lat, lon, bay_count, equipment_slots, holding_cells, bed_capacity) VALUES (?, ?, ?, ?, 0, 0, ?, ?)',
-      [name, type, lat, lon, holding_cells, beds],
+    db.run('INSERT INTO stations (name, type, department, lat, lon, bay_count, equipment_slots, holding_cells, bed_capacity) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)',
+      [name, type, department, lat, lon, holding_cells, beds],
       async function (err) {
         if (err) return res.status(500).send('Failed to insert station');
         await adjustBalance(-totalCost);
         const balance = await getBalance();
-        res.json({ id: this.lastID, name, type, lat, lon, bay_count: 0, equipment_slots: 0, holding_cells, bed_capacity: beds, equipment: [], charged: totalCost, balance });
+        res.json({ id: this.lastID, name, type, department, lat, lon, bay_count: 0, equipment_slots: 0, holding_cells, bed_capacity: beds, equipment: [], charged: totalCost, balance });
       }
     );
   } catch (e) {
