@@ -588,14 +588,6 @@ app.post('/api/missions', (req, res) => {
     timing = 10
   } = req.body;
 
-app.post('/api/missions', (req, res) => {
-  const {
-    type, lat, lon,
-    required_units = [], required_training = [],
-    equipment_required = [], patients = [], prisoners = [], modifiers = [],
-    timing = 10
-  } = req.body;
-
   db.all('SELECT * FROM response_zones', (err, zones) => {
     if (err) return res.status(500).json({ error: err.message });
 
