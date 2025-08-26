@@ -570,13 +570,14 @@ async function fetchZones() {
   if (list) list.innerHTML = '';
   responseZones.forEach(z => {
     const coords = (z.polygon?.coordinates || []).map(c => [c[0], c[1]]);
-    const layer = L.polygon(coords, { color: colorForDept(z.department) }).addTo(zoneLayerGroup);
-    layer.bindPopup(`${z.name} (${z.department})`);
+    const deptList = Array.isArray(z.departments) ? z.departments : [];
+    const layer = L.polygon(coords, { color: colorForDept(deptList[0]) }).addTo(zoneLayerGroup);
+    layer.bindPopup(`${z.name} (${deptList.join(', ')})`);
     layer.on('click', () => startEditZone(z.id));
     zoneLayers.set(z.id, layer);
     if (list) {
       const el = document.createElement('div');
-      el.innerHTML = `${z.name} (${z.department}) <button class="edit-zone" data-id="${z.id}">Edit</button> <button class="delete-zone" data-id="${z.id}">Delete</button>`;
+      el.innerHTML = `${z.name} (${deptList.join(', ')}) <button class="edit-zone" data-id="${z.id}">Edit</button> <button class="delete-zone" data-id="${z.id}">Delete</button>`;
       list.appendChild(el);
     }
   });
@@ -610,11 +611,12 @@ document.getElementById('saveZoneEditBtn').addEventListener('click', async () =>
   const latlngs = layer.getLatLngs()[0].map(p => [p.lat, p.lng]);
   const z = responseZones.find(r => r.id == id);
   const name = prompt('Zone name:', z?.name || '') || (z?.name || '');
-  const dept = prompt('Department:', z?.department || '') || (z?.department || '');
+  const deptInput = prompt('Departments (comma-separated):', (z?.departments||[]).join(', ')) || '';
+  const departments = deptInput.split(',').map(s=>s.trim()).filter(Boolean);
   await fetch(`/api/response-zones/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, department: dept, polygon: { coordinates: latlngs } })
+    body: JSON.stringify({ name, departments, polygon: { coordinates: latlngs } })
   });
   editingZoneId = null;
   document.getElementById('saveZoneEditBtn').style.display = 'none';
@@ -635,7 +637,8 @@ map.on('draw:created', async e => {
   const stations = await fetch('/api/stations').then(r => r.json());
   const depts = [...new Set(stations.map(s => s.department).filter(Boolean))];
   const name = prompt('Zone name?') || 'Zone';
-  const dept = prompt(`Department (${depts.join(', ')})?`) || '';
+  const deptInput = prompt(`Departments (comma-separated) (${depts.join(', ')})?`) || '';
+  const departments = deptInput.split(',').map(s=>s.trim()).filter(Boolean);
   const newPoly = turf.polygon([ring.map(([lat, lng]) => [lng, lat])]);
   for (const z of [...responseZones]) {
     const existingRing = z.polygon.coordinates.slice();
@@ -652,7 +655,7 @@ map.on('draw:created', async e => {
         await fetch(`/api/response-zones/${z.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: z.name, department: z.department, polygon: { coordinates: newCoords } })
+          body: JSON.stringify({ name: z.name, departments: z.departments, polygon: { coordinates: newCoords } })
         });
       } else {
         await fetch(`/api/response-zones/${z.id}`, { method: 'DELETE' });
@@ -662,7 +665,7 @@ map.on('draw:created', async e => {
   await fetch('/api/response-zones', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, department: dept, polygon: { coordinates: latlngs } })
+    body: JSON.stringify({ name, departments, polygon: { coordinates: latlngs } })
   });
   fetchZones();
 });
@@ -1876,7 +1879,8 @@ async function autoDispatch(mission) {
     const allUnits = allUnitsRaw
       .filter(u=>{
         const st = stMap.get(u.station_id);
-        return !mission.department || (st && st.department === mission.department);
+        const mDepts = Array.isArray(mission.departments) ? mission.departments : [];
+        return mDepts.length === 0 || (st && mDepts.includes(st.department));
       })
       .map(u=>{
         const st = stMap.get(u.station_id);
@@ -1964,6 +1968,7 @@ async function runCardDispatch(mission) {
     const rc = await res.json();
     const rcMission = {
       ...mission,
+      departments: mission.departments || [],
       required_units: rc.units || [],
       required_training: rc.training || [],
       equipment_required: rc.equipment || []
