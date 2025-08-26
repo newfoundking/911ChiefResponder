@@ -62,7 +62,7 @@
   width: 420px; max-height: 80vh; overflow-y: auto; border-radius: 8px;
   display: none;">
         <div style="text-align:right;">
-                <button onclick="document.getElementById('missionDetails').style.display = 'none';">Close</button>
+                <button onclick="closeMissionDetails()">Close</button>
         </div>
         <h3>Details</h3>
         <div id="missionDetailsContent">Loading...</div>
@@ -172,6 +172,7 @@ let poiCache = [];
 let missionMarkers = [];
 let stationMarkers = [];
 let buildStationMode = false;
+let openMissionId = null;
 
 async function fetchPOIs() {
   try {
@@ -647,6 +648,7 @@ function renderPrisonerInfo(mission) {
 
 // ===== Mission details =====
 function showMissionDetails(mission) {
+  openMissionId = mission.id;
   const container = document.getElementById("missionDetailsContent");
   const patientHtml = renderPatientInfo(mission);
   const prisonerHtml = renderPrisonerInfo(mission);
@@ -685,6 +687,11 @@ function showMissionDetails(mission) {
     const t = document.getElementById('missionTimerArea');
     if (t) t.textContent = '';
   }
+}
+
+function closeMissionDetails() {
+  document.getElementById('missionDetails').style.display = 'none';
+  openMissionId = null;
 }
 
 // ===== Station details =====
@@ -1696,22 +1703,23 @@ function persistWorkTimers() {
 function startMissionCountdown(missionId, endTime) {
   const existing = activeWorkTimers.get(missionId);
   if (existing && existing.intervalId) clearInterval(existing.intervalId);
+  let iid;
   const update = () => {
-    const tDiv = document.getElementById('missionTimerArea');
     const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
-    if (remaining <= 0) {
-      if (tDiv) tDiv.textContent = 'Resolving…';
-      if (existing && existing.intervalId) clearInterval(existing.intervalId);
-      return;
+    if (openMissionId === missionId) {
+      const tDiv = document.getElementById('missionTimerArea');
+      if (remaining <= 0) {
+        if (tDiv) tDiv.textContent = 'Resolving…';
+      } else if (tDiv) {
+        const mins = Math.floor(remaining / 60);
+        const secs = remaining % 60;
+        tDiv.textContent = `Time remaining: ${mins}:${secs.toString().padStart(2, '0')}`;
+      }
     }
-    if (tDiv) {
-      const mins = Math.floor(remaining / 60);
-      const secs = remaining % 60;
-      tDiv.textContent = `Time remaining: ${mins}:${secs.toString().padStart(2, '0')}`;
-    }
+    if (remaining <= 0 && iid) clearInterval(iid);
   };
   update();
-  const iid = setInterval(update, 1000);
+  iid = setInterval(update, 1000);
   if (existing) {
     existing.intervalId = iid;
     existing.endTime = endTime;
@@ -1757,8 +1765,10 @@ async function checkMissionCompletion(mission) {
       if (existing.intervalId) clearInterval(existing.intervalId);
       activeWorkTimers.delete(mission.id);
       persistWorkTimers();
-      const tDiv = document.getElementById('missionTimerArea');
-      if (tDiv) tDiv.textContent = '';
+      if (openMissionId === mission.id) {
+        const tDiv = document.getElementById('missionTimerArea');
+        if (tDiv) tDiv.textContent = '';
+      }
     }
     return;
   }
