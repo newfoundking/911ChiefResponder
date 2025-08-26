@@ -181,22 +181,13 @@ const missionIcons = {
 };
 const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/star.png", hospital: "/star.png", jail: "/police.png" };
 
-let poiCache = [];
 let missionMarkers = [];
 let stationMarkers = [];
 let buildStationMode = false;
 let openMissionId = null;
 
-async function fetchPOIs() {
-  try {
-    const res = await fetch("/api/pois?lat=47.5646&lon=-52.7002&radius=5000");
-    poiCache = await res.json();
-  } catch (e) { console.warn("Failed to fetch POIs:", e); }
-}
-
 const map = L.map("map").setView([47.5646, -52.7002], 13);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
-fetchPOIs();
 
 document.getElementById("deleteAllStations").addEventListener("click", async () => {
   if (!confirm("Are you sure you want to delete ALL stations? This will also orphan units!")) return;
@@ -1120,13 +1111,20 @@ function instantiatePrisoners(arr) {
 
 // Generate Mission
 document.getElementById('generateMission').addEventListener('click', async ()=>{
-  if (poiCache.length===0 || missionTemplates.length===0) { alert("No POIs or mission templates loaded."); return; }
-  const validPOIs = poiCache.filter(p=> p && typeof p.lat==="number" && typeof p.lon==="number");
-  if (!validPOIs.length){ alert("No valid POIs loaded."); return; }
-  const poi = validPOIs[Math.floor(Math.random()*validPOIs.length)];
+  if (missionTemplates.length===0) { alert("No mission templates loaded."); return; }
+  const stations = await fetch('/api/stations').then(r=>r.json()).catch(()=>[]);
+  if (!stations.length) { alert("No stations available."); return; }
+  const st = stations[Math.floor(Math.random()*stations.length)];
+  const radius = 5000; // meters
+  const dist = Math.random()*radius;
+  const angle = Math.random()*2*Math.PI;
+  const dx = dist * Math.cos(angle);
+  const dy = dist * Math.sin(angle);
+  const lat = st.lat + (dy / 111320);
+  const lon = st.lon + (dx / (111320 * Math.cos(st.lat * Math.PI/180)));
   const template = missionTemplates[Math.floor(Math.random()*missionTemplates.length)];
   const missionData = {
-    type: template.name, lat: poi.lat, lon: poi.lon,
+    type: template.name, lat, lon,
     required_units: template.required_units,
     required_training: template.required_training || [],
     equipment_required: template.equipment_required || [],
@@ -1942,11 +1940,11 @@ async function rebuildEnrouteMarkers() {
 }
 
 // Init
-fetchPOIs().then(async () => {
+(async () => {
   await fetchStations();
   await fetchMissions();
   rebuildEnrouteMarkers();
-});
+})();
 </script>
 
 </body>
