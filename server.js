@@ -643,6 +643,27 @@ app.get('/api/missions/:id/units', (req, res) => {
     }
   );
 });
+
+// Fetch a single mission by id
+app.get('/api/missions/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid mission id' });
+  db.get('SELECT * FROM missions WHERE id=?', [id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const mission = {
+      ...row,
+      required_units: parseArrayField(row.required_units),
+      required_training: parseArrayField(row.required_training),
+      equipment_required: parseArrayField(row.equipment_required),
+      patients: parseArrayField(row.patients),
+      prisoners: parseArrayField(row.prisoners),
+      modifiers: parseArrayField(row.modifiers),
+      timing: typeof row.timing === 'number' ? row.timing : 10,
+    };
+    res.json(mission);
+  });
+});
 // Get personnel for a station (only unassigned)
 app.get('/api/stations/:id/personnel', (req, res) => {
     const stationId = req.params.id;
@@ -902,6 +923,51 @@ app.get('/api/units', (req, res) => {
     }));
     res.json(parsed);
   });
+});
+
+// Update basic unit fields (e.g., name/type)
+app.patch('/api/units/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid unit id' });
+
+  const fields = [];
+  const params = [];
+  if (req.body.name !== undefined) { fields.push('name = ?'); params.push(req.body.name); }
+  if (req.body.type !== undefined) { fields.push('type = ?'); params.push(req.body.type); }
+  if (req.body.class !== undefined) { fields.push('class = ?'); params.push(req.body.class); }
+  if (!fields.length) return res.status(400).json({ error: 'No updatable fields provided' });
+
+  params.push(id);
+  const sql = `UPDATE units SET ${fields.join(', ')} WHERE id = ?`;
+  db.run(sql, params, function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true, changed: this.changes });
+  });
+});
+
+// Get mission (if any) that a unit is assigned to
+app.get('/api/units/:id/mission', (req, res) => {
+  const unitId = Number(req.params.id);
+  if (!unitId) return res.status(400).json({ error: 'Invalid unit id' });
+  db.get(
+    `SELECT m.* FROM mission_units mu JOIN missions m ON m.id = mu.mission_id WHERE mu.unit_id = ?`,
+    [unitId],
+    (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!row) return res.json(null);
+      const mission = {
+        ...row,
+        required_units: parseArrayField(row.required_units),
+        required_training: parseArrayField(row.required_training),
+        equipment_required: parseArrayField(row.equipment_required),
+        patients: parseArrayField(row.patients),
+        prisoners: parseArrayField(row.prisoners),
+        modifiers: parseArrayField(row.modifiers),
+        timing: typeof row.timing === 'number' ? row.timing : 10,
+      };
+      res.json(mission);
+    }
+  );
 });
 
 // Assign equipment from station storage to a unit
