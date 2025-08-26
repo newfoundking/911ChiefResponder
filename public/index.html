@@ -755,10 +755,10 @@ async function showStationDetails(station) {
           <button id="change-station-icon">Change Icon</button>
       <p>Type: ${station.type}</p>
 
-      <p>Department: ${station.department || ''}</p>
+      <p>Department: <span id="station-dept">${station.department || ''}</span> <button id="change-station-dept">Change Department</button></p>
       <div>${isHospital ? 'Beds' : 'Holding Cells'}: ${occ}/${cap} (Free: ${cap - occ})</div>
     `;
-	  const iconBtn = detail.querySelector('#change-station-icon');
+          const iconBtn = detail.querySelector('#change-station-icon');
       iconBtn?.addEventListener('click', async () => {
       const url = prompt('Enter icon URL:');
       if (!url) return;
@@ -766,6 +766,18 @@ async function showStationDetails(station) {
       const data = await res.json();
       if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
       station.icon = url;
+      _stationById.set(station.id, station);
+      fetchStations();
+      showStationDetails(station);
+    });
+    const deptBtn = detail.querySelector('#change-station-dept');
+    deptBtn?.addEventListener('click', async () => {
+      const dept = prompt('Enter department:');
+      if (dept === null) return;
+      const res = await fetch(`/api/stations/${station.id}/department`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ department: dept }) });
+      const data = await res.json();
+      if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+      station.department = dept;
       _stationById.set(station.id, station);
       fetchStations();
       showStationDetails(station);
@@ -794,7 +806,7 @@ async function showStationDetails(station) {
     <h2>${station.name}</h2>
         <button id="change-station-icon">Change Icon</button>
     <p>Type: ${station.type}</p>
-    <p>Department: ${station.department || ''}</p>
+    <p>Department: <span id="station-dept">${station.department || ''}</span> <button id="change-station-dept">Change Department</button></p>
     <h3>Create Unit</h3>
     <select id="unit-type">${unitOptions}</select>
     <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
@@ -843,18 +855,30 @@ async function showStationDetails(station) {
           <button class="edit-unit-btn" data-unitid="${u.id}">Edit</button>
         </li>`).join('')}
     </ul>`;
-	  const iconBtn = detail.querySelector('#change-station-icon');
-	  iconBtn?.addEventListener('click', async () => {
-		const url = prompt('Enter icon URL:');
-		if (!url) return;
-		const res = await fetch(`/api/stations/${station.id}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ icon: url }) });
-		const data = await res.json();
-		if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
-		station.icon = url;
-		_stationById.set(station.id, station);
-		fetchStations();
-		showStationDetails(station);
-	  });
+          const iconBtn = detail.querySelector('#change-station-icon');
+          iconBtn?.addEventListener('click', async () => {
+                const url = prompt('Enter icon URL:');
+                if (!url) return;
+                const res = await fetch(`/api/stations/${station.id}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ icon: url }) });
+                const data = await res.json();
+                if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+                station.icon = url;
+                _stationById.set(station.id, station);
+                fetchStations();
+                showStationDetails(station);
+          });
+          const deptBtn = detail.querySelector('#change-station-dept');
+          deptBtn?.addEventListener('click', async () => {
+                const dept = prompt('Enter department:');
+                if (dept === null) return;
+                const res = await fetch(`/api/stations/${station.id}/department`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ department: dept }) });
+                const data = await res.json();
+                if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+                station.department = dept;
+                _stationById.set(station.id, station);
+                fetchStations();
+                showStationDetails(station);
+          });
         async function refreshBayInfo(stationId) {
           const [s, us] = await Promise.all([
             fetch(`/api/stations/${stationId}`, { cache: 'no-store' }).then(r=>r.json()),

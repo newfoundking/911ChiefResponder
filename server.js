@@ -915,6 +915,17 @@ app.patch('/api/stations/:id/icon', (req, res) => {
   });
 });
 
+// PATCH /api/stations/:id/department  { department: <string> }
+app.patch('/api/stations/:id/department', (req, res) => {
+  const id = Number(req.params.id);
+  const department = String(req.body?.department || '').trim();
+  if (!id) return res.status(400).json({ error: 'Invalid station id' });
+  db.run(`UPDATE stations SET department=? WHERE id=?`, [department, id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true, id, department });
+  });
+});
+
 // POST /api/stations/:id/equipment  { name: <string> }
 app.post('/api/stations/:id/equipment', (req, res) => {
   const stationId = Number(req.params.id);
