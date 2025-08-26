@@ -165,11 +165,21 @@ async function refreshStationPanelNoCache(stationId) {
   if (st) showStationDetails(st);
 }
 
+function makeIcon(url, size) {
+  return L.divIcon({
+    html: `<img src="${url}" style="width:100%;height:100%;object-fit:contain;object-position:center bottom;">`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size],
+    className: ''
+  });
+}
+
 const missionIcons = {
-  none: L.icon({ iconUrl: "/warning1.png", iconSize: [30,30], iconAnchor: [15,30] }),
-  partial: L.icon({ iconUrl: "/warning2.png", iconSize: [30,30], iconAnchor: [15,30] }),
-  complete: L.icon({ iconUrl: "/warning3.png", iconSize: [30,30], iconAnchor: [15,30] })
-};const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/star.png", hospital: "/star.png", jail: "/police.png" };
+  none: makeIcon("/warning1.png", 30),
+  partial: makeIcon("/warning2.png", 30),
+  complete: makeIcon("/warning3.png", 30)
+};
+const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/star.png", hospital: "/star.png", jail: "/police.png" };
 
 let poiCache = [];
 let missionMarkers = [];
@@ -215,7 +225,7 @@ document.querySelectorAll(".tab-button").forEach(button => {
 
 function unitIconFor(unit) {
   const url = unit.icon || stationIcons[unit.class] || stationIcons.fire;
-  return L.icon({ iconUrl: url, iconSize: [24,24], iconAnchor: [12,24] });
+  return makeIcon(url, 24);
 }
 
 function chooseMissionIcon(mission, assigned) {
@@ -498,7 +508,7 @@ async function fetchStations() {
     const used = unitCounts[idx];
     const free = (st.bay_count || 0) - used;
     const iconUrl = st.icon || stationIcons[st.type] || stationIcons.fire;
-    const icon = L.icon({ iconUrl, iconSize: [30,30], iconAnchor: [15,30] });
+    const icon = makeIcon(iconUrl, 30);
     const marker = L.marker([st.lat, st.lon], { icon }).addTo(map).on("click", () => showStationDetails(st));
     stationMarkers.push(marker);
     const el = document.createElement("div");
