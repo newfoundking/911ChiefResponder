@@ -128,6 +128,7 @@
   <p id="cadRequired"></p>
   <button onclick="dispatchAuto()">Dispatch (Auto)</button>
   <button onclick="dispatchRecommended()">Dispatch (Recommended)</button>
+  <button onclick="dispatchRunCard()">Dispatch (Run Card)</button>
   <button onclick="manualDispatch()">Manual Dispatch</button>
   <button onclick="closeCad()">Close</button>
 </div>
@@ -642,12 +643,13 @@ function showMissionDetails(mission) {
     ${patientHtml ? '<p><strong>Patients:</strong></p>' + patientHtml : ''}
     ${prisonerHtml ? '<p><strong>Prisoners:</strong></p>' + prisonerHtml : ''}
     <div id="assignedUnitsArea" style="margin-top:8px;"></div>
-    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button> <button id="autoDispatchBtn">Auto Dispatch</button></div>
+    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button> <button id="autoDispatchBtn">Auto Dispatch</button> <button id="runCardDispatchBtn">Run Card Dispatch</button></div>
     <div id="manualDispatchArea" style="margin-top:8px;"></div>
     <div id="missionTimerArea" style="margin-top:8px;"></div>
   `;
   document.getElementById('manualDispatchBtn').onclick = () => openManualDispatch(mission);
   document.getElementById('autoDispatchBtn').onclick = () => autoDispatch(mission);
+  document.getElementById('runCardDispatchBtn').onclick = () => runCardDispatch(mission);
   refreshAssignedUnitsUI(mission.id).then(assigned => {
     const reqDiv = document.getElementById('reqDynamic');
     if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned);
@@ -1555,6 +1557,41 @@ async function autoDispatch(mission) {
   } catch (e) {
     console.error(e);
     area.innerHTML = '<span style="color:#b00;">Auto dispatch failed.</span>';
+  }
+}
+
+async function runCardDispatch(mission) {
+  let area = document.getElementById('manualDispatchArea');
+  let tempArea = false;
+  if (!area) {
+    area = document.createElement('div');
+    area.id = 'manualDispatchArea';
+    area.style.display = 'none';
+    document.body.appendChild(area);
+    tempArea = true;
+  }
+  try {
+    const res = await fetch(`/api/run-cards/${encodeURIComponent(mission.type)}`);
+    if (!res.ok) { alert('No run card for this mission.'); return; }
+    const rc = await res.json();
+    const rcMission = {
+      ...mission,
+      required_units: rc.units || [],
+      required_training: rc.training || [],
+      equipment_required: rc.equipment || []
+    };
+    await autoDispatch(rcMission);
+  } catch (e) {
+    console.error(e);
+    alert('Run card dispatch failed.');
+  } finally {
+    if (tempArea) area.remove();
+  }
+}
+
+async function dispatchRunCard() {
+  if (window.currentMission) {
+    await runCardDispatch(window.currentMission);
   }
 }
 

@@ -37,14 +37,26 @@ async function loadMissions() {
 function appendMissionRow(mission) {
   const tbody = document.querySelector("#mission-table tbody");
   const row = document.createElement("tr");
+  const units = [].concat(mission.required_units || []);
+  const trainings = [].concat(mission.required_training || []);
+  const equipmentReq = [].concat(mission.equipment_required || []);
+  const modifiers = [].concat(mission.modifiers || []);
+  const patients = [].concat(mission.patients || []);
+  const prisoners = [].concat(mission.prisoners || []);
+
   row.innerHTML = `
     <td>${mission.name}</td>
     <td>${mission.trigger_type}</td>
     <td>${mission.trigger_filter}</td>
     <td>${mission.timing}</td>
-    <td>${(mission.required_units || []).map(u => `${u.quantity ?? u.count}×${u.type}`).join(", ")}</td>
+    <td>${units.map(u => `${u.quantity ?? u.count}×${u.type}`).join(", ")}</td>
+    <td>${trainings.map(t => `${t.qty ?? t.quantity ?? t.count ?? 1}×${t.training ?? t.name ?? t}`).join(", ")}</td>
+    <td>${equipmentReq.map(e => `${e.qty ?? e.quantity ?? e.count ?? 1}×${e.name ?? e}`).join(", ")}</td>
+    <td>${modifiers.map(m => `${m.type}${m.timeReduction ? ` (${m.timeReduction}%)` : ''}${m.maxCount ? ` x${m.maxCount}` : ''}`).join(", ")}</td>
+    <td>${patients.map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
+    <td>${prisoners.map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
     <td>${Number.isFinite(mission.rewards) ? mission.rewards : 0}</td>
-    <td><button onclick="editMission(${mission.id})">Edit</button></td>
+    <td><button onclick="editMission(${mission.id})">Edit</button> <button onclick='editRunCard(${JSON.stringify(mission.name)})'>Run Card</button></td>
   `;
   tbody.appendChild(row);
 }
@@ -389,4 +401,127 @@ function collectRows(containerSel) {
     });
     return obj;
   });
+}
+
+// ----- Run card management -----
+async function editRunCard(name) {
+  const container = document.getElementById('runcard-form-container');
+  container.style.display = 'block';
+  let existing = null;
+  try {
+    const res = await fetch(`/api/run-cards/${encodeURIComponent(name)}`);
+    if (res.ok) existing = await res.json();
+  } catch {}
+
+  container.innerHTML = `
+    <h3>Run Card for ${name}</h3>
+    <div><strong>Units</strong></div>
+    <div id="rc-unit-container"></div>
+    <button type="button" onclick="addRCUnitRow()">Add Unit</button><br>
+    <div><strong>Training</strong></div>
+    <div id="rc-training-container"></div>
+    <button type="button" onclick="addRCTrainingRow()">Add Training</button><br>
+    <div><strong>Equipment</strong></div>
+    <div id="rc-equipment-container"></div>
+    <button type="button" onclick="addRCEquipmentRow()">Add Equipment</button><br>
+    <button onclick="saveRunCard(${JSON.stringify(name)})">Save</button>
+    <button onclick="document.getElementById('runcard-form-container').style.display='none'">Close</button>
+  `;
+
+  (existing?.units || []).forEach(u => addRCUnitRow(u.type, u.quantity ?? u.count ?? 1));
+  (existing?.training || []).forEach(t => addRCTrainingRow(t.training ?? t.name ?? t, t.qty ?? t.quantity ?? t.count ?? 1));
+  (existing?.equipment || []).forEach(e => addRCEquipmentRow(e.name ?? e.type ?? e, e.qty ?? e.quantity ?? e.count ?? 1));
+}
+
+function addRCUnitRow(selectedType = "", qty = 1) {
+  const container = document.getElementById('rc-unit-container');
+  const row = document.createElement('div');
+  const select = document.createElement('select');
+  unitTypes.forEach(u => {
+    const opt = document.createElement('option');
+    opt.value = u.type;
+    opt.textContent = `${u.class} - ${u.type}`;
+    if (u.type === selectedType) opt.selected = true;
+    select.appendChild(opt);
+  });
+  select.name = 'type';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.name = 'quantity';
+  input.min = 1;
+  input.value = qty;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Remove';
+  btn.onclick = () => container.removeChild(row);
+  row.appendChild(select);
+  row.appendChild(input);
+  row.appendChild(btn);
+  container.appendChild(row);
+}
+
+function addRCTrainingRow(selected = "", qty = 1) {
+  const container = document.getElementById('rc-training-container');
+  const row = document.createElement('div');
+  const select = document.createElement('select');
+  getTrainingDisplayList().forEach(({ name }) => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (name === selected) opt.selected = true;
+    select.appendChild(opt);
+  });
+  select.name = 'training';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.name = 'qty';
+  input.min = 1;
+  input.value = qty;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Remove';
+  btn.onclick = () => container.removeChild(row);
+  row.appendChild(select);
+  row.appendChild(input);
+  row.appendChild(btn);
+  container.appendChild(row);
+}
+
+function addRCEquipmentRow(selected = "", qty = 1) {
+  const container = document.getElementById('rc-equipment-container');
+  const row = document.createElement('div');
+  const select = document.createElement('select');
+  getEquipDisplayList().forEach(({ name }) => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    if (name === selected) opt.selected = true;
+    select.appendChild(opt);
+  });
+  select.name = 'name';
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.name = 'qty';
+  input.min = 1;
+  input.value = qty;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = 'Remove';
+  btn.onclick = () => container.removeChild(row);
+  row.appendChild(select);
+  row.appendChild(input);
+  row.appendChild(btn);
+  container.appendChild(row);
+}
+
+async function saveRunCard(name) {
+  const units = collectRows('#rc-unit-container');
+  const training = collectRows('#rc-training-container');
+  const equipment = collectRows('#rc-equipment-container');
+  await fetch(`/api/run-cards/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ units, training, equipment })
+  });
+  document.getElementById('runcard-form-container').style.display = 'none';
 }
