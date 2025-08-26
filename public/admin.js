@@ -54,9 +54,16 @@ function appendMissionRow(mission) {
   tbody.appendChild(row);
 }
 
-function openMissionForm(existing = null) {
+async function openMissionForm(existing = null) {
   const c = document.getElementById("mission-form-container");
   c.style.display = "block";
+
+  // ensure standalone run card editor is hidden when opening mission form
+  const rcForm = document.getElementById('runcard-form-container');
+  if (rcForm) {
+    rcForm.style.display = 'none';
+    rcForm.innerHTML = '';
+  }
 
   c.innerHTML = `
     <h3>${existing ? "Edit" : "New"} Mission</h3>
@@ -103,6 +110,17 @@ function openMissionForm(existing = null) {
     <div id="equipment-container"></div>
     <button type="button" onclick="addEquipmentRow()">Add Equipment</button><br>
 
+    <h3>Run Card</h3>
+    <div><strong>Units</strong></div>
+    <div id="rc-unit-container"></div>
+    <button type="button" onclick="addRCUnitRow()">Add Unit</button><br>
+    <div><strong>Training</strong></div>
+    <div id="rc-training-container"></div>
+    <button type="button" onclick="addRCTrainingRow()">Add Training</button><br>
+    <div><strong>Equipment</strong></div>
+    <div id="rc-equipment-container"></div>
+    <button type="button" onclick="addRCEquipmentRow()">Add Equipment</button><br>
+
     <button onclick="submitMission()">Save</button>
   `;
 
@@ -116,6 +134,19 @@ function openMissionForm(existing = null) {
   (Array.isArray(existing?.required_training) ? existing.required_training : []).forEach(t => addTrainingRow(t.training ?? t.name ?? t, t.qty ?? 1));
   (Array.isArray(existing?.modifiers) ? existing.modifiers : []).forEach(m => addModifierRow(m.type, m.timeReduction, m.maxCount));
   (Array.isArray(existing?.equipment_required) ? existing.equipment_required : []).forEach(e => addEquipmentRow(e.name ?? e, e.qty ?? 1));
+
+  // Populate run card if editing existing mission
+  if (existing?.name) {
+    try {
+      const rcRes = await fetch(`/api/run-cards/${encodeURIComponent(existing.name)}`);
+      if (rcRes.ok) {
+        const rc = await rcRes.json();
+        (rc.units || []).forEach(u => addRCUnitRow(u.type, u.quantity ?? u.count ?? 1));
+        (rc.training || []).forEach(t => addRCTrainingRow(t.training ?? t.name ?? t, t.qty ?? t.quantity ?? t.count ?? 1));
+        (rc.equipment || []).forEach(e => addRCEquipmentRow(e.name ?? e.type ?? e, e.qty ?? e.quantity ?? e.count ?? 1));
+      }
+    } catch {}
+  }
 }
 
 function buildTriggerFilterUI(type, filter) {
@@ -377,6 +408,18 @@ async function submitMission() {
     return;
   }
 
+  // Save run card details alongside mission
+  const runCard = {
+    units: collectRows('#rc-unit-container') || [],
+    training: collectRows('#rc-training-container') || [],
+    equipment: collectRows('#rc-equipment-container') || []
+  };
+  await fetch(`/api/run-cards/${encodeURIComponent(mission.name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(runCard)
+  });
+
   document.getElementById("mission-form-container").style.display = "none";
   await loadMissions();
 }
@@ -398,6 +441,13 @@ function collectRows(containerSel) {
 
 // ----- Run card management -----
 async function editRunCard(name) {
+  // hide any open mission form to avoid duplicate element IDs
+  const missionForm = document.getElementById('mission-form-container');
+  if (missionForm) {
+    missionForm.style.display = 'none';
+    missionForm.innerHTML = '';
+  }
+
   const container = document.getElementById('runcard-form-container');
   container.style.display = 'block';
   let existing = null;
