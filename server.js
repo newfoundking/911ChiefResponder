@@ -693,26 +693,47 @@ app.post('/api/missions/:id/resolve', (req, res) => {
 /* =========================
    Stations
    ========================= */
-app.get('/api/stations', (req, res) => {
-  db.all('SELECT * FROM stations', (err, rows) => {
-    if (err) return res.status(500).send('Error reading stations');
-    rows = rows.map(r => {
-      try { r.equipment = JSON.parse(r.equipment || '[]'); } catch { r.equipment = []; }
-      return r;
+app.get('/api/stations', async (req, res) => {
+  try {
+    const rows = await new Promise((resolve, reject) => {
+      db.all('SELECT * FROM stations', (err, r) => (err ? reject(err) : resolve(r)));
     });
+    for (const r of rows) {
+      try { r.equipment = JSON.parse(r.equipment || '[]'); } catch { r.equipment = []; }
+      if (r.type === 'hospital') {
+        const occ = await getFacilityOccupancy(r.id, 'patient');
+        r.occupied_beds = occ.count;
+      } else if (r.type === 'jail' || (r.type === 'police' && Number(r.holding_cells) > 0)) {
+        const occ = await getFacilityOccupancy(r.id, 'prisoner');
+        r.occupied_cells = occ.count;
+      }
+    }
     res.json(rows);
-  });
+  } catch (e) {
+    res.status(500).send('Error reading stations');
+  }
 });
 
-app.get('/api/stations/:id', (req, res) => {
+app.get('/api/stations/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid station id' });
-  db.get('SELECT * FROM stations WHERE id=?', [id], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const row = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM stations WHERE id=?', [id], (err, r) => (err ? reject(err) : resolve(r)));
+    });
     if (!row) return res.status(404).json({ error: 'Station not found' });
     try { row.equipment = JSON.parse(row.equipment || '[]'); } catch { row.equipment = []; }
+    if (row.type === 'hospital') {
+      const occ = await getFacilityOccupancy(id, 'patient');
+      row.occupied_beds = occ.count;
+    } else if (row.type === 'jail' || (row.type === 'police' && Number(row.holding_cells) > 0)) {
+      const occ = await getFacilityOccupancy(id, 'prisoner');
+      row.occupied_cells = occ.count;
+    }
     res.json(row);
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ==== Station Bay Pricing (integer dollars) ====
