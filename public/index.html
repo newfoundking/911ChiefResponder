@@ -1391,13 +1391,42 @@ document.getElementById('generateMission').addEventListener('click', async ()=>{
   if (!stations.length) { alert("No stations available."); return; }
   const st = stations[Math.floor(Math.random()*stations.length)];
   const radius = 5000; // meters
-  const dist = Math.random()*radius;
-  const angle = Math.random()*2*Math.PI;
-  const dx = dist * Math.cos(angle);
-  const dy = dist * Math.sin(angle);
-  const lat = st.lat + (dy / 111320);
-  const lon = st.lon + (dx / (111320 * Math.cos(st.lat * Math.PI/180)));
   const template = missionTemplates[Math.floor(Math.random()*missionTemplates.length)];
+
+  let lat, lon;
+  if (template.trigger_type === 'poi' && template.trigger_filter) {
+    try {
+      const pois = await fetch(`/api/pois?lat=${st.lat}&lon=${st.lon}&radius=${radius}`)
+        .then(r => r.json()).catch(() => []);
+      const matches = pois.filter(p => p.tags && p.tags.amenity === template.trigger_filter);
+      if (matches.length) {
+        const poi = matches[Math.floor(Math.random()*matches.length)];
+        lat = poi.lat; lon = poi.lon;
+      }
+    } catch (e) { console.error('POI lookup failed', e); }
+  } else if (template.trigger_type === 'intersection' && template.trigger_filter) {
+    const [road1, road2] = String(template.trigger_filter).split('|');
+    if (road1 && road2) {
+      try {
+        const query = `[out:json];way["name"="${road1}"](around:${radius},${st.lat},${st.lon});way["name"="${road2}"](around:${radius},${st.lat},${st.lon});node(w["name"="${road1}"])(w["name"="${road2}"]);out;`;
+        const resp = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
+        const data = await resp.json();
+        if (Array.isArray(data.elements) && data.elements.length) {
+          const inter = data.elements[0];
+          lat = inter.lat; lon = inter.lon;
+        }
+      } catch (e) { console.error('Intersection lookup failed', e); }
+    }
+  }
+  if (lat === undefined || lon === undefined) {
+    const dist = Math.random()*radius;
+    const angle = Math.random()*2*Math.PI;
+    const dx = dist * Math.cos(angle);
+    const dy = dist * Math.sin(angle);
+    lat = st.lat + (dy / 111320);
+    lon = st.lon + (dx / (111320 * Math.cos(st.lat * Math.PI/180)));
+  }
+
   const missionData = {
     type: template.name, lat, lon,
     required_units: template.required_units,
