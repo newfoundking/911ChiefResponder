@@ -1013,6 +1013,14 @@ async function showStationDetails(station) {
           <button class="edit-unit-btn" data-unitid="${u.id}">Edit</button>
         </li>`).join('')}
     </ul>`;
+  // Prepopulate personnel input with a random name
+  try {
+    const rnd = await fetch('/api/random-name').then(r => r.json());
+    const input = document.getElementById('personnel-name');
+    if (input && rnd.first && rnd.last) {
+      input.value = `${rnd.first} ${rnd.last}`;
+    }
+  } catch {}
           const iconBtn = detail.querySelector('#change-station-icon');
           iconBtn?.addEventListener('click', async () => {
                 const url = prompt('Enter icon URL:');

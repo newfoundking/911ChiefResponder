@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
+const { getRandomName } = require('./names');
 
 const db = require('./db');             // your sqlite3 instance
 const unitTypes = require('./unitTypes');
@@ -499,6 +500,16 @@ async function requireFunds(amount) {
 app.get('/api/wallet', async (req, res) => {
   try { res.json({ balance: await getBalance() }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Provide a random first/last name from names.db
+app.get('/api/random-name', async (req, res) => {
+  try {
+    const { first, last } = await getRandomName();
+    res.json({ first, last });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to fetch name' });
+  }
 });
 
 /* =========================
