@@ -87,14 +87,16 @@ db.serialize(() => {
       patients TEXT DEFAULT '[]',
       prisoners TEXT DEFAULT '[]',
       modifiers TEXT DEFAULT '[]',
-      status TEXT
-      -- timing will be added via ALTER below if missing
+      status TEXT,
+      timing INTEGER DEFAULT 10,
+      resolve_at INTEGER
     )
   `);
 
-  // Add timing/department columns if not present
+  // Add timing/department/resolve columns if not present (for legacy DBs)
   db.run(`ALTER TABLE missions ADD COLUMN timing INTEGER DEFAULT 10`, () => { /* ignore if exists */ });
   db.run(`ALTER TABLE missions ADD COLUMN departments TEXT`, () => { /* ignore if exists */ });
+  db.run(`ALTER TABLE missions ADD COLUMN resolve_at INTEGER`, () => { /* ignore if exists */ });
   db.run(`UPDATE missions SET departments = json_array(department) WHERE departments IS NULL AND department IS NOT NULL`, () => {});
 
   // Mission ↔ Units link
@@ -395,21 +397,38 @@ function resolveMissionById(missionId, cb) {
   });
 }
 
-const missionClocks = new Map(); // mission_id -> { startedAt: number(ms), durationMs: number }
+const missionClocks = new Map(); // mission_id -> { endAt: number(ms) }
 
-function beginMissionClock(missionId) {
-  if (missionClocks.has(missionId)) return; // already running
+function beginMissionClock(missionId, cb) {
+  const existing = missionClocks.get(missionId);
+  if (existing) return cb && cb(existing.endAt);
   db.get('SELECT timing FROM missions WHERE id=?', [missionId], (e, row) => {
-    if (e || !row) return;
+    if (e || !row) return cb && cb(null);
     const minutes = Number(row.timing || 0);
     const durationMs = Math.max(0, minutes) * 60 * 1000; // minutes -> ms
-    missionClocks.set(missionId, { startedAt: Date.now(), durationMs });
+    const endAt = Date.now() + durationMs;
+    db.run('UPDATE missions SET resolve_at=? WHERE id=?', [endAt, missionId], err => {
+      if (!err) missionClocks.set(missionId, { endAt });
+      cb && cb(err ? null : endAt);
+    });
   });
 }
 
 function clearMissionClock(missionId) {
   missionClocks.delete(missionId);
+  db.run('UPDATE missions SET resolve_at=NULL WHERE id=?', [missionId], ()=>{});
 }
+
+// Rehydrate mission clocks from DB on startup
+db.all('SELECT id, resolve_at FROM missions WHERE resolve_at IS NOT NULL', (err, rows) => {
+  if (err) return;
+  const now = Date.now();
+  rows.forEach(r => {
+    const end = Number(r.resolve_at);
+    if (end > now) missionClocks.set(r.id, { endAt: end });
+    else resolveMissionById(r.id, () => {});
+  });
+});
 
 function findUnitCostByType(t) {
   try {
@@ -592,7 +611,8 @@ app.get('/api/missions', (req, res) => {
       patients: JSON.parse(m.patients || "[]"),
       prisoners: JSON.parse(m.prisoners || "[]"),
       modifiers: JSON.parse(m.modifiers || "[]"),
-      timing: typeof m.timing === 'number' ? m.timing : 10
+      timing: typeof m.timing === 'number' ? m.timing : 10,
+      resolve_at: typeof m.resolve_at === 'number' ? m.resolve_at : null
     }));
     res.json(parsed);
   });
@@ -718,6 +738,7 @@ app.get('/api/missions/:id', (req, res) => {
       prisoners: parseArrayField(row.prisoners),
       modifiers: parseArrayField(row.modifiers),
       timing: typeof row.timing === 'number' ? row.timing : 10,
+      resolve_at: typeof row.resolve_at === 'number' ? row.resolve_at : null,
     };
     res.json(mission);
   });
@@ -772,6 +793,23 @@ app.post('/api/missions/:id/resolve', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ ok: true, ...(result || {}) });
   });
+});
+
+// Start or clear mission timers
+app.post('/api/missions/:id/timer', (req, res) => {
+  const missionId = parseInt(req.params.id, 10);
+  if (!missionId) return res.status(400).json({ error: 'invalid id' });
+  beginMissionClock(missionId, end => {
+    if (!end) return res.status(404).json({ error: 'mission not found' });
+    res.json({ resolve_at: end });
+  });
+});
+
+app.delete('/api/missions/:id/timer', (req, res) => {
+  const missionId = parseInt(req.params.id, 10);
+  if (!missionId) return res.status(400).json({ error: 'invalid id' });
+  clearMissionClock(missionId);
+  res.json({ ok: true });
 });
 
 
@@ -1558,7 +1596,7 @@ Promise.all(afterOps).then(() => {
   const now = Date.now();
   const toResolve = [];
   for (const [missionId, clk] of missionClocks.entries()) {
-    if (clk && now - clk.startedAt >= (clk.durationMs || 0)) {
+    if (clk && now >= clk.endAt) {
       toResolve.push(missionId);
     }
   }
@@ -1698,7 +1736,7 @@ setInterval(() => {
   const now = Date.now();
   const due = [];
   for (const [id, clk] of missionClocks.entries()) {
-    if (clk && now - clk.startedAt >= (clk.durationMs || 0)) due.push(id);
+    if (clk && now >= clk.endAt) due.push(id);
   }
   if (!due.length) return;
   due.forEach(id => {
