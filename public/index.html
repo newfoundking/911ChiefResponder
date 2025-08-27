@@ -1402,10 +1402,17 @@ document.getElementById('generateMission').addEventListener('click', async ()=>{
         .then(r => r.json()).catch(() => []);
       const matches = pois.filter(p => p.tags && p.tags.amenity === template.trigger_filter);
       if (matches.length) {
-        const poi = matches[Math.floor(Math.random()*matches.length)];
+        const poi = matches[Math.floor(Math.random() * matches.length)];
         lat = poi.lat; lon = poi.lon;
+      } else {
+        alert('No matching POI found.');
+        return;
       }
-    } catch (e) { console.error('POI lookup failed', e); }
+    } catch (e) {
+      console.error('POI lookup failed', e);
+      alert('POI lookup failed.');
+      return;
+    }
   } else if (template.trigger_type === 'intersection' && template.trigger_filter) {
     const [road1, road2] = String(template.trigger_filter).split('|');
     if (road1 && road2) {
@@ -1421,12 +1428,24 @@ document.getElementById('generateMission').addEventListener('click', async ()=>{
     }
   }
   if (lat === undefined || lon === undefined) {
-    const dist = Math.random()*radius;
-    const angle = Math.random()*2*Math.PI;
-    const dx = dist * Math.cos(angle);
-    const dy = dist * Math.sin(angle);
-    lat = st.lat + (dy / 111320);
-    lon = st.lon + (dx / (111320 * Math.cos(st.lat * Math.PI/180)));
+    try {
+      const roadQuery = `[out:json];way["highway"](around:${radius},${st.lat},${st.lon});out geom;`;
+      const roadResp = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(roadQuery));
+      const roadData = await roadResp.json();
+      if (Array.isArray(roadData.elements) && roadData.elements.length) {
+        const way = roadData.elements[Math.floor(Math.random() * roadData.elements.length)];
+        const geom = Array.isArray(way.geometry) ? way.geometry : [];
+        if (geom.length) {
+          const pt = geom[Math.floor(Math.random() * geom.length)];
+          lat = pt.lat;
+          lon = pt.lon;
+        }
+      }
+    } catch (e) { console.error('Road lookup failed', e); }
+  }
+  if (lat === undefined || lon === undefined) {
+    lat = st.lat;
+    lon = st.lon;
   }
 
   const missionData = {
