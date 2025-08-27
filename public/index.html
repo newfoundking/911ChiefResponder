@@ -2587,6 +2587,13 @@ async function rebuildEnrouteMarkers() {
           const rp = unitRoutes.get(t.unit_id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(t.unit_id); }
           clearUnitEta(t.unit_id);
           fetch(`/api/unit-travel/${t.unit_id}`, { method:'DELETE' }).catch(()=>{});
+          if (t.mission_id) {
+            let mission = null;
+            try {
+              mission = await fetch(`/api/missions/${t.mission_id}`).then(r => r.json());
+            } catch {}
+            if (mission) checkMissionCompletion(mission);
+          }
         },
         { saved: t }
       );
