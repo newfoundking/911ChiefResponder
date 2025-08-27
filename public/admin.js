@@ -50,6 +50,7 @@ function appendMissionRow(mission) {
     <td>${(mission.patients || []).map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
     <td>${(mission.prisoners || []).map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
     <td>${Number.isFinite(mission.rewards) ? mission.rewards : 0}</td>
+    <td>${mission.non_emergency ? 'Yes' : 'No'}</td>
     <td><button onclick="editMission(${mission.id})">Edit</button> <button onclick='editRunCard(${JSON.stringify(mission.name)})'>Run Card</button></td>
   `;
   tbody.appendChild(row);
@@ -80,6 +81,7 @@ async function openMissionForm(existing = null) {
     <label>Trigger Filter: <span id="trigger-filter-container"></span></label><br>
     <label>Timing (minutes): <input id="timing" type="number" value="${existing?.timing ?? 0}"></label><br>
     <label>Rewards (currency): <input id="rewards" type="number" value="${existing?.rewards ?? 0}"></label><br>
+    <label>Non-Emergency: <input id="non-emergency" type="checkbox" ${existing?.non_emergency ? 'checked' : ''}></label><br>
 
     <h4>Required Units</h4>
     <div><strong>Type</strong> | <strong>Quantity</strong></div>
@@ -432,7 +434,8 @@ async function submitMission() {
     required_training: collectRows("#training-container") || [],
     modifiers: collectRows("#modifiers-container") || [],
     penalty_options: collectRows("#penalty-container") || [],
-    equipment_required: collectRows("#equipment-container") || []
+    equipment_required: collectRows("#equipment-container") || [],
+    non_emergency: document.getElementById("non-emergency").checked ? 1 : null
   };
 
   const url = id ? `/api/mission-templates/${id}` : `/api/mission-templates`;

@@ -16,7 +16,7 @@ try { equipment = require('./equipment'); } catch { /* falls back to {} */ }
 // Older clients used "onscene" while the server expects "on_scene".
 // This ensures any existing records are standardized on startup.
 db.serialize(() => {
-  db.run("UPDATE units SET status='on_scene' WHERE status='onscene'");
+db.run("UPDATE units SET status='on_scene', responding=0 WHERE status='onscene'");
   db.run("UPDATE missions SET status='on_scene' WHERE status='onscene'");
 });
 
@@ -98,11 +98,16 @@ db.serialize(() => {
       modifiers TEXT DEFAULT '[]',
       penalty_options TEXT DEFAULT '[]',
       penalties TEXT DEFAULT '[]',
+      non_emergency INTEGER,
       status TEXT,
       timing INTEGER DEFAULT 10,
       resolve_at INTEGER
     )
   `);
+
+  db.run(`
+    ALTER TABLE mission_templates ADD COLUMN non_emergency INTEGER
+  `, () => { /* ignore if exists */ });
 
   // Add timing/department/resolve columns if not present (for legacy DBs)
   db.run(`ALTER TABLE missions ADD COLUMN timing INTEGER DEFAULT 10`, () => { /* ignore if exists */ });
@@ -111,6 +116,7 @@ db.serialize(() => {
   // Newer schema fields
   db.run(`ALTER TABLE missions ADD COLUMN penalty_options TEXT DEFAULT '[]'`, () => { /* ignore if exists */ });
   db.run(`ALTER TABLE missions ADD COLUMN penalties TEXT DEFAULT '[]'`, () => { /* ignore if exists */ });
+  db.run(`ALTER TABLE missions ADD COLUMN non_emergency INTEGER`, () => { /* ignore if exists */ });
   db.run(`UPDATE missions SET departments = json_array(department) WHERE departments IS NULL AND department IS NOT NULL`, () => {});
 
   // Mission ↔ Units link
@@ -138,7 +144,8 @@ db.serialize(() => {
           modifiers TEXT,
           equipment_required TEXT,
           penalty_options TEXT,
-          rewards INTEGER DEFAULT 0
+          rewards INTEGER DEFAULT 0,
+          non_emergency INTEGER
     )
   `);
 
@@ -163,13 +170,16 @@ db.serialize(() => {
       personnel TEXT DEFAULT '[]',
       equipment TEXT DEFAULT '[]',
       status TEXT DEFAULT 'available',
+      icon TEXT,
+      responding_icon TEXT,
+      responding INTEGER DEFAULT 0,
       patrol INTEGER DEFAULT 0,
       FOREIGN KEY (station_id) REFERENCES stations(id)
     )
   `);
 
   // Fix any legacy rows where status was "[]"
-  db.run(`UPDATE units SET status='available' WHERE status IS NULL OR status='[]'`);
+  db.run(`UPDATE units SET status='available', responding=0 WHERE status IS NULL OR status='[]'`);
   // Add patrol column for legacy DBs
   db.run(`ALTER TABLE units ADD COLUMN patrol INTEGER DEFAULT 0`, () => {});
 
@@ -251,6 +261,12 @@ db.run(`
 `, () => { /* ignore if exists */ });
 db.run(`
   ALTER TABLE units ADD COLUMN icon TEXT
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE units ADD COLUMN responding_icon TEXT
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE units ADD COLUMN responding INTEGER DEFAULT 0
 `, () => { /* ignore if exists */ });
 db.run(`
   CREATE TABLE IF NOT EXISTS facility_load (
@@ -378,7 +394,7 @@ function resolveMissionById(missionId, cb) {
 
         const freeUnits = ids.length
           ? new Promise((resolve, reject) =>
-              db.run(`UPDATE units SET status='available' WHERE id IN (${placeholders})`, ids, (e) => e ? reject(e) : resolve()))
+              db.run(`UPDATE units SET status='available', responding=0 WHERE id IN (${placeholders})`, ids, (e) => e ? reject(e) : resolve()))
           : Promise.resolve();
 
         try {
@@ -655,7 +671,8 @@ app.get('/api/missions', (req, res) => {
       penalty_options: JSON.parse(m.penalty_options || "[]"),
       penalties: JSON.parse(m.penalties || "[]"),
       timing: typeof m.timing === 'number' ? m.timing : 10,
-      resolve_at: m.resolve_at != null ? Number(m.resolve_at) : null
+      resolve_at: m.resolve_at != null ? Number(m.resolve_at) : null,
+      non_emergency: m.non_emergency === 1 || m.non_emergency === true
     }));
     res.json(parsed);
   });
@@ -667,7 +684,8 @@ app.post('/api/missions', (req, res) => {
     required_units = [], required_training = [],
     equipment_required = [], patients = [], prisoners = [], modifiers = [],
     penalty_options = [], penalties = [],
-    timing = 10
+    timing = 10,
+    non_emergency = null
   } = req.body;
 
   db.all('SELECT * FROM response_zones', (err, zones) => {
@@ -687,8 +705,8 @@ app.post('/api/missions', (req, res) => {
 
     db.run(`
       INSERT INTO missions
-      (type, lat, lon, departments, required_units, required_training, equipment_required, patients, prisoners, modifiers, penalty_options, penalties, status, timing)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (type, lat, lon, departments, required_units, required_training, equipment_required, patients, prisoners, modifiers, penalty_options, penalties, status, timing, non_emergency)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       type, lat, lon,
@@ -702,7 +720,8 @@ app.post('/api/missions', (req, res) => {
       JSON.stringify(penalty_options),
       JSON.stringify(penalties),
       'active',
-      timing
+      timing,
+      non_emergency ? 1 : null
     ],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
@@ -737,7 +756,7 @@ app.delete('/api/missions', (req, res) => {
 app.get('/api/missions/:id/units', (req, res) => {
   db.all(
     `SELECT
-       u.id, u.station_id, u.class, u.type, u.name, u.status, u.equipment,
+       u.id, u.station_id, u.class, u.type, u.name, u.status, u.responding, u.icon, u.responding_icon, u.equipment,
        COALESCE(json_group_array(
          json_object('id', p.id, 'name', p.name, 'training', p.training)
        ), '[]') AS personnel
@@ -751,6 +770,7 @@ app.get('/api/missions/:id/units', (req, res) => {
       if (err) return res.status(500).json({ error: err.message });
       const parsed = rows.map(r => ({
         ...r,
+        responding: r.responding === 1 || r.responding === true,
         equipment: (()=>{ try { return JSON.parse(r.equipment||'[]'); } catch { return []; } })(),
         personnel: (()=>{
           try {
@@ -788,6 +808,7 @@ app.get('/api/missions/:id', (req, res) => {
       penalties: parseArrayField(row.penalties),
       timing: typeof row.timing === 'number' ? row.timing : 10,
       resolve_at: row.resolve_at != null ? Number(row.resolve_at) : null,
+      non_emergency: row.non_emergency === 1 || row.non_emergency === true,
     };
     res.json(mission);
   });
@@ -833,13 +854,16 @@ app.post('/api/units/:id/personnel', (req, res) => {
 app.post('/api/missions/:id/units', (req, res) => {
     const missionId = req.params.id;
     const { unitId } = req.body;
-
-    db.run(`INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)`, [missionId, unitId], function (err) {
+    db.get('SELECT non_emergency FROM missions WHERE id=?', [missionId], (err, m) => {
         if (err) return res.status(500).json({ error: err.message });
-
-        db.run(`UPDATE units SET status = 'enroute' WHERE id = ?`, [unitId], function (err2) {
+        if (!m) return res.status(404).json({ error: 'mission not found' });
+        const responding = m.non_emergency ? 0 : 1;
+        db.run(`INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)`, [missionId, unitId], function (err2) {
             if (err2) return res.status(500).json({ error: err2.message });
-            res.json({ success: true });
+            db.run(`UPDATE units SET status = 'enroute', responding=? WHERE id = ?`, [responding, unitId], function (err3) {
+                if (err3) return res.status(500).json({ error: err3.message });
+                res.json({ success: true });
+            });
         });
     });
 });
@@ -1120,6 +1144,7 @@ app.get('/api/units', (req, res) => {
       const parsed = rows.map(u => ({
         ...u,
         patrol: u.patrol === 1 || u.patrol === true,
+        responding: u.responding === 1 || u.responding === true,
         equipment: (() => { try { return JSON.parse(u.equipment || '[]'); } catch { return []; } })(),
         personnel: byUnit.get(u.id) || [],
       }));
@@ -1167,6 +1192,7 @@ app.get('/api/units/:id/mission', (req, res) => {
         prisoners: parseArrayField(row.prisoners),
         modifiers: parseArrayField(row.modifiers),
         timing: typeof row.timing === 'number' ? row.timing : 10,
+        non_emergency: row.non_emergency === 1 || row.non_emergency === true,
       };
       res.json(mission);
     }
@@ -1275,10 +1301,21 @@ app.patch('/api/units/:id/status', (req, res) => {
   // Normalize legacy status value without underscore.
   if (status === 'onscene') status = 'on_scene';
 
-  db.run('UPDATE units SET status = ? WHERE id = ?', [status, id], function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ ok: true, status });
-  });
+  if (status === 'enroute') {
+    db.get('SELECT m.non_emergency FROM mission_units mu JOIN missions m ON m.id = mu.mission_id WHERE mu.unit_id=?', [id], (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      const responding = row && row.non_emergency ? 0 : 1;
+      db.run('UPDATE units SET status=?, responding=? WHERE id=?', [status, responding, id], function (err2) {
+        if (err2) return res.status(500).json({ error: err2.message });
+        res.json({ ok: true, status, responding: Boolean(responding) });
+      });
+    });
+  } else {
+    db.run('UPDATE units SET status=?, responding=0 WHERE id=?', [status, id], function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true, status, responding: false });
+    });
+  }
 });
 
 // Toggle unit patrol flag
@@ -1294,12 +1331,20 @@ app.patch('/api/units/:id/patrol', (req, res) => {
 // PATCH /api/units/:id/icon  { icon: <string> }
 app.patch('/api/units/:id/icon', (req, res) => {
   const id = Number(req.params.id);
-  const icon = String(req.body?.icon || '').trim();
+  const icon = req.body?.icon !== undefined ? String(req.body.icon).trim() : undefined;
+  const respondingIcon = req.body?.responding_icon !== undefined ? String(req.body.responding_icon).trim() : undefined;
   if (!id) return res.status(400).json({ error: 'Invalid unit id' });
-  if (icon.length > 2048) return res.status(400).json({ error: 'Icon URL too long' });
-  db.run(`UPDATE units SET icon=? WHERE id=?`, [icon, id], function (err) {
+  if (icon !== undefined && icon.length > 2048) return res.status(400).json({ error: 'Icon URL too long' });
+  if (respondingIcon !== undefined && respondingIcon.length > 2048) return res.status(400).json({ error: 'Icon URL too long' });
+  const sets = [];
+  const params = [];
+  if (icon !== undefined) { sets.push('icon=?'); params.push(icon); }
+  if (respondingIcon !== undefined) { sets.push('responding_icon=?'); params.push(respondingIcon); }
+  if (!sets.length) return res.status(400).json({ error: 'No icon provided' });
+  params.push(id);
+  db.run(`UPDATE units SET ${sets.join(', ')} WHERE id=?`, params, function (err) {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true, id, icon });
+    res.json({ success: true, id, icon, responding_icon: respondingIcon });
   });
 });
 
@@ -1313,7 +1358,7 @@ app.post('/api/units/:id/cancel', (req, res) => {
       const missions = rows.map(r => r.mission_id);
       db.run('DELETE FROM mission_units WHERE unit_id=?', [id]);
       db.run('DELETE FROM unit_travel WHERE unit_id=?', [id]);
-      db.run('UPDATE units SET status=? WHERE id=?', ['available', id], function (err2) {
+      db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', id], function (err2) {
         if (err2) return res.status(500).json({ error: err2.message });
         res.json({ ok: true, missions });
       });
@@ -1438,7 +1483,8 @@ app.get('/api/mission-templates', (req, res) => {
       required_training: parseArrayField(row.required_training),
       equipment_required: parseArrayField(row.equipment_required),
       penalty_options: parseArrayField(row.penalty_options),
-      rewards: Number.isFinite(row.rewards) ? row.rewards : 0
+      rewards: Number.isFinite(row.rewards) ? row.rewards : 0,
+      non_emergency: row.non_emergency === 1 || row.non_emergency === true
     }));
     res.json(parsed);
   });
@@ -1458,16 +1504,17 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
     modifiers: JSON.stringify(b.modifiers || []),
     equipment_required: JSON.stringify(b.equipment_required || []),
     penalty_options: JSON.stringify(b.penalty_options || []),
-    rewards: Number(b.rewards) || 0
+    rewards: Number(b.rewards) || 0,
+    non_emergency: b.non_emergency ? 1 : null
   };
   db.run(
     `INSERT INTO mission_templates
      (name, trigger_type, trigger_filter, timing,
-      required_units, patients, prisoners, required_training, modifiers, equipment_required, penalty_options, rewards)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      required_units, patients, prisoners, required_training, modifiers, equipment_required, penalty_options, rewards, non_emergency)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
-     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards],
+     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards, fields.non_emergency],
     function(err){
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID, ...fields });
@@ -1490,17 +1537,18 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
     modifiers: JSON.stringify(b.modifiers || []),
     equipment_required: JSON.stringify(b.equipment_required || []),
     penalty_options: JSON.stringify(b.penalty_options || []),
-    rewards: Number(b.rewards) || 0
+    rewards: Number(b.rewards) || 0,
+    non_emergency: b.non_emergency ? 1 : null
   };
   db.run(
     `UPDATE mission_templates SET
       name=?, trigger_type=?, trigger_filter=?, timing=?,
       required_units=?, patients=?, prisoners=?, required_training=?,
-      modifiers=?, equipment_required=?, penalty_options=?, rewards=?
+      modifiers=?, equipment_required=?, penalty_options=?, rewards=?, non_emergency=?
      WHERE id=?`,
     [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
-     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards, id],
+     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards, fields.non_emergency, id],
     function(err){
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id, ...fields });
@@ -1512,7 +1560,7 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
 app.get('/api/mission-templates/id/:id', (req, res) => {
   db.get(`SELECT id, name, trigger_type, trigger_filter, timing,
                  required_units, patients, prisoners, required_training,
-                 modifiers, equipment_required, penalty_options, rewards
+                 modifiers, equipment_required, penalty_options, rewards, non_emergency
           FROM mission_templates WHERE id=?`, [req.params.id], (err, r) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!r)   return res.status(404).json({ error: "Not found" });
@@ -1524,6 +1572,7 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
     r.equipment_required = parseArrayField(r.equipment_required);
     r.penalty_options = parseArrayField(r.penalty_options);
     r.rewards = Number.isFinite(r.rewards) ? r.rewards : 0;
+    r.non_emergency = r.non_emergency === 1 || r.non_emergency === true;
     res.json(r);
   });
 });
@@ -1579,10 +1628,15 @@ app.post('/api/mission-units', (req, res) => {
       if (err) return res.status(500).json({ error: err.message });
       if (row) return res.json({ ok: true, alreadyAssigned: true });
 
-      db.run('INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)', [mission_id, unit_id], function (err2) {
+      db.get('SELECT non_emergency FROM missions WHERE id=?', [mission_id], (err2, m) => {
         if (err2) return res.status(500).json({ error: err2.message });
-        // Flip unit to enroute immediately (front-end may PATCH too, that’s fine)
-        db.run('UPDATE units SET status=? WHERE id=?', ['enroute', unit_id], () => res.json({ ok: true, id: this?.lastID }));
+        if (!m) return res.status(404).json({ error: 'mission not found' });
+        const responding = m.non_emergency ? 0 : 1;
+        db.run('INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)', [mission_id, unit_id], function (err3) {
+          if (err3) return res.status(500).json({ error: err3.message });
+          // Flip unit to enroute immediately (front-end may PATCH too, that’s fine)
+          db.run('UPDATE units SET status=?, responding=? WHERE id=?', ['enroute', responding, unit_id], () => res.json({ ok: true, id: this?.lastID }));
+        });
       });
     });
   });
@@ -1595,7 +1649,7 @@ app.delete('/api/mission-units', (req, res) => {
   db.run('DELETE FROM mission_units WHERE mission_id = ? AND unit_id = ?', [mission_id, unit_id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
     // Optional: set available immediately (or let arrival back at station do it)
-    db.run('UPDATE units SET status=? WHERE id=?', ['available', unit_id], () => res.json({ ok: true, removed: this.changes }));
+    db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', unit_id], () => res.json({ ok: true, removed: this.changes }));
   });
 });
 
@@ -1637,13 +1691,13 @@ app.post('/api/unit-travel', (req, res) => {
     const elapsed = (Date.now() - new Date(started_at).getTime()) / 1000;
     if (elapsed >= Number(total_duration || 0)) {
       if (phase === 'to_scene') {
-        db.run('UPDATE units SET status=? WHERE id=?', ['on_scene', unit_id], () => {});
+        db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['on_scene', unit_id], () => {});
         db.run('DELETE FROM unit_travel WHERE unit_id=?', [unit_id], () => {});
         if (mission_id) {
           db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', mission_id], () => {});
         }
       } else if (phase === 'return') {
-        db.run('UPDATE units SET status=? WHERE id=?', ['available', unit_id], () => {});
+        db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', unit_id], () => {});
         db.run('DELETE FROM unit_travel WHERE unit_id=?', [unit_id], () => {});
       }
     }
@@ -1671,7 +1725,7 @@ app.get('/api/unit-travel/active', (req, res) => {
         if (r.phase === 'to_scene') {
           // Arrived at scene
           afterOps.push(new Promise(resolve => {
-            db.run('UPDATE units SET status=? WHERE id=?', ['on_scene', r.unit_id], () => {
+            db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['on_scene', r.unit_id], () => {
               db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => {
                 if (r.mission_id) {
                   db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', r.mission_id], () => {
@@ -1683,7 +1737,7 @@ app.get('/api/unit-travel/active', (req, res) => {
           }));
         } else if (r.phase === 'return') {
           afterOps.push(new Promise(resolve => {
-            db.run('UPDATE units SET status=? WHERE id=?', ['available', r.unit_id], () => {
+            db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', r.unit_id], () => {
               db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => resolve());
             });
           }));
