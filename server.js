@@ -96,6 +96,8 @@ db.serialize(() => {
       patients TEXT DEFAULT '[]',
       prisoners TEXT DEFAULT '[]',
       modifiers TEXT DEFAULT '[]',
+      penalty_options TEXT DEFAULT '[]',
+      penalties TEXT DEFAULT '[]',
       status TEXT,
       timing INTEGER DEFAULT 10,
       resolve_at INTEGER
@@ -132,6 +134,7 @@ db.serialize(() => {
           required_training TEXT,
           modifiers TEXT,
           equipment_required TEXT,
+          penalty_options TEXT,
           rewards INTEGER DEFAULT 0
     )
   `);
@@ -380,15 +383,19 @@ function resolveMissionById(missionId, cb) {
           db.run('DELETE FROM mission_units WHERE mission_id=?', [missionId], (e2) => {
             if (e2) return cb && cb(e2);
 
-            db.get('SELECT type, lat, lon, patients, prisoners FROM missions WHERE id=?', [missionId], (e3, m) => {
+            db.get('SELECT type, lat, lon, patients, prisoners, penalties FROM missions WHERE id=?', [missionId], (e3, m) => {
               if (e3) return cb && cb(e3);
               const missionName = m?.type || '';
               let pats = []; let pris = [];
               try { pats = JSON.parse(m?.patients || '[]'); } catch {}
               try { pris = JSON.parse(m?.prisoners || '[]'); } catch {}
+              let penalties = [];
+              try { penalties = JSON.parse(m?.penalties || '[]'); } catch {}
               db.get('SELECT rewards FROM mission_templates WHERE name=?', [missionName], async (e4, trow) => {
                 if (e4) return cb && cb(e4);
-                const reward = Number(trow?.rewards || 0);
+                const baseReward = Number(trow?.rewards || 0);
+                const rewardPenalty = penalties.reduce((s,p)=> s + (Number(p.rewardPenalty)||0),0);
+                const reward = Math.max(0, baseReward * (1 - rewardPenalty/100));
                 try {
                   if (reward > 0) await adjustBalance(+reward);
                   await handleTransports(missionId, m.lat, m.lon, pats, pris);
@@ -642,6 +649,8 @@ app.get('/api/missions', (req, res) => {
       patients: JSON.parse(m.patients || "[]"),
       prisoners: JSON.parse(m.prisoners || "[]"),
       modifiers: JSON.parse(m.modifiers || "[]"),
+      penalty_options: JSON.parse(m.penalty_options || "[]"),
+      penalties: JSON.parse(m.penalties || "[]"),
       timing: typeof m.timing === 'number' ? m.timing : 10,
       resolve_at: m.resolve_at != null ? Number(m.resolve_at) : null
     }));
@@ -654,6 +663,7 @@ app.post('/api/missions', (req, res) => {
     type, lat, lon,
     required_units = [], required_training = [],
     equipment_required = [], patients = [], prisoners = [], modifiers = [],
+    penalty_options = [], penalties = [],
     timing = 10
   } = req.body;
 
@@ -674,8 +684,8 @@ app.post('/api/missions', (req, res) => {
 
     db.run(`
       INSERT INTO missions
-      (type, lat, lon, departments, required_units, required_training, equipment_required, patients, prisoners, modifiers, status, timing)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (type, lat, lon, departments, required_units, required_training, equipment_required, patients, prisoners, modifiers, penalty_options, penalties, status, timing)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       type, lat, lon,
@@ -686,6 +696,8 @@ app.post('/api/missions', (req, res) => {
       JSON.stringify(patients),
       JSON.stringify(prisoners),
       JSON.stringify(modifiers),
+      JSON.stringify(penalty_options),
+      JSON.stringify(penalties),
       'active',
       timing
     ],
@@ -696,6 +708,7 @@ app.post('/api/missions', (req, res) => {
         type, lat, lon,
         departments,
         required_units, required_training, equipment_required, patients, prisoners, modifiers,
+        penalty_options, penalties,
         status: 'active',
         timing
       });
@@ -768,10 +781,23 @@ app.get('/api/missions/:id', (req, res) => {
       patients: parseArrayField(row.patients),
       prisoners: parseArrayField(row.prisoners),
       modifiers: parseArrayField(row.modifiers),
+      penalty_options: parseArrayField(row.penalty_options),
+      penalties: parseArrayField(row.penalties),
       timing: typeof row.timing === 'number' ? row.timing : 10,
       resolve_at: row.resolve_at != null ? Number(row.resolve_at) : null,
     };
     res.json(mission);
+  });
+});
+
+// Update penalties for a mission
+app.patch('/api/missions/:id/penalties', express.json(), (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid mission id' });
+  const penalties = JSON.stringify(req.body?.penalties || []);
+  db.run('UPDATE missions SET penalties=? WHERE id=?', [penalties, id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ id, penalties: JSON.parse(penalties) });
   });
 });
 // Get personnel for a station (only unassigned)
@@ -839,7 +865,7 @@ app.post('/api/missions/:id/timer', (req, res) => {
 app.patch('/api/missions/:id/timer', (req, res) => {
   const missionId = parseInt(req.params.id, 10);
   if (!missionId) return res.status(400).json({ error: 'invalid id' });
-  const reduction = Math.max(0, Math.min(100, Number(req.body?.reduction) || 0));
+  const reduction = Math.max(-100, Math.min(100, Number(req.body?.reduction) || 0));
   const clk = missionClocks.get(missionId);
   if (!clk) return res.status(404).json({ error: 'timer not running' });
   const now = Date.now();
@@ -1408,6 +1434,7 @@ app.get('/api/mission-templates', (req, res) => {
       modifiers: parseArrayField(row.modifiers),
       required_training: parseArrayField(row.required_training),
       equipment_required: parseArrayField(row.equipment_required),
+      penalty_options: parseArrayField(row.penalty_options),
       rewards: Number.isFinite(row.rewards) ? row.rewards : 0
     }));
     res.json(parsed);
@@ -1427,16 +1454,17 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
     required_training: JSON.stringify(b.required_training || []),
     modifiers: JSON.stringify(b.modifiers || []),
     equipment_required: JSON.stringify(b.equipment_required || []),
+    penalty_options: JSON.stringify(b.penalty_options || []),
     rewards: Number(b.rewards) || 0
   };
   db.run(
     `INSERT INTO mission_templates
      (name, trigger_type, trigger_filter, timing,
-      required_units, patients, prisoners, required_training, modifiers, equipment_required, rewards)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      required_units, patients, prisoners, required_training, modifiers, equipment_required, penalty_options, rewards)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
-     fields.modifiers, fields.equipment_required, fields.rewards],
+     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards],
     function(err){
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID, ...fields });
@@ -1458,17 +1486,18 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
     required_training: JSON.stringify(b.required_training || []),
     modifiers: JSON.stringify(b.modifiers || []),
     equipment_required: JSON.stringify(b.equipment_required || []),
+    penalty_options: JSON.stringify(b.penalty_options || []),
     rewards: Number(b.rewards) || 0
   };
   db.run(
     `UPDATE mission_templates SET
       name=?, trigger_type=?, trigger_filter=?, timing=?,
       required_units=?, patients=?, prisoners=?, required_training=?,
-      modifiers=?, equipment_required=?, rewards=?
+      modifiers=?, equipment_required=?, penalty_options=?, rewards=?
      WHERE id=?`,
     [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
-     fields.modifiers, fields.equipment_required, fields.rewards, id],
+     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards, id],
     function(err){
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id, ...fields });
@@ -1480,7 +1509,7 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
 app.get('/api/mission-templates/id/:id', (req, res) => {
   db.get(`SELECT id, name, trigger_type, trigger_filter, timing,
                  required_units, patients, prisoners, required_training,
-                 modifiers, equipment_required, rewards
+                 modifiers, equipment_required, penalty_options, rewards
           FROM mission_templates WHERE id=?`, [req.params.id], (err, r) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!r)   return res.status(404).json({ error: "Not found" });
@@ -1490,6 +1519,7 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
     r.required_training = parseArrayField(r.required_training);
     r.modifiers = parseArrayField(r.modifiers);
     r.equipment_required = parseArrayField(r.equipment_required);
+    r.penalty_options = parseArrayField(r.penalty_options);
     r.rewards = Number.isFinite(r.rewards) ? r.rewards : 0;
     res.json(r);
   });
