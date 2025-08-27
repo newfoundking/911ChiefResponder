@@ -285,8 +285,34 @@ window._unitById = new Map();
 // registries
 const unitMarkers = new Map(); // unitId -> { marker, animId }
 const unitRoutes  = new Map(); // unitId -> L.Polyline
+// track ETA timers for enroute units
+const unitEtaTimers = new Map(); // unitId -> intervalId
 
-function clearUnitEta(){ /* hook for later, no-op now */ }
+function formatEta(seconds){
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2,'0')}`;
+}
+
+function setUnitEta(unitId, elem, startedAt, totalDuration){
+  clearUnitEta(unitId);
+  function update(){
+    const elapsed = (Date.now() - new Date(startedAt).getTime())/1000;
+    const remaining = Math.max(0, (totalDuration||0) - elapsed);
+    elem.textContent = `enroute (${formatEta(remaining)})`;
+    if (remaining <= 0) clearUnitEta(unitId);
+  }
+  update();
+  const iid = setInterval(update, 1000);
+  unitEtaTimers.set(unitId, iid);
+}
+
+function clearUnitEta(unitId){
+  const iid = unitEtaTimers.get(unitId);
+  if (iid) clearInterval(iid);
+  unitEtaTimers.delete(unitId);
+}
 
 function cacheStations(stations){
   _stationById = new Map(stations.map(s => [s.id, { ...s, department: s.department ?? null }]));
@@ -772,8 +798,16 @@ async function refreshAssignedUnitsUI(missionId) {
   if (!div) return [];
   try {
     div.innerHTML = 'Loading assigned units…';
-    const res = await fetch(`/api/missions/${missionId}/units`);
+    const [res, travelRes] = await Promise.all([
+      fetch(`/api/missions/${missionId}/units`),
+      fetch('/api/unit-travel/active').catch(()=>null)
+    ]);
     const assigned = await res.json();
+    let travelMap = new Map();
+    try {
+      const travels = travelRes ? await travelRes.json() : [];
+      travelMap = new Map(travels.map(t => [t.unit_id, t]));
+    } catch {}
     (assigned||[]).forEach(u => _unitById.set(u.id, u));
     if (!Array.isArray(assigned) || !assigned.length) {
       div.innerHTML = '<em>No units assigned yet.</em>';
@@ -784,7 +818,7 @@ async function refreshAssignedUnitsUI(missionId) {
       <ul style="list-style:none; padding-left:0;">
         ${assigned.map(u => `
           <li style="display:flex; align-items:center; gap:6px; margin:4px 0;">
-            <span class="unit-link" data-unitid="${u.id}" style="cursor:pointer; color:blue;">${u.name}</span> (${u.type}) — ${u.status || 'enroute'}
+            <span class="unit-link" data-unitid="${u.id}" style="cursor:pointer; color:blue;">${u.name}</span> (${u.type}) — <span id="unit-status-${u.id}">${u.status || 'enroute'}</span>
             <button data-unitid="${u.id}" data-missionid="${missionId}" class="clear-unit-btn">Clear</button>
           </li>
         `).join('')}
@@ -798,6 +832,15 @@ async function refreshAssignedUnitsUI(missionId) {
         try { await clearAssignedUnit(parseInt(btn.dataset.missionid,10), parseInt(btn.dataset.unitid,10)); }
         finally { btn.disabled = false; }
       };
+    });
+    assigned.forEach(u => {
+      const travel = travelMap.get(u.id);
+      const statusEl = div.querySelector(`#unit-status-${u.id}`);
+      if (u.status === 'enroute' && travel && statusEl) {
+        setUnitEta(u.id, statusEl, travel.started_at, travel.total_duration);
+      } else {
+        clearUnitEta(u.id);
+      }
     });
     return assigned;
   } catch (e) {
@@ -1718,7 +1761,7 @@ async function showUnitDetails(unitId) {
     : '<p>No personnel assigned to this unit.</p>';
 
   const missionHtml = mission && mission.id
-    ? `<p><strong>Current Mission:</strong> <span class="mission-link" data-missionid="${mission.id}" style="cursor:pointer; color:blue;">#${mission.id} ${mission.type}</span></p>`
+    ? `<p><strong>Current Mission:</strong> <span class="mission-link" data-missionid="${mission.id}" style="cursor:pointer; color:blue;">#${mission.id} ${mission.type}</span> <button id="cancel-mission-btn" data-missionid="${mission.id}">Cancel</button></p>`
     : '<p><strong>Current Mission:</strong> None</p>';
   const patrolHtml = `<p><label><input type="checkbox" id="patrol-toggle" ${unit?.patrol ? 'checked' : ''}/> Patrol</label></p>`;
 
@@ -1746,6 +1789,13 @@ async function showUnitDetails(unitId) {
       body: JSON.stringify({ patrol: val })
     });
     _unitById.set(unitId, { ...unit, patrol: val });
+  });
+
+  const cancelBtn = content.querySelector('#cancel-mission-btn');
+  cancelBtn?.addEventListener('click', async () => {
+    const mid = parseInt(cancelBtn.dataset.missionid,10);
+    await clearAssignedUnit(mid, unitId);
+    modal.style.display = 'none';
   });
 
   content.querySelectorAll('.unassign-btn').forEach(btn => {
