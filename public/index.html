@@ -14,11 +14,13 @@
 		#sidebar { max-width: 30%; width: 100%; overflow-y: auto; padding: 10px; box-sizing: border-box; }
 		#map { flex: 1; }
 		.mission { border-bottom: 1px solid #ccc; margin-bottom: 1em; padding-bottom: 0.5em; }
-		.tab-button { padding: 0.5em 1em; border: none; background: #ddd; cursor: pointer; }
-		.tab-button.active { background: #aaa; font-weight: bold; }
-		.tab-content { display: none; }
-		.tab-content.active { display: block; }
-		#stationDetails { max-width: 30%; overflow-y: auto; }
+                .tab-button { padding: 0.5em 1em; border: none; background: #ddd; cursor: pointer; }
+                .tab-button.active { background: #aaa; font-weight: bold; }
+                .mission-speed { padding: 0.5em 1em; border: none; background: #ddd; cursor: pointer; margin-right: 0.5em; }
+                .mission-speed.active { background: #aaa; font-weight: bold; }
+                .tab-content { display: none; }
+                .tab-content.active { display: block; }
+                #stationDetails { max-width: 30%; overflow-y: auto; }
 		.popup { position: fixed; top: 10%; left: 30%; width: 40%; background: white; border: 2px solid black; padding: 20px; z-index: 9999; max-height: 80%; overflow-y: auto; }
 		.hidden { display: none; }
 		.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; overflow: auto; }
@@ -42,8 +44,14 @@
 	}
 	setInterval(refreshWallet, 5000);
 	refreshWallet();
-	</script>
+        </script>
         <div id="tab-missions" class="tab-content active">
+                <div id="missionSpeedControls" style="margin-bottom:1em;">
+                        <button class="mission-speed active" data-speed="pause">Pause</button>
+                        <button class="mission-speed" data-speed="slow">Slow</button>
+                        <button class="mission-speed" data-speed="medium">Medium</button>
+                        <button class="mission-speed" data-speed="fast">Fast</button>
+                </div>
                 <button id="generateMission">Generate Mission</button>
                 <button id="startPatrols">Start Patrols</button>
                 <button id="clearMissions" style="background: darkred; color: white; margin-top: 1em;">DEBUG CLEAR ALL CALLS</button>
@@ -1542,6 +1550,48 @@ document.getElementById("clearMissions").addEventListener("click", async ()=>{
   if (!confirm("Clear ALL missions?")) return;
   await fetch("/api/missions", { method:"DELETE" });
   fetchMissions();
+});
+
+// Mission generation speed controls
+let missionGenTimer = null;
+let missionGenRange = null;
+
+function scheduleMissionGeneration() {
+  if (!missionGenRange) return;
+  const [min, max] = missionGenRange;
+  const delay = (Math.floor(Math.random() * (max - min + 1)) + min) * 1000;
+  missionGenTimer = setTimeout(() => {
+    const btn = document.getElementById('generateMission');
+    if (btn) btn.click();
+    scheduleMissionGeneration();
+  }, delay);
+}
+
+function setMissionGenerationSpeed(range) {
+  if (missionGenTimer) clearTimeout(missionGenTimer);
+  missionGenRange = range;
+  if (range) scheduleMissionGeneration();
+}
+
+document.querySelectorAll('.mission-speed').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mission-speed').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    switch (btn.dataset.speed) {
+      case 'pause':
+        setMissionGenerationSpeed(null);
+        break;
+      case 'slow':
+        setMissionGenerationSpeed([90,150]);
+        break;
+      case 'medium':
+        setMissionGenerationSpeed([30,90]);
+        break;
+      case 'fast':
+        setMissionGenerationSpeed([10,30]);
+        break;
+    }
+  });
 });
 
 // Focus
