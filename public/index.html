@@ -260,14 +260,11 @@ function unitIconFor(unit) {
 }
 
 function chooseMissionIcon(mission, assigned) {
-  if (!Array.isArray(assigned) || assigned.length === 0) return missionIcons.none;
-  const req = Array.isArray(mission.required_units) ? mission.required_units : [];
-  const counts = {};
-  for (const u of assigned) {
-    counts[u.type] = (counts[u.type] || 0) + 1;
-  }
-  const allMet = req.every(r => (counts[r.type] || 0) >= (r.quantity ?? r.count ?? 1));
-  return allMet ? missionIcons.complete : missionIcons.partial;
+  const responders = (Array.isArray(assigned) ? assigned : [])
+    .filter(u => u.status === 'enroute' || u.status === 'onscene');
+  if (responders.length === 0) return missionIcons.none;
+  if (activeWorkTimers.has(mission.id)) return missionIcons.complete;
+  return missionIcons.partial;
 }
 
 // caches
@@ -1450,7 +1447,15 @@ async function cancelUnit(unitId, stationId) {
     alert(`Failed: ${msg}`);
     return;
   }
+  const data = await res.json().catch(() => ({}));
   refreshStationPanelNoCache(stationId);
+  if (Array.isArray(data.missions) && data.missions.length) {
+    const missions = await (await fetch('/api/missions')).json();
+    for (const mid of data.missions) {
+      const m = missions.find(ms => ms.id === mid);
+      if (m) await checkMissionCompletion(m);
+    }
+  }
 }
 
 async function showUnitDetails(unitId) {
@@ -2119,6 +2124,7 @@ async function checkMissionCompletion(mission) {
         if (tDiv) tDiv.textContent = '';
       }
     }
+    await fetchMissions();
     return;
   }
 
@@ -2161,6 +2167,7 @@ async function checkMissionCompletion(mission) {
     activeWorkTimers.set(mission.id, { timeoutId: tid, endTime });
     persistWorkTimers();
     startMissionCountdown(mission.id, endTime);
+    await fetchMissions();
   }
 }
 
