@@ -1954,20 +1954,6 @@ async function autoDispatch(mission) {
         const dist = st ? haversineKm(st.lat, st.lon, mission.lat, mission.lon) : Infinity;
         return { ...u, _dist: dist };
       });
-    const selected = [];
-    const selectedIds = new Set();
-
-    function pickUnits(filterFn, count) {
-      const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && filterFn(u)).sort((a,b)=>a._dist - b._dist);
-      const take = candidates.slice(0, count);
-      for (const u of take) { selectedIds.add(u.id); selected.push(u); }
-    }
-
-    const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
-    for (const r of reqUnits) {
-      const need = r.quantity ?? r.count ?? r.qty ?? 1;
-      pickUnits(u => u.type === r.type, need);
-    }
 
     function trainingCount(u, name) {
       let c = 0;
@@ -1982,31 +1968,61 @@ async function autoDispatch(mission) {
       return Array.isArray(u.equipment)?u.equipment.filter(e=>String(e).toLowerCase()===String(name).toLowerCase()).length:0;
     }
 
-    const reqTraining = Array.isArray(mission.required_training) ? mission.required_training : [];
-    for (const r of reqTraining) {
-      const need = r.qty ?? r.quantity ?? r.count ?? 1;
-      const name = r.training || r.name || r;
-      let have = selected.reduce((sum,u)=>sum + trainingCount(u,name),0);
-      if (have < need) {
-        const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && trainingCount(u,name)>0).sort((a,b)=>a._dist - b._dist);
-        for (const u of candidates) {
-          if (have >= need) break;
-          selectedIds.add(u.id); selected.push(u); have += trainingCount(u,name);
-        }
+    const selected = [];
+    const selectedIds = new Set();
+
+    const trainingNeeds = (Array.isArray(mission.required_training)?mission.required_training:[])
+      .map(r=>({ name: r.training || r.name || r, qty: r.qty ?? r.quantity ?? r.count ?? 1 }));
+    const equipmentNeeds = (Array.isArray(mission.equipment_required)?mission.equipment_required:[])
+      .map(r=>({ name: r.name || r.type || r, qty: r.qty ?? r.quantity ?? r.count ?? 1 }));
+
+    function applyNeeds(u) {
+      for (const n of trainingNeeds) {
+        n.qty -= trainingCount(u, n.name);
+      }
+      for (const n of equipmentNeeds) {
+        n.qty -= equipmentCount(u, n.name);
       }
     }
 
-    const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
-    for (const r of reqEquip) {
-      const need = r.qty ?? r.quantity ?? r.count ?? 1;
-      const name = r.name || r.type || r;
-      let have = selected.reduce((sum,u)=>sum + equipmentCount(u,name),0);
-      if (have < need) {
-        const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && equipmentCount(u,name)>0).sort((a,b)=>a._dist - b._dist);
-        for (const u of candidates) {
-          if (have >= need) break;
-          selectedIds.add(u.id); selected.push(u); have += equipmentCount(u,name);
-        }
+    function unitMatchesNeed(u) {
+      return trainingNeeds.some(n=>n.qty>0 && trainingCount(u,n.name)>0) ||
+             equipmentNeeds.some(n=>n.qty>0 && equipmentCount(u,n.name)>0);
+    }
+
+    function selectUnit(u) {
+      selectedIds.add(u.id);
+      selected.push(u);
+      applyNeeds(u);
+    }
+
+    const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
+    for (const r of reqUnits) {
+      const need = r.quantity ?? r.count ?? r.qty ?? 1;
+      for (let i=0; i<need; i++) {
+        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && u.type === r.type)
+                                 .sort((a,b)=>a._dist - b._dist);
+        if (!candidates.length) { area.innerHTML = '<em>No available units meet the requirements.</em>'; return; }
+        const chosen = candidates.find(unitMatchesNeed) || candidates[0];
+        selectUnit(chosen);
+      }
+    }
+
+    for (const n of trainingNeeds) {
+      while (n.qty > 0) {
+        const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && trainingCount(u,n.name)>0)
+                                   .sort((a,b)=>a._dist - b._dist);
+        if (!candidates.length) { area.innerHTML = '<em>Insufficient training to meet requirements.</em>'; return; }
+        selectUnit(candidates[0]);
+      }
+    }
+
+    for (const n of equipmentNeeds) {
+      while (n.qty > 0) {
+        const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && equipmentCount(u,n.name)>0)
+                                   .sort((a,b)=>a._dist - b._dist);
+        if (!candidates.length) { area.innerHTML = '<em>Insufficient equipment to meet requirements.</em>'; return; }
+        selectUnit(candidates[0]);
       }
     }
 
