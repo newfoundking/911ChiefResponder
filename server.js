@@ -108,6 +108,9 @@ db.serialize(() => {
   db.run(`ALTER TABLE missions ADD COLUMN timing INTEGER DEFAULT 10`, () => { /* ignore if exists */ });
   db.run(`ALTER TABLE missions ADD COLUMN departments TEXT`, () => { /* ignore if exists */ });
   db.run(`ALTER TABLE missions ADD COLUMN resolve_at INTEGER`, () => { /* ignore if exists */ });
+  // Newer schema fields
+  db.run(`ALTER TABLE missions ADD COLUMN penalty_options TEXT DEFAULT '[]'`, () => { /* ignore if exists */ });
+  db.run(`ALTER TABLE missions ADD COLUMN penalties TEXT DEFAULT '[]'`, () => { /* ignore if exists */ });
   db.run(`UPDATE missions SET departments = json_array(department) WHERE departments IS NULL AND department IS NOT NULL`, () => {});
 
   // Mission ↔ Units link
