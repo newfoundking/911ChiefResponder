@@ -265,8 +265,11 @@ document.querySelectorAll(".tab-button").forEach(button => {
 
 function unitIconFor(unit) {
   const sanitizedType = (unit.type || '').replace(/\s+/g, '');
-  const typeIcon = sanitizedType ? `/images/${sanitizedType}.png` : null;
-  const url = unit.icon || typeIcon || stationIcons[unit.class] || stationIcons.fire;
+  const baseIcon = sanitizedType ? `/images/${sanitizedType}.png` : null;
+  const respDefault = sanitizedType ? `/images/${sanitizedType}-responding.png` : null;
+  const normal = unit.icon || baseIcon || stationIcons[unit.class] || stationIcons.fire;
+  const responding = unit.responding_icon || respDefault || normal;
+  const url = unit.responding ? responding : normal;
   return makeIcon(url, 24);
 }
 
@@ -1856,14 +1859,17 @@ async function showUnitDetails(unitId) {
     });
   });
   content.querySelector('#change-unit-icon')?.addEventListener('click', async () => {
-    const url = prompt('Enter icon URL:');
-    if (!url) return;
-    const res = await fetch(`/api/units/${unitId}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ icon: url }) });
+    const url = prompt('Enter icon URL:', unit.icon || '');
+    if (url === null) return;
+    const resp = prompt('Enter responding icon URL (optional):', unit.responding_icon || '');
+    const body = { icon: url };
+    if (resp !== null) body.responding_icon = resp;
+    const res = await fetch(`/api/units/${unitId}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
-    _unitById.set(unitId, { ...unit, icon: url });
+    _unitById.set(unitId, { ...unit, icon: url, responding_icon: resp });
     const entry = unitMarkers.get(unitId);
-    if (entry) entry.marker.setIcon(unitIconFor({ ...unit, icon: url }));
+    if (entry) entry.marker.setIcon(unitIconFor({ ...unit, icon: url, responding_icon: resp }));
     modal.style.display = 'none';
     refreshStationPanelNoCache(unit.station_id);
   });
