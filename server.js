@@ -11,6 +11,14 @@ let equipment = {};
 try { trainingsByClass = require('./trainings'); } catch { /* falls back to {} */ }
 try { equipment = require('./equipment'); } catch { /* falls back to {} */ }
 
+// Normalize legacy status values missing the underscore.
+// Older clients used "onscene" while the server expects "on_scene".
+// This ensures any existing records are standardized on startup.
+db.serialize(() => {
+  db.run("UPDATE units SET status='on_scene' WHERE status='onscene'");
+  db.run("UPDATE missions SET status='on_scene' WHERE status='onscene'");
+});
+
 // Safely parse JSON fields that should be arrays. Some legacy rows may have
 // stored objects instead of arrays. This helper normalizes the output so the
 // rest of the code can rely on getting an array every time.
@@ -1194,12 +1202,16 @@ async function ensureStationHasFreeBay(stationId) {
 
 // Update unit status
 app.patch('/api/units/:id/status', (req, res) => {
-  const { status } = req.body || {};
+  let { status } = req.body || {};
   const id = parseInt(req.params.id, 10);
   if (!id || !status) return res.status(400).json({ error: 'id and status required' });
+
+  // Normalize legacy status value without underscore.
+  if (status === 'onscene') status = 'on_scene';
+
   db.run('UPDATE units SET status = ? WHERE id = ?', [status, id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ ok: true });
+    res.json({ ok: true, status });
   });
 });
 // PATCH /api/units/:id/icon  { icon: <string> }
