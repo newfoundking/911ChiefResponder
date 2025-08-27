@@ -2292,6 +2292,11 @@ function startMissionCountdown(missionId, endTime) {
 }
 
 function setupTimerForMission(mission, endTime) {
+  const existing = activeWorkTimers.get(mission.id);
+  if (existing) {
+    if (existing.timeoutId) clearTimeout(existing.timeoutId);
+    if (existing.intervalId) clearInterval(existing.intervalId);
+  }
   const ms = Math.max(0, endTime - Date.now());
   const tid = setTimeout(async ()=>{
     const cur = activeWorkTimers.get(mission.id);
@@ -2384,15 +2389,32 @@ async function checkMissionCompletion(mission) {
     return;
   }
 
+  const mods = Array.isArray(mission.modifiers) ? mission.modifiers : [];
+  let reduction = 0;
+  for (const m of mods) {
+    if (!m || typeof m !== 'object') continue;
+    const per = Number(m.timeReduction) || 0;
+    if (!per) continue;
+    const have = unitOnScene.get(m.type) || 0;
+    const maxCount = Number(m.maxCount) || 1;
+    reduction += Math.min(have, maxCount) * per;
+  }
+  reduction = Math.min(100, reduction);
+
   if (!existingEnd) {
-    const res = await fetch(`/api/missions/${mission.id}/timer`, { method: 'POST' });
-    const data = await res.json().catch(()=>({}));
-    const endTime = Number(data.resolve_at);
-    if (endTime) {
-      mission.resolve_at = endTime;
-      setupTimerForMission(mission, endTime);
-      await fetchMissions();
-    }
+    await fetch(`/api/missions/${mission.id}/timer`, { method: 'POST' });
+  }
+  const res = await fetch(`/api/missions/${mission.id}/timer`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reduction })
+  });
+  const data = await res.json().catch(()=>({}));
+  const endTime = Number(data.resolve_at);
+  if (endTime) {
+    mission.resolve_at = endTime;
+    setupTimerForMission(mission, endTime);
+    await fetchMissions();
   } else if (mission.resolve_at && (!activeWorkTimers.get(mission.id) || activeWorkTimers.get(mission.id).endTime !== mission.resolve_at)) {
     setupTimerForMission(mission, mission.resolve_at);
   }

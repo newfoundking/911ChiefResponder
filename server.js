@@ -409,23 +409,25 @@ function resolveMissionById(missionId, cb) {
   });
 }
 
-const missionClocks = new Map(); // mission_id -> { endAt: number(ms) }
+const missionClocks = new Map(); // mission_id -> { endAt, startedAt, baseDuration }
 
 function beginMissionClock(missionId, cb) {
   db.get('SELECT timing, resolve_at FROM missions WHERE id=?', [missionId], (e, row) => {
     if (e || !row) return cb && cb(null);
 
+    const baseDuration = Math.max(0, Number(row.timing || 0)) * 60 * 1000;
     const existingDb = row.resolve_at != null ? Number(row.resolve_at) : null;
-    if (existingDb && existingDb > Date.now()) {
-      missionClocks.set(missionId, { endAt: existingDb });
+    const now = Date.now();
+    if (existingDb && existingDb > now) {
+      const startedAt = existingDb - baseDuration;
+      missionClocks.set(missionId, { endAt: existingDb, startedAt, baseDuration });
       return cb && cb(existingDb);
     }
 
-    const minutes = Number(row.timing || 0);
-    const durationMs = Math.max(0, minutes) * 60 * 1000; // minutes -> ms
-    const endAt = Date.now() + durationMs;
+    const endAt = now + baseDuration;
+    const startedAt = now;
     db.run('UPDATE missions SET resolve_at=? WHERE id=?', [endAt, missionId], err => {
-      if (!err) missionClocks.set(missionId, { endAt });
+      if (!err) missionClocks.set(missionId, { endAt, startedAt, baseDuration });
       cb && cb(err ? null : endAt);
     });
   });
@@ -437,12 +439,14 @@ function clearMissionClock(missionId) {
 }
 
 // Rehydrate mission clocks from DB on startup
-db.all('SELECT id, resolve_at FROM missions WHERE resolve_at IS NOT NULL', (err, rows) => {
+db.all('SELECT id, resolve_at, timing FROM missions WHERE resolve_at IS NOT NULL', (err, rows) => {
   if (err) return;
   const now = Date.now();
   rows.forEach(r => {
     const end = Number(r.resolve_at);
-    if (end > now) missionClocks.set(r.id, { endAt: end });
+    const baseDuration = Math.max(0, Number(r.timing || 0)) * 60 * 1000;
+    const startedAt = end - baseDuration;
+    if (end > now) missionClocks.set(r.id, { endAt: end, startedAt, baseDuration });
     else resolveMissionById(r.id, () => {});
   });
 });
@@ -829,6 +833,24 @@ app.post('/api/missions/:id/timer', (req, res) => {
   beginMissionClock(missionId, end => {
     if (!end) return res.status(404).json({ error: 'mission not found' });
     res.json({ resolve_at: end });
+  });
+});
+
+app.patch('/api/missions/:id/timer', (req, res) => {
+  const missionId = parseInt(req.params.id, 10);
+  if (!missionId) return res.status(400).json({ error: 'invalid id' });
+  const reduction = Math.max(0, Math.min(100, Number(req.body?.reduction) || 0));
+  const clk = missionClocks.get(missionId);
+  if (!clk) return res.status(404).json({ error: 'timer not running' });
+  const now = Date.now();
+  const elapsed = now - clk.startedAt;
+  const remaining = Math.max(0, clk.baseDuration - elapsed);
+  const newRemaining = remaining * (1 - reduction / 100);
+  const endAt = now + newRemaining;
+  clk.endAt = endAt;
+  db.run('UPDATE missions SET resolve_at=? WHERE id=?', [endAt, missionId], err => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ resolve_at: endAt });
   });
 });
 
