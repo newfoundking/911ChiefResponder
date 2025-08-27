@@ -214,7 +214,7 @@ let openMissionId = null;
 const map = L.map("map").setView([47.5646, -52.7002], 13);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
 
-const zoneLayerGroup = L.featureGroup().addTo(map);
+const zoneLayerGroup = L.featureGroup();
 const zoneLayers = new Map();
 let responseZones = [];
 const deptColors = {};
@@ -246,6 +246,11 @@ document.querySelectorAll(".tab-button").forEach(button => {
     document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
     button.classList.add("active");
     document.getElementById(`tab-${button.dataset.tab}`).classList.add("active");
+    if (button.dataset.tab === 'zones') {
+      map.addLayer(zoneLayerGroup);
+    } else {
+      map.removeLayer(zoneLayerGroup);
+    }
   });
 });
 
