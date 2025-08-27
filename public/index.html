@@ -2475,55 +2475,72 @@ for (const [id, obj] of Array.from(activeWorkTimers.entries())) {
 }
 
 async function checkMissionCompletion(mission) {
-  const assigned = await (await fetch(`/api/missions/${mission.id}/units`)).json();
-  const unitOnScene = new Map();
-  const equipOnScene = new Map();
-  const trainOnScene = new Map();
-  for (const u of assigned) {
-    if (u.status === 'on_scene') {
-      unitOnScene.set(u.type, (unitOnScene.get(u.type)||0)+1);
-      for (const e of Array.isArray(u.equipment) ? u.equipment : []) {
-        equipOnScene.set(e, (equipOnScene.get(e)||0)+1);
-      }
-      for (const p of Array.isArray(u.personnel) ? u.personnel : []) {
-        for (const t of Array.isArray(p.training) ? p.training : []) {
-          trainOnScene.set(t, (trainOnScene.get(t)||0)+1);
+  function evaluate(assigned) {
+    const unitOnScene = new Map();
+    const equipOnScene = new Map();
+    const trainOnScene = new Map();
+    for (const u of assigned) {
+      if (u.status === 'on_scene') {
+        unitOnScene.set(u.type, (unitOnScene.get(u.type) || 0) + 1);
+        for (const e of Array.isArray(u.equipment) ? u.equipment : []) {
+          equipOnScene.set(e, (equipOnScene.get(e) || 0) + 1);
+        }
+        for (const p of Array.isArray(u.personnel) ? u.personnel : []) {
+          for (const t of Array.isArray(p.training) ? p.training : []) {
+            trainOnScene.set(t, (trainOnScene.get(t) || 0) + 1);
+          }
         }
       }
     }
+    const reqUnits = Array.isArray(mission.required_units) ? mission.required_units.map(r => {
+      const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
+      const ignored = penalties.filter(p => p.type === r.type).reduce((s, p) => s + (p.quantity || 0), 0);
+      const qty = Math.max(0, (r.quantity ?? r.count ?? 1) - ignored);
+      return { ...r, quantity: qty };
+    }) : [];
+    const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
+    const reqTrain = Array.isArray(mission.required_training) ? mission.required_training : [];
+    const unitsMet = reqUnits.every(r => (unitOnScene.get(r.type) || 0) >= (r.quantity ?? r.count ?? 1));
+    const equipMet = reqEquip.every(r => (equipOnScene.get(r.name || r.type || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
+    const trainMet = reqTrain.every(r => (trainOnScene.get(r.training || r.name || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
+    return { allMet: unitsMet && equipMet && trainMet, unitOnScene, equipOnScene, trainOnScene };
   }
-  const reqUnits = Array.isArray(mission.required_units) ? mission.required_units.map(r => {
-    const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
-    const ignored = penalties.filter(p => p.type === r.type).reduce((s,p)=>s+(p.quantity||0),0);
-    const qty = Math.max(0, (r.quantity ?? r.count ?? 1) - ignored);
-    return { ...r, quantity: qty };
-  }) : [];
-  const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
-  const reqTrain = Array.isArray(mission.required_training) ? mission.required_training : [];
-  const unitsMet = reqUnits.every(r => (unitOnScene.get(r.type)||0) >= (r.quantity ?? r.count ?? 1));
-  const equipMet = reqEquip.every(r => (equipOnScene.get(r.name || r.type || r)||0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
-  const trainMet = reqTrain.every(r => (trainOnScene.get(r.training || r.name || r)||0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
-  const allMet = unitsMet && equipMet && trainMet;
+
+  let assigned = await (await fetch(`/api/missions/${mission.id}/units`)).json();
+  let { allMet, unitOnScene, equipOnScene, trainOnScene } = evaluate(assigned);
   const existingEnd = mission.resolve_at || (activeWorkTimers.get(mission.id)?.endTime);
 
   if (!allMet) {
     if (existingEnd) {
-      await fetch(`/api/missions/${mission.id}/timer`, { method: 'DELETE' });
-      const ex = activeWorkTimers.get(mission.id);
-      if (ex) {
-        if (ex.timeoutId) clearTimeout(ex.timeoutId);
-        if (ex.intervalId) clearInterval(ex.intervalId);
-        activeWorkTimers.delete(mission.id);
-        persistWorkTimers();
+      await new Promise(r => setTimeout(r, 200));
+      assigned = await (await fetch(`/api/missions/${mission.id}/units`)).json();
+      const recheck = evaluate(assigned);
+      if (recheck.allMet) {
+        allMet = true;
+        unitOnScene = recheck.unitOnScene;
+        equipOnScene = recheck.equipOnScene;
+        trainOnScene = recheck.trainOnScene;
+      } else {
+        await fetch(`/api/missions/${mission.id}/timer`, { method: 'DELETE' });
+        const ex = activeWorkTimers.get(mission.id);
+        if (ex) {
+          if (ex.timeoutId) clearTimeout(ex.timeoutId);
+          if (ex.intervalId) clearInterval(ex.intervalId);
+          activeWorkTimers.delete(mission.id);
+          persistWorkTimers();
+        }
+        mission.resolve_at = null;
+        if (openMissionId === mission.id) {
+          const tDiv = document.getElementById('missionTimerArea');
+          if (tDiv) tDiv.textContent = '';
+        }
+        await fetchMissions();
+        return;
       }
-      mission.resolve_at = null;
-      if (openMissionId === mission.id) {
-        const tDiv = document.getElementById('missionTimerArea');
-        if (tDiv) tDiv.textContent = '';
-      }
+    } else {
+      await fetchMissions();
+      return;
     }
-    await fetchMissions();
-    return;
   }
 
   const mods = Array.isArray(mission.modifiers) ? mission.modifiers : [];
