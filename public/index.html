@@ -811,19 +811,43 @@ async function refreshAssignedUnitsUI(missionId) {
 function renderRequirementsDynamic(mission, assigned) {
   const req = Array.isArray(mission.required_units) ? mission.required_units : [];
   if (!req.length) return '<em>No specific unit requirements.</em>';
+  const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
   const counts = { enroute: new Map(), on_scene: new Map() };
   for (const u of assigned || []) {
     if (u.status === 'on_scene') counts.on_scene.set(u.type, (counts.on_scene.get(u.type)||0)+1);
     else if (u.status === 'enroute') counts.enroute.set(u.type, (counts.enroute.get(u.type)||0)+1);
   }
   const items = req.map(r => {
-    const need = r.quantity ?? r.count ?? 1;
+    const baseNeed = r.quantity ?? r.count ?? 1;
+    const ignored = penalties.filter(p => p.type === r.type).reduce((s,p)=>s+(p.quantity||0),0);
+    const need = Math.max(0, baseNeed - ignored);
     const onScene = counts.on_scene.get(r.type) || 0;
     const enroute = counts.enroute.get(r.type) || 0;
     const outstanding = Math.max(0, need - enroute - onScene);
     return `<li>${need} × ${r.type} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
   });
-  return `<ul>${items.join('')}</ul>`;
+  const options = Array.isArray(mission.penalty_options) ? mission.penalty_options : [];
+  let optHtml = '';
+  if (options.length) {
+    const rows = options.map((p, idx) => {
+      const checked = penalties.some(sel => sel.type===p.type && sel.quantity===p.quantity && sel.timePenalty===p.timePenalty && sel.rewardPenalty===p.rewardPenalty);
+      return `<div><label><input type="checkbox" class="penalty-opt" data-idx="${idx}" ${checked?"checked":""}> Ignore ${p.quantity}×${p.type} (-${p.timePenalty||0}% speed, -${p.rewardPenalty||0}% reward)</label></div>`;
+    });
+    optHtml = `<div><strong>Penalties:</strong>${rows.join('')}</div>`;
+  }
+  return `<ul>${items.join('')}</ul>${optHtml}`;
+}
+
+function attachPenaltyHandlers(mission) {
+  document.querySelectorAll('.penalty-opt').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const options = Array.isArray(mission.penalty_options) ? mission.penalty_options : [];
+      const selected = Array.from(document.querySelectorAll('.penalty-opt:checked')).map(c => options[parseInt(c.dataset.idx,10)]);
+      mission.penalties = selected;
+      await fetch(`/api/missions/${mission.id}/penalties`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ penalties: selected }) });
+      checkMissionCompletion(mission);
+    });
+  });
 }
 
 function renderTrainingRequirementsDynamic(mission, assigned) {
@@ -940,7 +964,7 @@ function showMissionDetails(mission) {
   document.getElementById('runCardDispatchBtn').onclick = () => runCardDispatch(mission);
   refreshAssignedUnitsUI(mission.id).then(assigned => {
     const reqDiv = document.getElementById('reqDynamic');
-    if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned);
+    if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
     const trainDiv = document.getElementById('reqTrainingDynamic');
     if (trainDiv) trainDiv.innerHTML = renderTrainingRequirementsDynamic(mission, assigned);
     const equipDiv = document.getElementById('reqEquipmentDynamic');
@@ -1529,6 +1553,8 @@ document.getElementById('generateMission').addEventListener('click', async ()=>{
     patients: instantiatePatients(template.patients),
     prisoners: instantiatePrisoners(template.prisoners),
     modifiers: template.modifiers || [],
+    penalty_options: template.penalty_options || [],
+    penalties: [],
     timing: template.timing ?? 10
   };
   try {
@@ -2039,7 +2065,7 @@ async function sendUnitsToMission(mission, ids, area) {
   if (area) area.innerHTML = `<strong>Dispatched ${ids.length} unit(s) to mission #${mission.id}.</strong>`;
   const assigned = await refreshAssignedUnitsUI(mission.id);
   const reqDiv = document.getElementById('reqDynamic');
-  if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned);
+  if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
   const trainDiv = document.getElementById('reqTrainingDynamic');
   if (trainDiv) trainDiv.innerHTML = renderTrainingRequirementsDynamic(mission, assigned);
   const equipDiv = document.getElementById('reqEquipmentDynamic');
@@ -2083,7 +2109,7 @@ async function sendUnitsToMission(mission, ids, area) {
 
         const assignedAfter = await refreshAssignedUnitsUI(mission.id);
         const reqDiv2 = document.getElementById('reqDynamic');
-        if (reqDiv2) reqDiv2.innerHTML = renderRequirementsDynamic(mission, assignedAfter);
+        if (reqDiv2) { reqDiv2.innerHTML = renderRequirementsDynamic(mission, assignedAfter); attachPenaltyHandlers(mission); }
         const trainDiv2 = document.getElementById('reqTrainingDynamic');
         if (trainDiv2) trainDiv2.innerHTML = renderTrainingRequirementsDynamic(mission, assignedAfter);
         const equipDiv2 = document.getElementById('reqEquipmentDynamic');
@@ -2282,7 +2308,7 @@ async function clearAssignedUnit(missionId, unitId) {
   const missionSnap = missions.find(m=>m.id===missionId);
   if (missionSnap) {
     const reqDiv = document.getElementById('reqDynamic');
-    if (reqDiv) reqDiv.innerHTML = renderRequirementsDynamic(missionSnap, assigned);
+    if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(missionSnap, assigned); attachPenaltyHandlers(missionSnap); }
     const trainDiv = document.getElementById('reqTrainingDynamic');
     if (trainDiv) trainDiv.innerHTML = renderTrainingRequirementsDynamic(missionSnap, assigned);
     const equipDiv = document.getElementById('reqEquipmentDynamic');
@@ -2410,7 +2436,12 @@ async function checkMissionCompletion(mission) {
       }
     }
   }
-  const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
+  const reqUnits = Array.isArray(mission.required_units) ? mission.required_units.map(r => {
+    const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
+    const ignored = penalties.filter(p => p.type === r.type).reduce((s,p)=>s+(p.quantity||0),0);
+    const qty = Math.max(0, (r.quantity ?? r.count ?? 1) - ignored);
+    return { ...r, quantity: qty };
+  }) : [];
   const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
   const reqTrain = Array.isArray(mission.required_training) ? mission.required_training : [];
   const unitsMet = reqUnits.every(r => (unitOnScene.get(r.type)||0) >= (r.quantity ?? r.count ?? 1));
@@ -2450,6 +2481,10 @@ async function checkMissionCompletion(mission) {
     reduction += Math.min(have, maxCount) * per;
   }
   reduction = Math.min(100, reduction);
+  const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
+  const penaltyTime = penalties.reduce((s,p)=>s+(Number(p.timePenalty)||0),0);
+  reduction -= penaltyTime;
+  reduction = Math.max(-100, Math.min(100, reduction));
 
   if (!existingEnd) {
     await fetch(`/api/missions/${mission.id}/timer`, { method: 'POST' });

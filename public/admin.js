@@ -46,6 +46,7 @@ function appendMissionRow(mission) {
     <td>${(mission.required_training || []).map(t => `${t.qty ?? t.quantity ?? t.count ?? 1}×${t.training ?? t.name ?? t}`).join(", ")}</td>
     <td>${(mission.equipment_required || []).map(e => `${e.qty ?? e.quantity ?? e.count ?? 1}×${e.name ?? e}`).join(", ")}</td>
     <td>${(mission.modifiers || []).map(m => `${m.type}${m.timeReduction ? ` (${m.timeReduction}%)` : ''}${m.maxCount ? ` x${m.maxCount}` : ''}`).join(", ")}</td>
+    <td>${(mission.penalty_options || []).map(p => `${p.quantity ?? 1}×${p.type} (-${p.timePenalty || 0}%/${p.rewardPenalty || 0}%)`).join(", ")}</td>
     <td>${(mission.patients || []).map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
     <td>${(mission.prisoners || []).map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
     <td>${Number.isFinite(mission.rewards) ? mission.rewards : 0}</td>
@@ -105,6 +106,11 @@ async function openMissionForm(existing = null) {
     <div id="modifiers-container"></div>
     <button type="button" onclick="addModifierRow()">Add Modifier</button><br>
 
+    <h4>Penalty Options</h4>
+    <div><strong>Type</strong> | <strong>Quantity</strong> | <strong>Time Penalty (%)</strong> | <strong>Reward Penalty (%)</strong></div>
+    <div id="penalty-container"></div>
+    <button type="button" onclick="addPenaltyRow()">Add Penalty Option</button><br>
+
     <h4>Equipment Required</h4>
     <div><strong>Equipment</strong> | <strong>Quantity</strong></div>
     <div id="equipment-container"></div>
@@ -133,6 +139,7 @@ async function openMissionForm(existing = null) {
   (Array.isArray(existing?.prisoners) ? existing.prisoners : []).forEach(p => addPrisonerRow(p.min, p.max, p.chance, p.transportChance));
   (Array.isArray(existing?.required_training) ? existing.required_training : []).forEach(t => addTrainingRow(t.training ?? t.name ?? t, t.qty ?? 1));
   (Array.isArray(existing?.modifiers) ? existing.modifiers : []).forEach(m => addModifierRow(m.type, m.timeReduction, m.maxCount));
+  (Array.isArray(existing?.penalty_options) ? existing.penalty_options : []).forEach(p => addPenaltyRow(p.type, p.quantity, p.timePenalty, p.rewardPenalty));
   (Array.isArray(existing?.equipment_required) ? existing.equipment_required : []).forEach(e => addEquipmentRow(e.name ?? e, e.qty ?? 1));
 
   // Populate run card if editing existing mission
@@ -333,6 +340,40 @@ function addModifierRow(selectedType = "", timeReduction = 0, maxCount = 1) {
   container.appendChild(row);
 }
 
+function addPenaltyRow(type = "", qty = 1, timePenalty = 0, rewardPenalty = 0) {
+  const container = document.getElementById("penalty-container");
+  const row = document.createElement("div");
+
+  const typeSelect = document.createElement("select");
+  unitTypes.forEach(u => {
+    const opt = document.createElement("option");
+    opt.value = u.type;
+    opt.textContent = `${u.class} - ${u.type}`;
+    if (u.type === type) opt.selected = true;
+    typeSelect.appendChild(opt);
+  });
+  typeSelect.name = "type";
+
+  const qtyInput = document.createElement("input");
+  qtyInput.type = "number"; qtyInput.name = "quantity"; qtyInput.min = 1; qtyInput.value = qty;
+
+  const timeInput = document.createElement("input");
+  timeInput.type = "number"; timeInput.name = "timePenalty"; timeInput.min = 0; timeInput.max = 100; timeInput.value = timePenalty;
+
+  const rewardInput = document.createElement("input");
+  rewardInput.type = "number"; rewardInput.name = "rewardPenalty"; rewardInput.min = 0; rewardInput.max = 100; rewardInput.value = rewardPenalty;
+
+  const removeBtn = document.createElement("button");
+  removeBtn.textContent = "Remove"; removeBtn.type = "button"; removeBtn.onclick = () => container.removeChild(row);
+
+  row.appendChild(typeSelect);
+  row.appendChild(qtyInput);
+  row.appendChild(timeInput);
+  row.appendChild(rewardInput);
+  row.appendChild(removeBtn);
+  container.appendChild(row);
+}
+
 function addEquipmentRow(selected = "", qty = 1) {
   const container = document.getElementById("equipment-container");
   const row = document.createElement("div");
@@ -390,6 +431,7 @@ async function submitMission() {
     prisoners: collectRows("#prisoners-container") || [],
     required_training: collectRows("#training-container") || [],
     modifiers: collectRows("#modifiers-container") || [],
+    penalty_options: collectRows("#penalty-container") || [],
     equipment_required: collectRows("#equipment-container") || []
   };
 
