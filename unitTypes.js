@@ -6,7 +6,8 @@ const unitTypes = [
   { class: "fire", type: "Special Operations",capacity: 4, equipmentSlots: 2, attributes: [], cost: 22000 },
   { class: "fire", type: "Tanker", 			  capacity: 4, equipmentSlots: 2, attributes: ["tanker"], cost: 12000 },
   { class: "fire", type: "Support Unit",      capacity: 2, equipmentSlots: 4, attributes: [], cost: 5000 },
-
+  { class: "fire", type: "ARFF",              capacity: 2, equipmentSlots: 4, attributes: ["foam"], cost: 8000 },
+  
   { class: "ambulance", type: "Ambulance",    capacity: 2, equipmentSlots: 1, attributes: ["medicaltransport"], cost: 14000 },
   { class: "ambulance", type: "Fly-car",      capacity: 2, equipmentSlots: 1, attributes: [], cost: 9000  },
   { class: "ambulance", type: "Supervisor",   capacity: 4, equipmentSlots: 2, attributes: [], cost: 10000 },
