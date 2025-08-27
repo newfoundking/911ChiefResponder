@@ -255,7 +255,9 @@ document.querySelectorAll(".tab-button").forEach(button => {
 });
 
 function unitIconFor(unit) {
-  const url = unit.icon || stationIcons[unit.class] || stationIcons.fire;
+  const sanitizedType = (unit.type || '').replace(/\s+/g, '');
+  const typeIcon = sanitizedType ? `/images/${sanitizedType}.png` : null;
+  const url = unit.icon || typeIcon || stationIcons[unit.class] || stationIcons.fire;
   return makeIcon(url, 24);
 }
 
