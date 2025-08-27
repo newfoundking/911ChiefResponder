@@ -1160,11 +1160,15 @@ app.post('/api/units/:id/cancel', (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'invalid id' });
   db.serialize(() => {
-    db.run('DELETE FROM mission_units WHERE unit_id=?', [id]);
-    db.run('DELETE FROM unit_travel WHERE unit_id=?', [id]);
-    db.run('UPDATE units SET status=? WHERE id=?', ['available', id], function (err) {
+    db.all('SELECT mission_id FROM mission_units WHERE unit_id=?', [id], (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json({ ok: true });
+      const missions = rows.map(r => r.mission_id);
+      db.run('DELETE FROM mission_units WHERE unit_id=?', [id]);
+      db.run('DELETE FROM unit_travel WHERE unit_id=?', [id]);
+      db.run('UPDATE units SET status=? WHERE id=?', ['available', id], function (err2) {
+        if (err2) return res.status(500).json({ error: err2.message });
+        res.json({ ok: true, missions });
+      });
     });
   });
 });
@@ -1485,7 +1489,6 @@ app.post('/api/unit-travel', (req, res) => {
         db.run('DELETE FROM unit_travel WHERE unit_id=?', [unit_id], () => {});
         if (mission_id) {
           db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', mission_id], () => {});
-			beginMissionClock(mission_id);
         }
       } else if (phase === 'return') {
         db.run('UPDATE units SET status=? WHERE id=?', ['available', unit_id], () => {});
@@ -1520,7 +1523,6 @@ app.get('/api/unit-travel/active', (req, res) => {
               db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => {
                 if (r.mission_id) {
                   db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', r.mission_id], () => {
-                    beginMissionClock(r.mission_id);
                     resolve();
                   });
                 } else resolve();
