@@ -400,10 +400,15 @@ function resolveMissionById(missionId, cb) {
 const missionClocks = new Map(); // mission_id -> { endAt: number(ms) }
 
 function beginMissionClock(missionId, cb) {
-  const existing = missionClocks.get(missionId);
-  if (existing) return cb && cb(existing.endAt);
-  db.get('SELECT timing FROM missions WHERE id=?', [missionId], (e, row) => {
+  db.get('SELECT timing, resolve_at FROM missions WHERE id=?', [missionId], (e, row) => {
     if (e || !row) return cb && cb(null);
+
+    const existingDb = row.resolve_at != null ? Number(row.resolve_at) : null;
+    if (existingDb && existingDb > Date.now()) {
+      missionClocks.set(missionId, { endAt: existingDb });
+      return cb && cb(existingDb);
+    }
+
     const minutes = Number(row.timing || 0);
     const durationMs = Math.max(0, minutes) * 60 * 1000; // minutes -> ms
     const endAt = Date.now() + durationMs;
@@ -612,7 +617,7 @@ app.get('/api/missions', (req, res) => {
       prisoners: JSON.parse(m.prisoners || "[]"),
       modifiers: JSON.parse(m.modifiers || "[]"),
       timing: typeof m.timing === 'number' ? m.timing : 10,
-      resolve_at: typeof m.resolve_at === 'number' ? m.resolve_at : null
+      resolve_at: m.resolve_at != null ? Number(m.resolve_at) : null
     }));
     res.json(parsed);
   });
@@ -738,7 +743,7 @@ app.get('/api/missions/:id', (req, res) => {
       prisoners: parseArrayField(row.prisoners),
       modifiers: parseArrayField(row.modifiers),
       timing: typeof row.timing === 'number' ? row.timing : 10,
-      resolve_at: typeof row.resolve_at === 'number' ? row.resolve_at : null,
+      resolve_at: row.resolve_at != null ? Number(row.resolve_at) : null,
     };
     res.json(mission);
   });
