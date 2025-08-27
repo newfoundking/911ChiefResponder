@@ -2129,8 +2129,10 @@ async function checkMissionCompletion(mission) {
   }
 
   if (!existing) {
-    const minutes = Number.isFinite(mission.timing) ? mission.timing : 10;
-    const ms = Math.max(5, minutes*60)*1000;
+    // `mission.timing` is stored as seconds in the DB; ensure at least a
+    // 5‑second window before auto‑resolving a mission.
+    const seconds = Number.isFinite(mission.timing) ? mission.timing : 10;
+    const ms = Math.max(5, seconds) * 1000;
     const endTime = Date.now() + ms;
     const tid = setTimeout(async ()=>{
       const cur = activeWorkTimers.get(mission.id);
