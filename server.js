@@ -1024,12 +1024,28 @@ app.get('/api/units', (req, res) => {
 
   db.all(sql, params, (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    const parsed = rows.map(u => ({
-      ...u,
-      personnel: JSON.parse(u.personnel || '[]'),
-      equipment: JSON.parse(u.equipment || '[]'),
-    }));
-    res.json(parsed);
+
+    // Load all personnel and group them by unit
+    db.all('SELECT * FROM personnel', [], (err2, pers) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+      const byUnit = new Map();
+      for (const p of pers) {
+        if (!p.unit_id) continue;
+        let list = byUnit.get(p.unit_id);
+        if (!list) { list = []; byUnit.set(p.unit_id, list); }
+        let training;
+        try { training = JSON.parse(p.training || '[]'); }
+        catch { training = []; }
+        list.push({ ...p, training });
+      }
+
+      const parsed = rows.map(u => ({
+        ...u,
+        equipment: (() => { try { return JSON.parse(u.equipment || '[]'); } catch { return []; } })(),
+        personnel: byUnit.get(u.id) || [],
+      }));
+      res.json(parsed);
+    });
   });
 });
 

@@ -1990,6 +1990,11 @@ async function autoDispatch(mission) {
              equipmentNeeds.some(n=>n.qty>0 && equipmentCount(u,n.name)>0);
     }
 
+    function unitMatchesAllNeeds(u) {
+      return trainingNeeds.every(n=>n.qty<=0 || trainingCount(u,n.name)>0) &&
+             equipmentNeeds.every(n=>n.qty<=0 || equipmentCount(u,n.name)>0);
+    }
+
     function selectUnit(u) {
       selectedIds.add(u.id);
       selected.push(u);
@@ -2003,7 +2008,9 @@ async function autoDispatch(mission) {
         let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && u.type === r.type)
                                  .sort((a,b)=>a._dist - b._dist);
         if (!candidates.length) { area.innerHTML = '<em>No available units meet the requirements.</em>'; return; }
-        const chosen = candidates.find(unitMatchesNeed) || candidates[0];
+        const chosen = candidates.find(unitMatchesAllNeeds) ||
+                       candidates.find(unitMatchesNeed) ||
+                       candidates[0];
         selectUnit(chosen);
       }
     }
