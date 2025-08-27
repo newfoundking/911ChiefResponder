@@ -263,7 +263,7 @@ function unitIconFor(unit) {
 
 function chooseMissionIcon(mission, assigned) {
   const responders = (Array.isArray(assigned) ? assigned : [])
-    .filter(u => u.status === 'enroute' || u.status === 'onscene');
+    .filter(u => u.status === 'enroute' || u.status === 'on_scene');
   if (responders.length === 0) return missionIcons.none;
   if (activeWorkTimers.has(mission.id)) return missionIcons.complete;
   return missionIcons.partial;
@@ -746,17 +746,17 @@ async function refreshAssignedUnitsUI(missionId) {
 function renderRequirementsDynamic(mission, assigned) {
   const req = Array.isArray(mission.required_units) ? mission.required_units : [];
   if (!req.length) return '<em>No specific unit requirements.</em>';
-  const counts = { enroute: new Map(), onscene: new Map() };
+  const counts = { enroute: new Map(), on_scene: new Map() };
   for (const u of assigned || []) {
-    if (u.status === 'onscene') counts.onscene.set(u.type, (counts.onscene.get(u.type)||0)+1);
+    if (u.status === 'on_scene') counts.on_scene.set(u.type, (counts.on_scene.get(u.type)||0)+1);
     else if (u.status === 'enroute') counts.enroute.set(u.type, (counts.enroute.get(u.type)||0)+1);
   }
   const items = req.map(r => {
     const need = r.quantity ?? r.count ?? 1;
-    const onscene = counts.onscene.get(r.type) || 0;
+    const onScene = counts.on_scene.get(r.type) || 0;
     const enroute = counts.enroute.get(r.type) || 0;
-    const outstanding = Math.max(0, need - enroute - onscene);
-    return `<li>${need} × ${r.type} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onscene})</small></li>`;
+    const outstanding = Math.max(0, need - enroute - onScene);
+    return `<li>${need} × ${r.type} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
   });
   return `<ul>${items.join('')}</ul>`;
 }
@@ -764,9 +764,9 @@ function renderRequirementsDynamic(mission, assigned) {
 function renderTrainingRequirementsDynamic(mission, assigned) {
   const req = Array.isArray(mission.required_training) ? mission.required_training : [];
   if (!req.length) return '';
-  const counts = { enroute: new Map(), onscene: new Map() };
+  const counts = { enroute: new Map(), on_scene: new Map() };
   for (const u of assigned || []) {
-    const target = u.status === 'onscene' ? counts.onscene : (u.status === 'enroute' ? counts.enroute : null);
+    const target = u.status === 'on_scene' ? counts.on_scene : (u.status === 'enroute' ? counts.enroute : null);
     if (!target) continue;
     for (const p of Array.isArray(u.personnel) ? u.personnel : []) {
       for (const t of Array.isArray(p.training) ? p.training : []) {
@@ -777,10 +777,10 @@ function renderTrainingRequirementsDynamic(mission, assigned) {
   const items = req.map(r => {
     const need = r.qty ?? r.quantity ?? r.count ?? 1;
     const name = r.training || r.name || r;
-    const onscene = counts.onscene.get(name) || 0;
+    const onScene = counts.on_scene.get(name) || 0;
     const enroute = counts.enroute.get(name) || 0;
-    const outstanding = Math.max(0, need - enroute - onscene);
-    return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onscene})</small></li>`;
+    const outstanding = Math.max(0, need - enroute - onScene);
+    return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
   });
   return `<ul>${items.join('')}</ul>`;
 }
@@ -788,9 +788,9 @@ function renderTrainingRequirementsDynamic(mission, assigned) {
 function renderEquipmentRequirementsDynamic(mission, assigned) {
   const req = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
   if (!req.length) return '';
-  const counts = { enroute: new Map(), onscene: new Map() };
+  const counts = { enroute: new Map(), on_scene: new Map() };
   for (const u of assigned || []) {
-    const target = u.status === 'onscene' ? counts.onscene : (u.status === 'enroute' ? counts.enroute : null);
+    const target = u.status === 'on_scene' ? counts.on_scene : (u.status === 'enroute' ? counts.enroute : null);
     if (!target) continue;
     for (const e of Array.isArray(u.equipment) ? u.equipment : []) {
       target.set(e, (target.get(e) || 0) + 1);
@@ -799,10 +799,10 @@ function renderEquipmentRequirementsDynamic(mission, assigned) {
   const items = req.map(r => {
     const need = r.qty ?? r.quantity ?? r.count ?? 1;
     const name = r.name || r.type || r;
-    const onscene = counts.onscene.get(name) || 0;
+    const onScene = counts.on_scene.get(name) || 0;
     const enroute = counts.enroute.get(name) || 0;
-    const outstanding = Math.max(0, need - enroute - onscene);
-    return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onscene})</small></li>`;
+    const outstanding = Math.max(0, need - enroute - onScene);
+    return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
   });
   return `<ul>${items.join('')}</ul>`;
 }
@@ -1915,7 +1915,7 @@ async function sendUnitsToMission(mission, ids, area) {
         await fetch(`/api/units/${uid}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'onscene' })
+          body: JSON.stringify({ status: 'on_scene' })
         });
 
         const entry = unitMarkers.get(uid);
@@ -2235,18 +2235,18 @@ for (const [id, obj] of Array.from(activeWorkTimers.entries())) {
 
 async function checkMissionCompletion(mission) {
   const assigned = await (await fetch(`/api/missions/${mission.id}/units`)).json();
-  const unitOnscene = new Map();
-  const equipOnscene = new Map();
-  const trainOnscene = new Map();
+  const unitOnScene = new Map();
+  const equipOnScene = new Map();
+  const trainOnScene = new Map();
   for (const u of assigned) {
-    if (u.status === 'onscene') {
-      unitOnscene.set(u.type, (unitOnscene.get(u.type)||0)+1);
+    if (u.status === 'on_scene') {
+      unitOnScene.set(u.type, (unitOnScene.get(u.type)||0)+1);
       for (const e of Array.isArray(u.equipment) ? u.equipment : []) {
-        equipOnscene.set(e, (equipOnscene.get(e)||0)+1);
+        equipOnScene.set(e, (equipOnScene.get(e)||0)+1);
       }
       for (const p of Array.isArray(u.personnel) ? u.personnel : []) {
         for (const t of Array.isArray(p.training) ? p.training : []) {
-          trainOnscene.set(t, (trainOnscene.get(t)||0)+1);
+          trainOnScene.set(t, (trainOnScene.get(t)||0)+1);
         }
       }
     }
@@ -2254,9 +2254,9 @@ async function checkMissionCompletion(mission) {
   const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
   const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
   const reqTrain = Array.isArray(mission.required_training) ? mission.required_training : [];
-  const unitsMet = reqUnits.every(r => (unitOnscene.get(r.type)||0) >= (r.quantity ?? r.count ?? 1));
-  const equipMet = reqEquip.every(r => (equipOnscene.get(r.name || r.type || r)||0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
-  const trainMet = reqTrain.every(r => (trainOnscene.get(r.training || r.name || r)||0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
+  const unitsMet = reqUnits.every(r => (unitOnScene.get(r.type)||0) >= (r.quantity ?? r.count ?? 1));
+  const equipMet = reqEquip.every(r => (equipOnScene.get(r.name || r.type || r)||0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
+  const trainMet = reqTrain.every(r => (trainOnScene.get(r.training || r.name || r)||0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
   const allMet = unitsMet && equipMet && trainMet;
   const existingEnd = mission.resolve_at || (activeWorkTimers.get(mission.id)?.endTime);
 
@@ -2313,7 +2313,7 @@ async function rebuildEnrouteMarkers() {
         t.unit_id, t.from, t.to, TRAVEL_SPEED[u.class] || 45,
         async () => {
           if (t.phase === 'to_scene') {
-            await fetch(`/api/units/${t.unit_id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'onscene' }) });
+            await fetch(`/api/units/${t.unit_id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'on_scene' }) });
           }
           const entry = unitMarkers.get(t.unit_id);
           if (t.phase === 'to_scene' && entry) { try{ map.removeLayer(entry.marker); }catch{} unitMarkers.delete(t.unit_id); }
@@ -2339,7 +2339,7 @@ async function rebuildEnrouteMarkers() {
           if (!st) continue;
           ensureUnitMarker(u);
           routeAndAnimateUnit(u.id, [st.lat, st.lon], [m.lat, m.lon], TRAVEL_SPEED[u.class] || 45, async ()=>{
-            await fetch(`/api/units/${u.id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'onscene' }) });
+            await fetch(`/api/units/${u.id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'on_scene' }) });
             const entry = unitMarkers.get(u.id); if (entry){ try{ map.removeLayer(entry.marker); }catch{} unitMarkers.delete(u.id); }
             const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); }
             clearUnitEta(u.id);
