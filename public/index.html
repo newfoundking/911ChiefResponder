@@ -165,7 +165,7 @@
 
 <script>
 // ========= constants / helpers =========
-const TRAVEL_SPEED = { fire: 50, police: 75, ambulance: 60 }; // km/h used across UI
+const TRAVEL_SPEED = { fire: 63, police: 94, ambulance: 75 }; // km/h used across UI (25% faster)
 
 function haversineKm(aLat, aLon, bLat, bLon) {
   const R = 6371;
@@ -455,7 +455,7 @@ async function routeAndAnimateUnit(unitId, from, to, speedClassKmh, onArrive, re
     const la1 = from[0] * Math.PI/180, la2 = to[0] * Math.PI/180;
     const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
     const distKm = 2*R*Math.asin(Math.sqrt(h));
-    const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 45)) * 3600));
+      const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 56)) * 3600));
     animateMoveUnit(unitId, from, to, etaSec * 1000, onArrive);
   }
 }
@@ -563,7 +563,7 @@ async function patrolRoute(unitId, from, to, speedClassKmh, onDone) {
     animateAlongRouteOffset(unitId, coords, seg_durations, onDone, 0);
   } catch (err) {
     const distKm = haversineKm(from[0], from[1], to[0], to[1]);
-    const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 45)) * 3600));
+    const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 56)) * 3600));
     animateMoveUnit(unitId, from, to, etaSec * 1000, onDone);
   }
 }
@@ -573,7 +573,7 @@ function startUnitPatrol(unit) {
   const st = _stationById.get(unit.station_id);
   if (!st) return;
   ensureUnitMarker(unit);
-  const speed = TRAVEL_SPEED[unit.class] || 50;
+  const speed = TRAVEL_SPEED[unit.class] || 63;
   const state = { start: Date.now() };
   patrolStates.set(unit.id, state);
   const maxMs = 60 * 60 * 1000;
@@ -1611,7 +1611,7 @@ async function cancelUnit(unitId, stationId) {
         unit.id,
         [current.lat, current.lng],
         [st.lat, st.lon],
-        TRAVEL_SPEED[unit.class] || 45,
+          TRAVEL_SPEED[unit.class] || 56,
         () => {
           const rp = unitRoutes.get(unit.id);
           if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(unit.id); }
@@ -2011,7 +2011,7 @@ async function sendUnitsToMission(mission, ids, area) {
     const current = marker.getLatLng ? marker.getLatLng() : L.latLng(st.lat, st.lon);
     const from = [current.lat, current.lng];
     const to   = [mission.lat, mission.lon];
-    const spd  = TRAVEL_SPEED[u.class] || 45;
+      const spd  = TRAVEL_SPEED[u.class] || 56;
 
     routeAndAnimateUnit(
       uid, from, to, spd,
@@ -2222,7 +2222,7 @@ async function clearAssignedUnit(missionId, unitId) {
     const from = [current.lat, current.lng];
     const to   = [st.lat, st.lon];
     routeAndAnimateUnit(
-      u.id, from, to, TRAVEL_SPEED[u.class] || 45,
+        u.id, from, to, TRAVEL_SPEED[u.class] || 56,
       () => { const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); } fetch(`/api/unit-travel/${u.id}`,{method:'DELETE'}).catch(()=>{}); },
       { phase: 'return' }
     );
@@ -2314,7 +2314,7 @@ function setupTimerForMission(mission, endTime) {
         u.id,
         [current.lat, current.lng],
         [st.lat, st.lon],
-        TRAVEL_SPEED[u.class] || 45,
+          TRAVEL_SPEED[u.class] || 56,
         () => {
           const rp = unitRoutes.get(u.id);
           if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(u.id); }
@@ -2414,7 +2414,7 @@ async function rebuildEnrouteMarkers() {
       if (!u) continue;
       ensureUnitMarker(u);
       routeAndAnimateUnit(
-        t.unit_id, t.from, t.to, TRAVEL_SPEED[u.class] || 45,
+          t.unit_id, t.from, t.to, TRAVEL_SPEED[u.class] || 56,
         async () => {
           if (t.phase === 'to_scene') {
             await fetch(`/api/units/${t.unit_id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'on_scene' }) });
@@ -2442,7 +2442,7 @@ async function rebuildEnrouteMarkers() {
           const st = _stationById.get(u.station_id);
           if (!st) continue;
           ensureUnitMarker(u);
-          routeAndAnimateUnit(u.id, [st.lat, st.lon], [m.lat, m.lon], TRAVEL_SPEED[u.class] || 45, async ()=>{
+            routeAndAnimateUnit(u.id, [st.lat, st.lon], [m.lat, m.lon], TRAVEL_SPEED[u.class] || 56, async ()=>{
             await fetch(`/api/units/${u.id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'on_scene' }) });
             const entry = unitMarkers.get(u.id); if (entry){ try{ map.removeLayer(entry.marker); }catch{} unitMarkers.delete(u.id); }
             const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); }
