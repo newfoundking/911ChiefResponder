@@ -542,6 +542,15 @@ async function fetchMissions() {
       missionList.appendChild(el);
     }
 
+    // Check completion for each mission without overloading the server
+    const CHECK_DELAY = 100;
+    valid.forEach((m, idx) => {
+      setTimeout(() => {
+        const assigned = assignedList[idx];
+        checkMissionCompletion(m, assigned).catch(() => {});
+      }, idx * CHECK_DELAY);
+    });
+
     // Sync mission timers with server state
     const now = Date.now();
     const presentIds = new Set(missions.map(m => m.id));
@@ -2474,7 +2483,7 @@ for (const [id, obj] of Array.from(activeWorkTimers.entries())) {
   startMissionCountdown(id, obj.endTime);
 }
 
-async function checkMissionCompletion(mission) {
+async function checkMissionCompletion(mission, assigned) {
   function evaluate(assigned) {
     const unitOnScene = new Map();
     const equipOnScene = new Map();
@@ -2506,15 +2515,18 @@ async function checkMissionCompletion(mission) {
     return { allMet: unitsMet && equipMet && trainMet, unitOnScene, equipOnScene, trainOnScene };
   }
 
-  let assigned = await (await fetch(`/api/missions/${mission.id}/units`)).json();
-  let { allMet, unitOnScene, equipOnScene, trainOnScene } = evaluate(assigned);
+  let assignedUnits = assigned;
+  if (!assignedUnits) {
+    assignedUnits = await (await fetch(`/api/missions/${mission.id}/units`)).json();
+  }
+  let { allMet, unitOnScene, equipOnScene, trainOnScene } = evaluate(assignedUnits);
   const existingEnd = mission.resolve_at || (activeWorkTimers.get(mission.id)?.endTime);
 
   if (!allMet) {
     if (existingEnd) {
       await new Promise(r => setTimeout(r, 200));
-      assigned = await (await fetch(`/api/missions/${mission.id}/units`)).json();
-      const recheck = evaluate(assigned);
+      assignedUnits = await (await fetch(`/api/missions/${mission.id}/units`)).json();
+      const recheck = evaluate(assignedUnits);
       if (recheck.allMet) {
         allMet = true;
         unitOnScene = recheck.unitOnScene;
