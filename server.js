@@ -157,12 +157,15 @@ db.serialize(() => {
       personnel TEXT DEFAULT '[]',
       equipment TEXT DEFAULT '[]',
       status TEXT DEFAULT 'available',
+      patrol INTEGER DEFAULT 0,
       FOREIGN KEY (station_id) REFERENCES stations(id)
     )
   `);
 
   // Fix any legacy rows where status was "[]"
   db.run(`UPDATE units SET status='available' WHERE status IS NULL OR status='[]'`);
+  // Add patrol column for legacy DBs
+  db.run(`ALTER TABLE units ADD COLUMN patrol INTEGER DEFAULT 0`, () => {});
 
   // Personnel
   db.run(`
@@ -1065,6 +1068,7 @@ app.get('/api/units', (req, res) => {
 
       const parsed = rows.map(u => ({
         ...u,
+        patrol: u.patrol === 1 || u.patrol === true,
         equipment: (() => { try { return JSON.parse(u.equipment || '[]'); } catch { return []; } })(),
         personnel: byUnit.get(u.id) || [],
       }));
@@ -1223,6 +1227,17 @@ app.patch('/api/units/:id/status', (req, res) => {
   db.run('UPDATE units SET status = ? WHERE id = ?', [status, id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ ok: true, status });
+  });
+});
+
+// Toggle unit patrol flag
+app.patch('/api/units/:id/patrol', (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid unit id' });
+  const patrol = req.body && req.body.patrol ? 1 : 0;
+  db.run('UPDATE units SET patrol=? WHERE id=?', [patrol, id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true, patrol: Boolean(patrol) });
   });
 });
 // PATCH /api/units/:id/icon  { icon: <string> }

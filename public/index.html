@@ -43,12 +43,13 @@
 	setInterval(refreshWallet, 5000);
 	refreshWallet();
 	</script>
-	<div id="tab-missions" class="tab-content active">
-		<button id="generateMission">Generate Mission</button>
-		<button id="clearMissions" style="background: darkred; color: white; margin-top: 1em;">DEBUG CLEAR ALL CALLS</button>
-		<button id="deleteAllStations">DEBUG DELETE ALL STATIONS</button>
-		<div id="missionList"></div>
-	</div>
+        <div id="tab-missions" class="tab-content active">
+                <button id="generateMission">Generate Mission</button>
+                <button id="startPatrols">Start Patrols</button>
+                <button id="clearMissions" style="background: darkred; color: white; margin-top: 1em;">DEBUG CLEAR ALL CALLS</button>
+                <button id="deleteAllStations">DEBUG DELETE ALL STATIONS</button>
+                <div id="missionList"></div>
+        </div>
 
         <div id="tab-stations" class="tab-content">
           <button id="buildStation" style="margin-bottom: 1em;">Build New Station</button>
@@ -401,6 +402,7 @@ function drawRoute(unitId, coords) {
 }
 
 async function routeAndAnimateUnit(unitId, from, to, speedClassKmh, onArrive, resumeOpts) {
+  patrolStates.delete(unitId);
   try {
     // Resume with saved travel (from backend)
     if (resumeOpts?.saved) {
@@ -533,6 +535,61 @@ async function fetchMissions() {
   } catch (err) {
     console.error("Failed to fetch missions:", err);
   }
+}
+
+// ===== Patrol helpers =====
+const patrolStates = new Map();
+
+function randomPointNear(lat, lon, radiusKm) {
+  const r = radiusKm / 6371;
+  const u = Math.random();
+  const v = Math.random();
+  const w = r * Math.sqrt(u);
+  const t = 2 * Math.PI * v;
+  const lat1 = lat * Math.PI/180;
+  const lon1 = lon * Math.PI/180;
+  const newLat = Math.asin(Math.sin(lat1)*Math.cos(w) + Math.cos(lat1)*Math.sin(w)*Math.cos(t));
+  const newLon = lon1 + Math.atan2(Math.sin(t)*Math.sin(w)*Math.cos(lat1), Math.cos(w) - Math.sin(lat1)*Math.sin(newLat));
+  return [newLat*180/Math.PI, newLon*180/Math.PI];
+}
+
+async function patrolRoute(unitId, from, to, speedClassKmh, onDone) {
+  try {
+    const { coords, duration, annotations } = await fetchRouteOSRM(from, to);
+    const seg_durations = (annotations?.duration?.length === coords.length - 1)
+      ? annotations.duration
+      : Array.from({ length: coords.length - 1 }, () => duration / Math.max(1, coords.length - 1));
+    drawRoute(unitId, coords);
+    animateAlongRouteOffset(unitId, coords, seg_durations, onDone, 0);
+  } catch (err) {
+    const distKm = haversineKm(from[0], from[1], to[0], to[1]);
+    const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 45)) * 3600));
+    animateMoveUnit(unitId, from, to, etaSec * 1000, onDone);
+  }
+}
+
+function startUnitPatrol(unit) {
+  if (!unit || patrolStates.has(unit.id)) return;
+  const st = _stationById.get(unit.station_id);
+  if (!st) return;
+  ensureUnitMarker(unit);
+  const speed = TRAVEL_SPEED[unit.class] || 50;
+  const state = { start: Date.now() };
+  patrolStates.set(unit.id, state);
+  const maxMs = 60 * 60 * 1000;
+
+  const step = (from) => {
+    const s = patrolStates.get(unit.id);
+    if (!s) return;
+    if (Date.now() - s.start >= maxMs) {
+      patrolRoute(unit.id, from, [st.lat, st.lon], speed, () => patrolStates.delete(unit.id));
+      return;
+    }
+    const dest = randomPointNear(st.lat, st.lon, 5);
+    patrolRoute(unit.id, from, dest, speed, () => step(dest));
+  };
+
+  step([st.lat, st.lon]);
 }
 
 async function generateMissionAtPOI(poi) {
@@ -1473,6 +1530,13 @@ document.getElementById('generateMission').addEventListener('click', async ()=>{
   } catch (err) { console.error("Failed to create mission:", err); alert("Failed to create mission."); }
 });
 
+// Start patrols for all units flagged
+document.getElementById('startPatrols').addEventListener('click', async () => {
+  const units = await fetch('/api/units').then(r => r.json()).catch(()=>[]);
+  cacheUnits(units);
+  units.filter(u => u.patrol).forEach(u => startUnitPatrol(u));
+});
+
 // Clear Missions
 document.getElementById("clearMissions").addEventListener("click", async ()=>{
   if (!confirm("Clear ALL missions?")) return;
@@ -1606,12 +1670,14 @@ async function showUnitDetails(unitId) {
   const missionHtml = mission && mission.id
     ? `<p><strong>Current Mission:</strong> <span class="mission-link" data-missionid="${mission.id}" style="cursor:pointer; color:blue;">#${mission.id} ${mission.type}</span></p>`
     : '<p><strong>Current Mission:</strong> None</p>';
+  const patrolHtml = `<p><label><input type="checkbox" id="patrol-toggle" ${unit?.patrol ? 'checked' : ''}/> Patrol</label></p>`;
 
   content.innerHTML = `
     <p><strong>Name:</strong> ${unit?.name || 'Unknown'} <button id="edit-unit-btn">Edit</button></p>
     <p><strong>Station:</strong> ${station?.name || 'Unknown'}</p>
     <p><strong>Vehicle Class:</strong> ${unit?.class || 'Unknown'} (${unit?.type || ''})</p>
     ${missionHtml}
+    ${patrolHtml}
     <button id="change-unit-icon">Change Icon</button>
     <h4>Equipment Aboard</h4>
     ${equipmentHtml}
@@ -1620,6 +1686,17 @@ async function showUnitDetails(unitId) {
     <h4>Assigned Personnel</h4>
     ${personnelHtml}
   `;
+
+  const patrolToggle = content.querySelector('#patrol-toggle');
+  patrolToggle?.addEventListener('change', async () => {
+    const val = patrolToggle.checked;
+    await fetch(`/api/units/${unitId}/patrol`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ patrol: val })
+    });
+    _unitById.set(unitId, { ...unit, patrol: val });
+  });
 
   content.querySelectorAll('.unassign-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
