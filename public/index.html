@@ -2546,11 +2546,15 @@ async function checkMissionCompletion(mission, assigned) {
           const tDiv = document.getElementById('missionTimerArea');
           if (tDiv) tDiv.textContent = '';
         }
-        await fetchMissions();
+        if (openMissionId === mission.id) {
+          await refreshAssignedUnitsUI(mission.id);
+        }
         return;
       }
     } else {
-      await fetchMissions();
+      if (openMissionId === mission.id) {
+        await refreshAssignedUnitsUI(mission.id);
+      }
       return;
     }
   }
@@ -2584,7 +2588,6 @@ async function checkMissionCompletion(mission, assigned) {
   if (endTime) {
     mission.resolve_at = endTime;
     setupTimerForMission(mission, endTime);
-    await fetchMissions();
   } else if (mission.resolve_at && (!activeWorkTimers.get(mission.id) || activeWorkTimers.get(mission.id).endTime !== mission.resolve_at)) {
     setupTimerForMission(mission, mission.resolve_at);
   }
