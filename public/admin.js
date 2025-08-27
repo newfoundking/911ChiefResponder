@@ -42,6 +42,7 @@ function appendMissionRow(mission) {
     <td>${mission.trigger_type}</td>
     <td>${mission.trigger_filter}</td>
     <td>${mission.timing}</td>
+    <td>${mission.non_emergency ? 'Yes' : 'No'}</td>
     <td>${(mission.required_units || []).map(u => `${u.quantity ?? u.count}×${u.type}`).join(", ")}</td>
     <td>${(mission.required_training || []).map(t => `${t.qty ?? t.quantity ?? t.count ?? 1}×${t.training ?? t.name ?? t}`).join(", ")}</td>
     <td>${(mission.equipment_required || []).map(e => `${e.qty ?? e.quantity ?? e.count ?? 1}×${e.name ?? e}`).join(", ")}</td>
@@ -79,6 +80,7 @@ async function openMissionForm(existing = null) {
     <label>Trigger Filter: <span id="trigger-filter-container"></span></label><br>
     <label>Timing (minutes): <input id="timing" type="number" value="${existing?.timing ?? 0}"></label><br>
     <label>Rewards (currency): <input id="rewards" type="number" value="${existing?.rewards ?? 0}"></label><br>
+    <label><input type="checkbox" id="non-emergency" ${existing?.non_emergency ? 'checked' : ''}/> Non-Emergency Call</label><br>
 
     <h4>Required Units</h4>
     <div><strong>Type</strong> | <strong>Quantity</strong></div>
@@ -385,6 +387,7 @@ async function submitMission() {
     trigger_filter: triggerFilter,
     timing: Number(document.getElementById("timing").value),
     rewards: Number(document.getElementById("rewards").value) || 0, // <-- NEW
+    non_emergency: document.getElementById("non-emergency").checked,
     required_units: collectRows("#unit-req-container") || [],
     patients: collectRows("#patients-container") || [],
     prisoners: collectRows("#prisoners-container") || [],

@@ -96,6 +96,7 @@ db.serialize(() => {
       patients TEXT DEFAULT '[]',
       prisoners TEXT DEFAULT '[]',
       modifiers TEXT DEFAULT '[]',
+      non_emergency INTEGER DEFAULT 0,
       status TEXT,
       timing INTEGER DEFAULT 10,
       resolve_at INTEGER
@@ -106,6 +107,7 @@ db.serialize(() => {
   db.run(`ALTER TABLE missions ADD COLUMN timing INTEGER DEFAULT 10`, () => { /* ignore if exists */ });
   db.run(`ALTER TABLE missions ADD COLUMN departments TEXT`, () => { /* ignore if exists */ });
   db.run(`ALTER TABLE missions ADD COLUMN resolve_at INTEGER`, () => { /* ignore if exists */ });
+  db.run(`ALTER TABLE missions ADD COLUMN non_emergency INTEGER DEFAULT 0`, () => { /* ignore if exists */ });
   db.run(`UPDATE missions SET departments = json_array(department) WHERE departments IS NULL AND department IS NOT NULL`, () => {});
 
   // Mission ↔ Units link
@@ -132,9 +134,11 @@ db.serialize(() => {
           required_training TEXT,
           modifiers TEXT,
           equipment_required TEXT,
-          rewards INTEGER DEFAULT 0
+          rewards INTEGER DEFAULT 0,
+          non_emergency INTEGER DEFAULT 0
     )
   `);
+  db.run(`ALTER TABLE mission_templates ADD COLUMN non_emergency INTEGER DEFAULT 0`, () => { /* ignore if exists */ });
 
   // Run cards
   db.run(`
@@ -194,9 +198,11 @@ db.serialize(() => {
       coords TEXT NOT NULL,               -- JSON [[lat,lon],...]
       seg_durations TEXT NOT NULL,        -- JSON [sec,...]
       total_duration REAL NOT NULL,       -- seconds (post multiplier)
+      emergency INTEGER DEFAULT 1,
       FOREIGN KEY (unit_id) REFERENCES units(id)
     )
   `);
+  db.run(`ALTER TABLE unit_travel ADD COLUMN emergency INTEGER DEFAULT 1`, () => { /* ignore if exists */ });
 
   // Response zones
   db.run(`
@@ -643,7 +649,8 @@ app.get('/api/missions', (req, res) => {
       prisoners: JSON.parse(m.prisoners || "[]"),
       modifiers: JSON.parse(m.modifiers || "[]"),
       timing: typeof m.timing === 'number' ? m.timing : 10,
-      resolve_at: m.resolve_at != null ? Number(m.resolve_at) : null
+      resolve_at: m.resolve_at != null ? Number(m.resolve_at) : null,
+      non_emergency: m.non_emergency === 1
     }));
     res.json(parsed);
   });
@@ -654,7 +661,8 @@ app.post('/api/missions', (req, res) => {
     type, lat, lon,
     required_units = [], required_training = [],
     equipment_required = [], patients = [], prisoners = [], modifiers = [],
-    timing = 10
+    timing = 10,
+    non_emergency = 0
   } = req.body;
 
   db.all('SELECT * FROM response_zones', (err, zones) => {
@@ -674,8 +682,8 @@ app.post('/api/missions', (req, res) => {
 
     db.run(`
       INSERT INTO missions
-      (type, lat, lon, departments, required_units, required_training, equipment_required, patients, prisoners, modifiers, status, timing)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (type, lat, lon, departments, required_units, required_training, equipment_required, patients, prisoners, modifiers, non_emergency, status, timing)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       type, lat, lon,
@@ -686,6 +694,7 @@ app.post('/api/missions', (req, res) => {
       JSON.stringify(patients),
       JSON.stringify(prisoners),
       JSON.stringify(modifiers),
+      non_emergency ? 1 : 0,
       'active',
       timing
     ],
@@ -697,7 +706,8 @@ app.post('/api/missions', (req, res) => {
         departments,
         required_units, required_training, equipment_required, patients, prisoners, modifiers,
         status: 'active',
-        timing
+        timing,
+        non_emergency: non_emergency ? 1 : 0
       });
     });
   });
@@ -770,6 +780,7 @@ app.get('/api/missions/:id', (req, res) => {
       modifiers: parseArrayField(row.modifiers),
       timing: typeof row.timing === 'number' ? row.timing : 10,
       resolve_at: row.resolve_at != null ? Number(row.resolve_at) : null,
+      non_emergency: row.non_emergency === 1,
     };
     res.json(mission);
   });
@@ -1137,7 +1148,9 @@ app.get('/api/units/:id/mission', (req, res) => {
         patients: parseArrayField(row.patients),
         prisoners: parseArrayField(row.prisoners),
         modifiers: parseArrayField(row.modifiers),
+        departments: parseArrayField(row.departments),
         timing: typeof row.timing === 'number' ? row.timing : 10,
+        non_emergency: row.non_emergency === 1,
       };
       res.json(mission);
     }
@@ -1408,7 +1421,8 @@ app.get('/api/mission-templates', (req, res) => {
       modifiers: parseArrayField(row.modifiers),
       required_training: parseArrayField(row.required_training),
       equipment_required: parseArrayField(row.equipment_required),
-      rewards: Number.isFinite(row.rewards) ? row.rewards : 0
+      rewards: Number.isFinite(row.rewards) ? row.rewards : 0,
+      non_emergency: row.non_emergency === 1
     }));
     res.json(parsed);
   });
@@ -1427,16 +1441,17 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
     required_training: JSON.stringify(b.required_training || []),
     modifiers: JSON.stringify(b.modifiers || []),
     equipment_required: JSON.stringify(b.equipment_required || []),
-    rewards: Number(b.rewards) || 0
+    rewards: Number(b.rewards) || 0,
+    non_emergency: b.non_emergency ? 1 : 0
   };
   db.run(
     `INSERT INTO mission_templates
      (name, trigger_type, trigger_filter, timing,
-      required_units, patients, prisoners, required_training, modifiers, equipment_required, rewards)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      required_units, patients, prisoners, required_training, modifiers, equipment_required, rewards, non_emergency)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
-     fields.modifiers, fields.equipment_required, fields.rewards],
+     fields.modifiers, fields.equipment_required, fields.rewards, fields.non_emergency],
     function(err){
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID, ...fields });
@@ -1458,17 +1473,18 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
     required_training: JSON.stringify(b.required_training || []),
     modifiers: JSON.stringify(b.modifiers || []),
     equipment_required: JSON.stringify(b.equipment_required || []),
-    rewards: Number(b.rewards) || 0
+    rewards: Number(b.rewards) || 0,
+    non_emergency: b.non_emergency ? 1 : 0
   };
   db.run(
     `UPDATE mission_templates SET
       name=?, trigger_type=?, trigger_filter=?, timing=?,
       required_units=?, patients=?, prisoners=?, required_training=?,
-      modifiers=?, equipment_required=?, rewards=?
+      modifiers=?, equipment_required=?, rewards=?, non_emergency=?
      WHERE id=?`,
     [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
-     fields.modifiers, fields.equipment_required, fields.rewards, id],
+     fields.modifiers, fields.equipment_required, fields.rewards, fields.non_emergency, id],
     function(err){
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id, ...fields });
@@ -1480,7 +1496,7 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
 app.get('/api/mission-templates/id/:id', (req, res) => {
   db.get(`SELECT id, name, trigger_type, trigger_filter, timing,
                  required_units, patients, prisoners, required_training,
-                 modifiers, equipment_required, rewards
+                 modifiers, equipment_required, rewards, non_emergency
           FROM mission_templates WHERE id=?`, [req.params.id], (err, r) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!r)   return res.status(404).json({ error: "Not found" });
@@ -1491,6 +1507,7 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
     r.modifiers = parseArrayField(r.modifiers);
     r.equipment_required = parseArrayField(r.equipment_required);
     r.rewards = Number.isFinite(r.rewards) ? r.rewards : 0;
+    r.non_emergency = r.non_emergency === 1;
     res.json(r);
   });
 });
@@ -1573,15 +1590,15 @@ app.delete('/api/mission-units', (req, res) => {
 app.post('/api/unit-travel', (req, res) => {
   const {
     unit_id, mission_id = null, phase = 'to_scene', started_at,
-    from, to, coords, seg_durations, total_duration
+    from, to, coords, seg_durations, total_duration, emergency = 1
   } = req.body || {};
   if (!unit_id || !started_at || !from || !to || !coords || !seg_durations || !total_duration) {
     return res.status(400).json({ error: 'invalid payload' });
   }
 
   db.run(`
-    INSERT INTO unit_travel (unit_id, mission_id, phase, started_at, from_lat, from_lon, to_lat, to_lon, coords, seg_durations, total_duration)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO unit_travel (unit_id, mission_id, phase, started_at, from_lat, from_lon, to_lat, to_lon, coords, seg_durations, total_duration, emergency)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(unit_id) DO UPDATE SET
       mission_id=excluded.mission_id,
       phase=excluded.phase,
@@ -1592,11 +1609,12 @@ app.post('/api/unit-travel', (req, res) => {
       to_lon=excluded.to_lon,
       coords=excluded.coords,
       seg_durations=excluded.seg_durations,
-      total_duration=excluded.total_duration
+      total_duration=excluded.total_duration,
+      emergency=excluded.emergency
   `, [
     unit_id, mission_id, phase, started_at,
     from[0], from[1], to[0], to[1],
-    JSON.stringify(coords), JSON.stringify(seg_durations), total_duration
+    JSON.stringify(coords), JSON.stringify(seg_durations), total_duration, emergency ? 1 : 0
   ], (err) => {
     if (err) return res.status(500).json({ error: err.message });
 
@@ -1668,7 +1686,8 @@ app.get('/api/unit-travel/active', (req, res) => {
         to: [r.to_lat, r.to_lon],
         coords: JSON.parse(r.coords || '[]'),
         seg_durations: JSON.parse(r.seg_durations || '[]'),
-        total_duration: r.total_duration
+        total_duration: r.total_duration,
+        emergency: r.emergency === 1
       });
     }
 

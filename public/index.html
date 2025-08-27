@@ -264,6 +264,8 @@ document.querySelectorAll(".tab-button").forEach(button => {
 });
 
 function unitIconFor(unit) {
+  if (unit.responding === true) return makeIcon('/responding.svg', 24);
+  if (unit.responding === false) return makeIcon('/notresponding.svg', 24);
   const sanitizedType = (unit.type || '').replace(/\s+/g, '');
   const typeIcon = sanitizedType ? `/images/${sanitizedType}.png` : null;
   const url = unit.icon || typeIcon || stationIcons[unit.class] || stationIcons.fire;
@@ -432,7 +434,8 @@ async function routeAndAnimateUnit(unitId, from, to, speedClassKmh, onArrive, re
     // Light “emergency” multiplier
     const speedMultiplier = { fire: 1.2, police: 1.3, ambulance: 1.25 };
     const u = _unitById.get(unitId);
-    const mult = u ? (speedMultiplier[u.class] || 1.0) : 1.0;
+    const emergency = resumeOpts?.emergency !== false;
+    const mult = emergency ? (u ? (speedMultiplier[u.class] || 1.0) : 1.0) : 1.0;
     const adjustedTotal = Math.max(5, duration / mult);
 
     // Persist to backend so we can resume on refresh
@@ -448,7 +451,8 @@ async function routeAndAnimateUnit(unitId, from, to, speedClassKmh, onArrive, re
           from, to,
           coords,
           seg_durations,
-          total_duration: adjustedTotal
+          total_duration: adjustedTotal,
+          emergency
         })
       });
     } catch (e) { console.warn('Failed to persist travel:', e); }
@@ -580,7 +584,9 @@ function startUnitPatrol(unit) {
   if (!unit || patrolStates.has(unit.id)) return;
   const st = _stationById.get(unit.station_id);
   if (!st) return;
-  ensureUnitMarker(unit);
+  const upd = { ...unit, responding: false };
+  _unitById.set(unit.id, upd);
+  ensureUnitMarker(upd);
   const speed = TRAVEL_SPEED[unit.class] || 63;
   const state = { start: Date.now() };
   patrolStates.set(unit.id, state);
@@ -1654,7 +1660,9 @@ async function cancelUnit(unitId, stationId) {
     const unit = _unitById.get(unitId);
     const st = unit ? _stationById.get(unit.station_id) : null;
     if (unit && st) {
-      ensureUnitMarker(unit);
+      const upd = { ...unit, responding: false };
+      _unitById.set(unit.id, upd);
+      ensureUnitMarker(upd);
       const entry = unitMarkers.get(unit.id);
       const current = entry?.marker.getLatLng() || L.latLng(st.lat, st.lon);
       routeAndAnimateUnit(
@@ -1665,9 +1673,10 @@ async function cancelUnit(unitId, stationId) {
         () => {
           const rp = unitRoutes.get(unit.id);
           if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(unit.id); }
+          const curr = _unitById.get(unit.id); if (curr) { delete curr.responding; _unitById.set(unit.id, curr); }
           fetch(`/api/unit-travel/${unit.id}`, { method:'DELETE' }).catch(()=>{});
         },
-        { phase: 'return' }
+        { phase: 'return', emergency: false }
       );
       await fetch(`/api/units/${unitId}/status`, {
         method:'PATCH',
@@ -2053,7 +2062,10 @@ async function sendUnitsToMission(mission, ids, area) {
     if (!u) continue;
     const st = _stationById.get(u.station_id);
     if (!st) continue;
-    const marker = ensureUnitMarker(u);
+    const responding = !mission.non_emergency;
+    const upd = { ...u, responding };
+    _unitById.set(uid, upd);
+    const marker = ensureUnitMarker(upd);
     if (!marker) continue;
 
     fetch(`/api/units/${uid}/status`, { method:'PATCH', headers:{ 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'enroute' }) });
@@ -2088,9 +2100,10 @@ async function sendUnitsToMission(mission, ids, area) {
         if (trainDiv2) trainDiv2.innerHTML = renderTrainingRequirementsDynamic(mission, assignedAfter);
         const equipDiv2 = document.getElementById('reqEquipmentDynamic');
         if (equipDiv2) equipDiv2.innerHTML = renderEquipmentRequirementsDynamic(mission, assignedAfter);
+        const curr = _unitById.get(uid); if (curr) { delete curr.responding; _unitById.set(uid, curr); }
         checkMissionCompletion(mission);
       },
-      { mission_id: mission.id, phase: 'to_scene' }
+      { mission_id: mission.id, phase: 'to_scene', emergency: responding }
     );
   }
 }
@@ -2104,7 +2117,7 @@ async function dispatchSelectedUnits(missionId) {
     const mission = missions.find(m=>m.id===missionId);
     if (!mission) { alert('Mission not found.'); return; }
     await sendUnitsToMission(mission, ids, area);
-    openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon });
+    openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon, non_emergency: mission.non_emergency });
   } catch (e) {
     console.error(e);
     alert('Failed to dispatch one or more units.');
@@ -2266,19 +2279,21 @@ async function clearAssignedUnit(missionId, unitId) {
   const mission = missions.find(m=>m.id===missionId);
   const st = u && _stationById.get(u.station_id);
   if (u && mission && st) {
-    ensureUnitMarker(u);
+    const upd = { ...u, responding: false };
+    _unitById.set(u.id, upd);
+    ensureUnitMarker(upd);
     const entry = unitMarkers.get(u.id);
     const current = entry?.marker.getLatLng() || L.latLng(mission.lat, mission.lon);
     const from = [current.lat, current.lng];
     const to   = [st.lat, st.lon];
     routeAndAnimateUnit(
         u.id, from, to, TRAVEL_SPEED[u.class] || 56,
-      () => { const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); } fetch(`/api/unit-travel/${u.id}`,{method:'DELETE'}).catch(()=>{}); },
-      { phase: 'return' }
+      () => { const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); } const curr=_unitById.get(u.id); if(curr){delete curr.responding; _unitById.set(u.id,curr);} fetch(`/api/unit-travel/${u.id}`,{method:'DELETE'}).catch(()=>{}); },
+      { phase: 'return', emergency: false }
     );
   }
   const assigned = await refreshAssignedUnitsUI(missionId);
-  if (document.getElementById('manualDispatchArea')) openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon });
+  if (document.getElementById('manualDispatchArea')) openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon, non_emergency: mission.non_emergency });
   const missionSnap = missions.find(m=>m.id===missionId);
   if (missionSnap) {
     const reqDiv = document.getElementById('reqDynamic');
@@ -2362,7 +2377,9 @@ function setupTimerForMission(mission, endTime) {
     for (const u of assignedBefore) {
       const st = _stationById.get(u.station_id);
       if (!st) continue;
-      ensureUnitMarker(u);
+      const upd = { ...u, responding: false };
+      _unitById.set(u.id, upd);
+      ensureUnitMarker(upd);
       const entry = unitMarkers.get(u.id);
       const current = entry?.marker.getLatLng() || L.latLng(mission.lat, mission.lon);
       routeAndAnimateUnit(
@@ -2373,9 +2390,10 @@ function setupTimerForMission(mission, endTime) {
         () => {
           const rp = unitRoutes.get(u.id);
           if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(u.id); }
+          const curr = _unitById.get(u.id); if (curr) { delete curr.responding; _unitById.set(u.id, curr); }
           fetch(`/api/unit-travel/${u.id}`, { method:'DELETE' }).catch(()=>{});
         },
-        { phase: 'return' }
+        { phase: 'return', emergency: false }
       );
     }
     await refreshAssignedUnitsUI(mission.id);
@@ -2484,7 +2502,10 @@ async function rebuildEnrouteMarkers() {
     for (const t of travels) {
       const u = _unitById.get(t.unit_id);
       if (!u) continue;
-      ensureUnitMarker(u);
+      const responding = t.phase === 'to_scene' && t.emergency;
+      const upd = { ...u, responding };
+      _unitById.set(t.unit_id, upd);
+      ensureUnitMarker(upd);
       routeAndAnimateUnit(
           t.unit_id, t.from, t.to, TRAVEL_SPEED[u.class] || 56,
         async () => {
@@ -2495,9 +2516,10 @@ async function rebuildEnrouteMarkers() {
           if (t.phase === 'to_scene' && entry) { try{ map.removeLayer(entry.marker); }catch{} unitMarkers.delete(t.unit_id); }
           const rp = unitRoutes.get(t.unit_id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(t.unit_id); }
           clearUnitEta(t.unit_id);
+          const curr = _unitById.get(t.unit_id); if (curr) { delete curr.responding; _unitById.set(t.unit_id, curr); }
           fetch(`/api/unit-travel/${t.unit_id}`, { method:'DELETE' }).catch(()=>{});
         },
-        { saved: t }
+        { saved: t, phase: t.phase, mission_id: t.mission_id, emergency: t.emergency }
       );
     }
     return;
@@ -2513,15 +2535,19 @@ async function rebuildEnrouteMarkers() {
         if (u.status === 'enroute') {
           const st = _stationById.get(u.station_id);
           if (!st) continue;
-          ensureUnitMarker(u);
-            routeAndAnimateUnit(u.id, [st.lat, st.lon], [m.lat, m.lon], TRAVEL_SPEED[u.class] || 56, async ()=>{
+          const responding = !m.non_emergency;
+          const upd = { ...u, responding };
+          _unitById.set(u.id, upd);
+          ensureUnitMarker(upd);
+          routeAndAnimateUnit(u.id, [st.lat, st.lon], [m.lat, m.lon], TRAVEL_SPEED[u.class] || 56, async ()=>{
             await fetch(`/api/units/${u.id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'on_scene' }) });
             const entry = unitMarkers.get(u.id); if (entry){ try{ map.removeLayer(entry.marker); }catch{} unitMarkers.delete(u.id); }
             const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); }
             clearUnitEta(u.id);
+            const curr = _unitById.get(u.id); if (curr) { delete curr.responding; _unitById.set(u.id, curr); }
             await refreshAssignedUnitsUI(m.id);
             checkMissionCompletion(m);
-          });
+          }, { mission_id: m.id, phase: 'to_scene', emergency: responding });
         }
       }
     }
