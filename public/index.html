@@ -1500,21 +1500,43 @@ async function openAssignModal(unitId, stationId) {
 
 async function cancelUnit(unitId, stationId) {
   if (!confirm('Cancel this unit?')) return;
-  const res = await fetch(`/api/units/${unitId}/cancel`, { method: 'POST' });
-  if (!res.ok) {
-    const msg = await res.text();
-    alert(`Failed: ${msg}`);
-    return;
-  }
-  const data = await res.json().catch(() => ({}));
-  refreshStationPanelNoCache(stationId);
-  if (Array.isArray(data.missions) && data.missions.length) {
-    const missions = await (await fetch('/api/missions')).json();
-    for (const mid of data.missions) {
-      const m = missions.find(ms => ms.id === mid);
-      if (m) await checkMissionCompletion(m);
+
+  let mission = null;
+  try {
+    mission = await fetch(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
+  } catch {}
+
+  if (mission && mission.id) {
+    await clearAssignedUnit(mission.id, unitId);
+    await checkMissionCompletion(mission);
+  } else {
+    const unit = _unitById.get(unitId);
+    const st = unit ? _stationById.get(unit.station_id) : null;
+    if (unit && st) {
+      ensureUnitMarker(unit);
+      const entry = unitMarkers.get(unit.id);
+      const current = entry?.marker.getLatLng() || L.latLng(st.lat, st.lon);
+      routeAndAnimateUnit(
+        unit.id,
+        [current.lat, current.lng],
+        [st.lat, st.lon],
+        TRAVEL_SPEED[unit.class] || 45,
+        () => {
+          const rp = unitRoutes.get(unit.id);
+          if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(unit.id); }
+          fetch(`/api/unit-travel/${unit.id}`, { method:'DELETE' }).catch(()=>{});
+        },
+        { phase: 'return' }
+      );
+      await fetch(`/api/units/${unitId}/status`, {
+        method:'PATCH',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ status:'available' })
+      });
     }
   }
+
+  refreshStationPanelNoCache(stationId);
 }
 
 async function showUnitDetails(unitId) {
