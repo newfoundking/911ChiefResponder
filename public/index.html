@@ -281,6 +281,14 @@ function chooseMissionIcon(mission, assigned) {
   return missionIcons.partial;
 }
 
+function missionIconUrl(mission, assigned) {
+  const responders = (Array.isArray(assigned) ? assigned : [])
+    .filter(u => u.status === 'enroute' || u.status === 'on_scene');
+  if (responders.length === 0) return '/warning1.png';
+  if (activeWorkTimers.has(mission.id)) return '/warning3.png';
+  return '/warning2.png';
+}
+
 // caches
 window._stationById = new Map();
 window._unitById = new Map();
@@ -290,6 +298,7 @@ const unitMarkers = new Map(); // unitId -> { marker, animId }
 const unitRoutes  = new Map(); // unitId -> L.Polyline
 // track ETA timers for enroute units
 const unitEtaTimers = new Map(); // unitId -> intervalId
+const missionListTimers = new Map(); // missionId -> intervalId
 
 function formatEta(seconds){
   const s = Math.max(0, Math.floor(seconds));
@@ -315,6 +324,25 @@ function clearUnitEta(unitId){
   const iid = unitEtaTimers.get(unitId);
   if (iid) clearInterval(iid);
   unitEtaTimers.delete(unitId);
+}
+
+function startMissionListTimer(id, endTime){
+  const prev = missionListTimers.get(id);
+  if (prev) clearInterval(prev);
+  const elem = document.querySelector(`.mission-time[data-id="${id}"]`);
+  if (!elem) return;
+  let iid = null;
+  function update(){
+    const remaining = Math.max(0, (endTime - Date.now())/1000);
+    elem.textContent = formatEta(remaining);
+    if (remaining <= 0){
+      clearInterval(iid);
+      missionListTimers.delete(id);
+    }
+  }
+  update();
+  iid = setInterval(update, 1000);
+  missionListTimers.set(id, iid);
 }
 
 function cacheStations(stations){
@@ -531,6 +559,14 @@ async function fetchMissions() {
     // Remove resolved missions from display
     missions = missions.filter(m => m.status !== 'resolved');
 
+    const missionIds = new Set(missions.map(m => m.id));
+    for (const [id, iid] of Array.from(missionListTimers.entries())) {
+      if (!missionIds.has(id)) {
+        clearInterval(iid);
+        missionListTimers.delete(id);
+      }
+    }
+
     missionMarkers.forEach(m => map.removeLayer(m));
     missionMarkers = [];
 
@@ -562,11 +598,18 @@ async function fetchMissions() {
 
       const el = document.createElement("div");
       el.className = "mission";
+      const endTime = Number(m.resolve_at);
+      const timerSpan = Number.isFinite(endTime)
+        ? `<span class="mission-time" data-id="${m.id}">${formatEta((endTime - Date.now())/1000)}</span>`
+        : "";
       el.innerHTML = `
+        <img src="${missionIconUrl(m, assigned)}" class="mission-icon">
         <strong class="focus-mission" data-lat="${m.lat}" data-lon="${m.lon}" style="cursor:pointer;">${m.type}</strong>
+        ${timerSpan}
         <button onclick='showMissionDetails(${JSON.stringify(m)})' style="margin-left:8px;">Details</button><br>
         Address: ${address}<br>`;
       missionList.appendChild(el);
+      if (Number.isFinite(endTime)) startMissionListTimer(m.id, endTime);
     }
 
     // Check completion for each mission without overloading the server
