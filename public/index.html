@@ -1566,13 +1566,20 @@ function instantiatePrisoners(arr) {
 }
 
 // Generate Mission
-document.getElementById('generateMission').addEventListener('click', async ()=>{
-  if (missionTemplates.length===0) { alert("No mission templates loaded."); return; }
-  const stations = await fetch('/api/stations').then(r=>r.json()).catch(()=>[]);
+async function generateMission(retry = false, excludeIndex = null) {
+  if (missionTemplates.length === 0) { alert("No mission templates loaded."); return; }
+  const stations = await fetch('/api/stations').then(r => r.json()).catch(() => []);
   if (!stations.length) { alert("No stations available."); return; }
-  const st = stations[Math.floor(Math.random()*stations.length)];
+  const st = stations[Math.floor(Math.random() * stations.length)];
   const radius = 5000; // meters
-  const template = missionTemplates[Math.floor(Math.random()*missionTemplates.length)];
+
+  let availableTemplates = missionTemplates;
+  if (excludeIndex !== null) {
+    availableTemplates = missionTemplates.filter((_, idx) => idx !== excludeIndex);
+    if (!availableTemplates.length) return;
+  }
+  const template = availableTemplates[Math.floor(Math.random() * availableTemplates.length)];
+  const templateIndex = missionTemplates.indexOf(template);
 
   let lat, lon;
   if (template.trigger_type === 'poi' && template.trigger_filter) {
@@ -1584,7 +1591,8 @@ document.getElementById('generateMission').addEventListener('click', async ()=>{
         const poi = matches[Math.floor(Math.random() * matches.length)];
         lat = poi.lat; lon = poi.lon;
       } else {
-        alert('No matching POI found.');
+        console.warn('No matching POI found.');
+        if (!retry) return generateMission(true, templateIndex);
         return;
       }
     } catch (e) {
@@ -1640,11 +1648,13 @@ document.getElementById('generateMission').addEventListener('click', async ()=>{
     timing: template.timing ?? 10
   };
   try {
-    const res = await fetch('/api/missions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(missionData)});
+    const res = await fetch('/api/missions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(missionData) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     await fetchMissions();
   } catch (err) { console.error("Failed to create mission:", err); alert("Failed to create mission."); }
-});
+}
+
+document.getElementById('generateMission').addEventListener('click', () => generateMission());
 
 // Start patrols for all units flagged
 document.getElementById('startPatrols').addEventListener('click', async () => {
