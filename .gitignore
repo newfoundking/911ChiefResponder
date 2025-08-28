@@ -4,3 +4,5 @@ public/images/
 game.db
 *.db
 *.db
+game.db
+public/images/Thumbs.db
