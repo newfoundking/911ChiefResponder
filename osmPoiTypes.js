@@ -1,6 +1,6 @@
 const OSM_POI_TYPES = [
   "airport",
-  "Large_airport",
+  "large_airport",
   "atm",
   "bank",
   "bar",
@@ -9,7 +9,7 @@ const OSM_POI_TYPES = [
   "bus_station",
   "cafe",
   "car_wash",
-  "cargo_port"
+  "cargo_port",
   "cinema",
   "farm",
   "fire_station",
