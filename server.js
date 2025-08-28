@@ -34,17 +34,6 @@ function parseArrayField(str) {
   }
 }
 
-async function reverseGeocode(lat, lon) {
-  try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`;
-    const res = await axios.get(url, { headers: { 'User-Agent': '911ChiefResponder' } });
-    return res.data?.display_name || null;
-  } catch (e) {
-    console.error('Reverse geocode failed:', e.message);
-    return null;
-  }
-}
-
 // Simple point in polygon check for [lat, lon] coordinate arrays
 function pointInPolygon(lat, lon, poly) {
   const pts = Array.isArray(poly?.coordinates) ? poly.coordinates : [];
@@ -100,7 +89,6 @@ db.serialize(() => {
       type TEXT,
       lat REAL,
       lon REAL,
-      address TEXT,
       departments TEXT,
       required_units TEXT,
       required_training TEXT DEFAULT '[]',
@@ -129,7 +117,6 @@ db.serialize(() => {
   db.run(`ALTER TABLE missions ADD COLUMN penalty_options TEXT DEFAULT '[]'`, () => { /* ignore if exists */ });
   db.run(`ALTER TABLE missions ADD COLUMN penalties TEXT DEFAULT '[]'`, () => { /* ignore if exists */ });
   db.run(`ALTER TABLE missions ADD COLUMN non_emergency INTEGER`, () => { /* ignore if exists */ });
-  db.run(`ALTER TABLE missions ADD COLUMN address TEXT`, () => { /* ignore if exists */ });
   db.run(`UPDATE missions SET departments = json_array(department) WHERE departments IS NULL AND department IS NOT NULL`, () => {});
 
   // Mission ↔ Units link
@@ -691,7 +678,7 @@ app.get('/api/missions', (req, res) => {
   });
 });
 
-app.post('/api/missions', async (req, res) => {
+app.post('/api/missions', (req, res) => {
   const {
     type, lat, lon,
     required_units = [], required_training = [],
@@ -700,8 +687,6 @@ app.post('/api/missions', async (req, res) => {
     timing = 10,
     non_emergency = null
   } = req.body;
-
-  const address = await reverseGeocode(lat, lon);
 
   db.all('SELECT * FROM response_zones', (err, zones) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -720,11 +705,11 @@ app.post('/api/missions', async (req, res) => {
 
     db.run(`
       INSERT INTO missions
-      (type, lat, lon, address, departments, required_units, required_training, equipment_required, patients, prisoners, modifiers, penalty_options, penalties, status, timing, non_emergency)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (type, lat, lon, departments, required_units, required_training, equipment_required, patients, prisoners, modifiers, penalty_options, penalties, status, timing, non_emergency)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
-      type, lat, lon, address,
+      type, lat, lon,
       JSON.stringify(departments),
       JSON.stringify(required_units),
       JSON.stringify(required_training),
@@ -742,7 +727,7 @@ app.post('/api/missions', async (req, res) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({
         id: this.lastID,
-        type, lat, lon, address,
+        type, lat, lon,
         departments,
         required_units, required_training, equipment_required, patients, prisoners, modifiers,
         penalty_options, penalties,
