@@ -506,6 +506,23 @@ fetch('/api/mission-templates')
 // UI helpers
 function closeModal(){ const m = document.querySelector(".modal-overlay"); if (m) m.remove(); }
 
+// Cache mission addresses by ID to avoid duplicate reverse-geocoding lookups.
+const missionAddressCache = {};
+async function reverseGeocode(lat, lon, id) {
+  if (id && missionAddressCache[id]) return missionAddressCache[id];
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`);
+    if (!res.ok) throw new Error('Reverse geocode failed');
+    const data = await res.json();
+    const addr = data.display_name || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    if (id) missionAddressCache[id] = addr;
+    return addr;
+  } catch (err) {
+    console.warn('Reverse geocode error:', err);
+    return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+  }
+}
+
 async function fetchMissions() {
   try {
     const res = await fetch("/api/missions");
@@ -524,9 +541,19 @@ async function fetchMissions() {
     const assignedList = await Promise.all(
       valid.map(m => fetch(`/api/missions/${m.id}/units`).then(r => r.json()).catch(() => []))
     );
+    const addresses = await Promise.all(
+      valid.map(m => {
+        if (m.address) {
+          missionAddressCache[m.id] = m.address;
+          return m.address;
+        }
+        return reverseGeocode(m.lat, m.lon, m.id);
+      })
+    );
     for (let i = 0; i < valid.length; i++) {
       const m = valid[i];
       const assigned = assignedList[i];
+       const address = addresses[i];
       const marker = L.marker([m.lat, m.lon], { icon: chooseMissionIcon(m, assigned) })
         .addTo(map)
         .on("click", () => showMissionDetails(m));
@@ -538,7 +565,7 @@ async function fetchMissions() {
       el.innerHTML = `
         <strong class="focus-mission" data-lat="${m.lat}" data-lon="${m.lon}" style="cursor:pointer;">${m.type}</strong>
         <button onclick='showMissionDetails(${JSON.stringify(m)})' style="margin-left:8px;">Details</button><br>
-        Lat: ${m.lat.toFixed(4)}<br>Lon: ${m.lon.toFixed(4)}<br>`;
+        Address: ${address}<br>`;
       missionList.appendChild(el);
     }
 
