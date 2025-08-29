@@ -120,6 +120,9 @@ db.serialize(() => {
   db.run(`
     ALTER TABLE mission_templates ADD COLUMN non_emergency INTEGER
   `, () => { /* ignore if exists */ });
+  db.run(`
+    ALTER TABLE mission_templates ADD COLUMN frequency INTEGER DEFAULT 3
+  `, () => { /* ignore if exists */ });
 
   // Add timing/department/resolve columns if not present (for legacy DBs)
   db.run(`ALTER TABLE missions ADD COLUMN timing INTEGER DEFAULT 10`, () => { /* ignore if exists */ });
@@ -158,7 +161,8 @@ db.serialize(() => {
           equipment_required TEXT,
           penalty_options TEXT,
           rewards INTEGER DEFAULT 0,
-          non_emergency INTEGER
+          non_emergency INTEGER,
+          frequency INTEGER DEFAULT 3
     )
   `);
 
@@ -1515,7 +1519,8 @@ app.get('/api/mission-templates', (req, res) => {
       equipment_required: parseArrayField(row.equipment_required),
       penalty_options: parseArrayField(row.penalty_options),
       rewards: Number.isFinite(row.rewards) ? row.rewards : 0,
-      non_emergency: row.non_emergency === 1 || row.non_emergency === true
+      non_emergency: row.non_emergency === 1 || row.non_emergency === true,
+      frequency: Number.isFinite(row.frequency) ? row.frequency : 3
     }));
     res.json(parsed);
   });
@@ -1536,16 +1541,17 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
     equipment_required: JSON.stringify(b.equipment_required || []),
     penalty_options: JSON.stringify(b.penalty_options || []),
     rewards: Number(b.rewards) || 0,
-    non_emergency: b.non_emergency ? 1 : null
+    non_emergency: b.non_emergency ? 1 : null,
+    frequency: Math.min(5, Math.max(1, Number(b.frequency) || 3))
   };
   db.run(
     `INSERT INTO mission_templates
      (name, trigger_type, trigger_filter, timing,
-      required_units, patients, prisoners, required_training, modifiers, equipment_required, penalty_options, rewards, non_emergency)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      required_units, patients, prisoners, required_training, modifiers, equipment_required, penalty_options, rewards, non_emergency, frequency)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
-     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards, fields.non_emergency],
+     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards, fields.non_emergency, fields.frequency],
     function(err){
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id: this.lastID, ...fields });
@@ -1569,17 +1575,18 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
     equipment_required: JSON.stringify(b.equipment_required || []),
     penalty_options: JSON.stringify(b.penalty_options || []),
     rewards: Number(b.rewards) || 0,
-    non_emergency: b.non_emergency ? 1 : null
+    non_emergency: b.non_emergency ? 1 : null,
+    frequency: Math.min(5, Math.max(1, Number(b.frequency) || 3))
   };
   db.run(
     `UPDATE mission_templates SET
       name=?, trigger_type=?, trigger_filter=?, timing=?,
       required_units=?, patients=?, prisoners=?, required_training=?,
-      modifiers=?, equipment_required=?, penalty_options=?, rewards=?, non_emergency=?
+      modifiers=?, equipment_required=?, penalty_options=?, rewards=?, non_emergency=?, frequency=?
      WHERE id=?`,
     [fields.name, fields.trigger_type, fields.trigger_filter, fields.timing,
      fields.required_units, fields.patients, fields.prisoners, fields.required_training,
-     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards, fields.non_emergency, id],
+     fields.modifiers, fields.equipment_required, fields.penalty_options, fields.rewards, fields.non_emergency, fields.frequency, id],
     function(err){
       if (err) return res.status(500).json({ error: err.message });
       res.json({ id, ...fields });
@@ -1591,7 +1598,7 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
 app.get('/api/mission-templates/id/:id', (req, res) => {
   db.get(`SELECT id, name, trigger_type, trigger_filter, timing,
                  required_units, patients, prisoners, required_training,
-                 modifiers, equipment_required, penalty_options, rewards, non_emergency
+                 modifiers, equipment_required, penalty_options, rewards, non_emergency, frequency
           FROM mission_templates WHERE id=?`, [req.params.id], (err, r) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!r)   return res.status(404).json({ error: "Not found" });
@@ -1604,6 +1611,7 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
     r.penalty_options = parseArrayField(r.penalty_options);
     r.rewards = Number.isFinite(r.rewards) ? r.rewards : 0;
     r.non_emergency = r.non_emergency === 1 || r.non_emergency === true;
+    r.frequency = Number.isFinite(r.frequency) ? r.frequency : 3;
     res.json(r);
   });
 });

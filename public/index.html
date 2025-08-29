@@ -531,7 +531,7 @@ async function routeAndAnimateUnit(unitId, from, to, speedClassKmh, onArrive, re
 let missionTemplates = [];
 fetch('/api/mission-templates')
   .then(r => r.json())
-  .then(data => { missionTemplates = data; })
+  .then(data => { missionTemplates = data.map(t => ({ ...t, frequency: Number(t.frequency) || 3 })); })
   .catch(err => console.error('Failed to load mission templates:', err));
 
 // UI helpers
@@ -1635,7 +1635,13 @@ async function generateMission(retry = false, excludeIndex = null) {
     availableTemplates = missionTemplates.filter((_, idx) => idx !== excludeIndex);
     if (!availableTemplates.length) return;
   }
-  const template = availableTemplates[Math.floor(Math.random() * availableTemplates.length)];
+  const weights = availableTemplates.map(t => Math.max(1, 6 - (Number(t.frequency) || 3)));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  let pick = Math.random() * totalWeight;
+  let template = availableTemplates[0];
+  for (let i = 0; i < availableTemplates.length; i++) {
+    if ((pick -= weights[i]) < 0) { template = availableTemplates[i]; break; }
+  }
   const templateIndex = missionTemplates.indexOf(template);
 
   let lat, lon;
