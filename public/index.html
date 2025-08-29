@@ -572,9 +572,11 @@ async function fetchMissions() {
     let missions = await res.json();
     missions = sortMissions(missions);
 
-    const missionIds = new Set(missions.map(m => m.id));
+    const missionById = new Map(missions.map(m => [m.id, m]));
+    const missionIds = new Set(missionById.keys());
     for (const [id, iid] of Array.from(missionListTimers.entries())) {
-      if (!missionIds.has(id)) {
+      const m = missionById.get(id);
+      if (!m || !Number.isFinite(m.resolve_at)) {
         clearInterval(iid);
         missionListTimers.delete(id);
       }
@@ -584,7 +586,8 @@ async function fetchMissions() {
     missionMarkers = [];
 
     const missionList = document.getElementById("missionList");
-    missionList.innerHTML = "";
+    const scrollPos = missionList.scrollTop;
+    const existingEls = new Map(Array.from(missionList.children).map(el => [Number(el.dataset.id), el]));
 
     const valid = missions.filter(m => Number.isFinite(m.lat) && Number.isFinite(m.lon));
     const assignedList = await Promise.all(
@@ -602,15 +605,22 @@ async function fetchMissions() {
     for (let i = 0; i < valid.length; i++) {
       const m = valid[i];
       const assigned = assignedList[i];
-       const address = addresses[i];
+      const address = addresses[i];
       const marker = L.marker([m.lat, m.lon], { icon: chooseMissionIcon(m, assigned) })
         .addTo(map)
         .on("click", () => showMissionDetails(m));
 
       missionMarkers.push(marker);
 
-      const el = document.createElement("div");
-      el.className = "mission";
+      let el = existingEls.get(m.id);
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "mission";
+        el.dataset.id = m.id;
+      } else {
+        existingEls.delete(m.id);
+        el.innerHTML = ""; // clear for rebuild
+      }
       const endTime = Number(m.resolve_at);
       const timerSpan = Number.isFinite(endTime)
         ? `<span class="mission-time" data-id="${m.id}">${formatEta((endTime - Date.now())/1000)}</span>`
@@ -633,6 +643,12 @@ async function fetchMissions() {
       missionList.appendChild(el);
       if (Number.isFinite(endTime)) startMissionListTimer(m.id, endTime);
     }
+
+    for (const el of existingEls.values()) {
+      missionList.removeChild(el);
+    }
+
+    missionList.scrollTop = scrollPos;
 
     // Check completion for each mission without overloading the server
     const CHECK_DELAY = 100;
