@@ -682,7 +682,16 @@ app.patch('/api/stations/:id/holding-cells', (req, res) => {
    Missions
    ========================= */
 app.get('/api/missions', (req, res) => {
-  db.all("SELECT * FROM missions", (err, rows) => {
+  const sql = `
+    SELECT m.*, 
+           SUM(CASE WHEN u.status = 'enroute' THEN 1 ELSE 0 END) AS responding_count,
+           SUM(CASE WHEN u.status IN ('enroute','on_scene') THEN 1 ELSE 0 END) AS assigned_count
+    FROM missions m
+    LEFT JOIN mission_units mu ON mu.mission_id = m.id
+    LEFT JOIN units u ON u.id = mu.unit_id
+    GROUP BY m.id
+  `;
+  db.all(sql, (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     const parsed = rows.map(m => ({
       ...m,
@@ -697,7 +706,9 @@ app.get('/api/missions', (req, res) => {
       penalties: JSON.parse(m.penalties || "[]"),
       timing: typeof m.timing === 'number' ? m.timing : 10,
       resolve_at: m.resolve_at != null ? Number(m.resolve_at) : null,
-      non_emergency: m.non_emergency === 1 || m.non_emergency === true
+      non_emergency: m.non_emergency === 1 || m.non_emergency === true,
+      responding_count: Number(m.responding_count) || 0,
+      assigned_count: Number(m.assigned_count) || 0
     }));
     res.json(parsed);
   });
