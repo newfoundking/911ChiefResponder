@@ -684,18 +684,9 @@ async function fetchMissions() {
 
     missionList.scrollTop = scrollPos;
 
-    // Check completion for each mission without overloading the server
-    const CHECK_DELAY = 100;
-    valid.forEach((m, idx) => {
-      setTimeout(() => {
-        const assigned = assignedList[idx];
-        checkMissionCompletion(m, assigned).catch(() => {});
-      }, idx * CHECK_DELAY);
-    });
-
-    // Sync mission timers with server state
-    const now = Date.now();
-    const presentIds = new Set(missions.map(m => m.id));
+      // Sync mission timers with server state
+      const now = Date.now();
+      const presentIds = new Set(missions.map(m => m.id));
     for (const [id, obj] of Array.from(activeWorkTimers.entries())) {
       if (!presentIds.has(id)) {
         if (obj.timeoutId) clearTimeout(obj.timeoutId);
@@ -2527,118 +2518,9 @@ for (const [id, obj] of Array.from(activeWorkTimers.entries())) {
   startMissionCountdown(id, obj.endTime);
 }
 
-async function checkMissionCompletion(mission, assigned) {
-  function evaluate(assigned) {
-    const unitOnScene = new Map();
-    const equipOnScene = new Map();
-    const trainOnScene = new Map();
-    for (const u of assigned) {
-      if (u.status === 'on_scene') {
-        unitOnScene.set(u.type, (unitOnScene.get(u.type) || 0) + 1);
-        for (const e of Array.isArray(u.equipment) ? u.equipment : []) {
-          equipOnScene.set(e, (equipOnScene.get(e) || 0) + 1);
-        }
-        for (const p of Array.isArray(u.personnel) ? u.personnel : []) {
-          for (const t of Array.isArray(p.training) ? p.training : []) {
-            trainOnScene.set(t, (trainOnScene.get(t) || 0) + 1);
-          }
-        }
-      }
-    }
-    const reqUnits = Array.isArray(mission.required_units) ? mission.required_units.map(r => {
-      const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
-      const types = Array.isArray(r.types) ? r.types : [r.type];
-      const ignored = penalties.filter(p => types.includes(p.type)).reduce((s, p) => s + (p.quantity || 0), 0);
-      const qty = Math.max(0, (r.quantity ?? r.count ?? 1) - ignored);
-      return { ...r, quantity: qty, types };
-    }) : [];
-    const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
-    const reqTrain = Array.isArray(mission.required_training) ? mission.required_training : [];
-    const unitsMet = reqUnits.every(r => {
-      const count = r.types.reduce((s,t)=>s+(unitOnScene.get(t)||0),0);
-      return count >= (r.quantity ?? r.count ?? 1);
-    });
-    const equipMet = reqEquip.every(r => (equipOnScene.get(r.name || r.type || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
-    const trainMet = reqTrain.every(r => (trainOnScene.get(r.training || r.name || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
-    return { allMet: unitsMet && equipMet && trainMet, unitOnScene, equipOnScene, trainOnScene };
-  }
-
-  let assignedUnits = assigned;
-  if (!assignedUnits) {
-    assignedUnits = await (await fetch(`/api/missions/${mission.id}/units`)).json();
-  }
-  let { allMet, unitOnScene, equipOnScene, trainOnScene } = evaluate(assignedUnits);
-  const existingEnd = mission.resolve_at || (activeWorkTimers.get(mission.id)?.endTime);
-
-  if (!allMet) {
-    if (existingEnd) {
-      await new Promise(r => setTimeout(r, 200));
-      assignedUnits = await (await fetch(`/api/missions/${mission.id}/units`)).json();
-      const recheck = evaluate(assignedUnits);
-      if (recheck.allMet) {
-        allMet = true;
-        unitOnScene = recheck.unitOnScene;
-        equipOnScene = recheck.equipOnScene;
-        trainOnScene = recheck.trainOnScene;
-      } else {
-        await fetch(`/api/missions/${mission.id}/timer`, { method: 'DELETE' });
-        const ex = activeWorkTimers.get(mission.id);
-        if (ex) {
-          if (ex.timeoutId) clearTimeout(ex.timeoutId);
-          if (ex.intervalId) clearInterval(ex.intervalId);
-          activeWorkTimers.delete(mission.id);
-          persistWorkTimers();
-        }
-        mission.resolve_at = null;
-        if (openMissionId === mission.id) {
-          const tDiv = document.getElementById('missionTimerArea');
-          if (tDiv) tDiv.textContent = '';
-        }
-        if (openMissionId === mission.id) {
-          await refreshAssignedUnitsUI(mission.id);
-        }
-        return;
-      }
-    } else {
-      if (openMissionId === mission.id) {
-        await refreshAssignedUnitsUI(mission.id);
-      }
-      return;
-    }
-  }
-
-  const mods = Array.isArray(mission.modifiers) ? mission.modifiers : [];
-  let reduction = 0;
-  for (const m of mods) {
-    if (!m || typeof m !== 'object') continue;
-    const per = Number(m.timeReduction) || 0;
-    if (!per) continue;
-    const have = unitOnScene.get(m.type) || 0;
-    const maxCount = Number(m.maxCount) || 1;
-    reduction += Math.min(have, maxCount) * per;
-  }
-  reduction = Math.min(100, reduction);
-  const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
-  const penaltyTime = penalties.reduce((s,p)=>s+(Number(p.timePenalty)||0),0);
-  reduction -= penaltyTime;
-  reduction = Math.max(-100, Math.min(100, reduction));
-
-  if (!existingEnd) {
-    await fetch(`/api/missions/${mission.id}/timer`, { method: 'POST' });
-  }
-  const res = await fetch(`/api/missions/${mission.id}/timer`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reduction })
-  });
-  const data = await res.json().catch(()=>({}));
-  const endTime = Number(data.resolve_at);
-  if (endTime) {
-    mission.resolve_at = endTime;
-    setupTimerForMission(mission, endTime);
-  } else if (mission.resolve_at && (!activeWorkTimers.get(mission.id) || activeWorkTimers.get(mission.id).endTime !== mission.resolve_at)) {
-    setupTimerForMission(mission, mission.resolve_at);
-  }
+// Mission completion is now handled entirely by the server.
+async function checkMissionCompletion() {
+  return;
 }
 
 // Rebuild en-route after reload (using backend unit-travel)
