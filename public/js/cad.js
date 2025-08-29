@@ -304,7 +304,7 @@ async function openMission(id) {
       <button id="manualDispatch">Manual Dispatch</button>
       <button id="autoDispatch">Auto Dispatch</button>
       <button id="runCardDispatch">Run Card</button>
-      <button id="classDispatchBtn">Class Dispatch</button>
+      <button id="unitTypeDispatchBtn">Unit Type Dispatch</button>
     </div>`;
   pane.classList.remove('hidden');
   document.getElementById('closeDetail').onclick = ()=>{
@@ -314,7 +314,7 @@ async function openMission(id) {
   document.getElementById('manualDispatch').onclick = ()=>openManualDispatch(mission);
   document.getElementById('autoDispatch').onclick = ()=>autoDispatch(mission);
   document.getElementById('runCardDispatch').onclick = ()=>runCardDispatch(mission);
-  document.getElementById('classDispatchBtn').onclick = ()=>openClassDispatch(mission);
+  document.getElementById('unitTypeDispatchBtn').onclick = ()=>openUnitTypeDispatch(mission);
 }
 
 async function autoDispatch(mission) {
@@ -538,37 +538,39 @@ async function openManualDispatch(mission) {
   };
 }
 
-async function openClassDispatch(mission) {
+async function openUnitTypeDispatch(mission) {
   const unitsPane = document.getElementById('cadUnits');
   const [stations, units] = await Promise.all([
     getStations(),
     fetchNoCache('/api/units?status=available').then(r=>r.json())
   ]);
   const stMap = new Map(stations.map(s=>[s.id,s]));
-  const groups = { fire: [], police: [], ambulance: [] };
+  const groups = new Map();
   units.forEach(u=>{
     const st = stMap.get(u.station_id);
     const dist = st ? haversine(mission.lat, mission.lon, st.lat, st.lon) : Infinity;
-    if (groups[u.class]) groups[u.class].push({ ...u, distance: dist });
+    const arr = groups.get(u.type) || [];
+    arr.push({ ...u, distance: dist });
+    groups.set(u.type, arr);
   });
-  let html = '<div class="cad-unit-header"><button id="closeClass">Close</button></div>';
-  for (const cls of Object.keys(groups)) {
-    const arr = groups[cls].sort((a,b)=>a.distance-b.distance);
-    html += `<div><strong>${cls.charAt(0).toUpperCase()+cls.slice(1)}</strong> (${arr.length}) <button data-class="${cls}" class="class-send">Send 1</button></div>`;
+  let html = '<div class="cad-unit-header"><button id="closeUnitType">Close</button></div>';
+  for (const [type, list] of groups.entries()) {
+    const arr = list.sort((a,b)=>a.distance-b.distance);
+    html += `<div><strong>${type}</strong> (${arr.length}) <button data-type="${type}" class="type-send">Send 1</button></div>`;
   }
   unitsPane.innerHTML = html;
   unitsPane.classList.remove('hidden');
-  document.getElementById('closeClass').onclick = ()=>unitsPane.classList.add('hidden');
-  unitsPane.querySelectorAll('.class-send').forEach(btn=>{
+  document.getElementById('closeUnitType').onclick = ()=>unitsPane.classList.add('hidden');
+  unitsPane.querySelectorAll('.type-send').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
-      const cls = btn.dataset.class;
-      const list = groups[cls];
+      const type = btn.dataset.type;
+      const list = groups.get(type) || [];
       if (!list.length) { alert('No available units'); return; }
       const unit = list.shift();
       await dispatchUnits(mission, [unit]);
       await loadMissions();
       await openMission(mission.id);
-      openClassDispatch(mission);
+      openUnitTypeDispatch(mission);
     });
   });
 }
