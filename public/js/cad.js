@@ -151,8 +151,7 @@ async function showStation(id) {
   const personnel = [];
   units.forEach(u => (u.personnel || []).forEach(p => personnel.push({ ...p, unit: u.name })));
   unassigned.forEach(p => personnel.push({ ...p, unit: 'Unassigned' }));
-  let html = `<div class="cad-station-detail"><div style="text-align:right"><button id="closeStationDetail">Close</button></div><h3>${st.name}</h3><p>Type: ${st.type}</p><p>Department: ${st.department||''}</p>`;
-  html += `<div style="margin:8px 0;"><button id="newPersonnel">New Personnel</button> <button id="newUnit">New Unit</button> <button id="newEquipment">New Equipment</button></div>`;
+  let html = `<div class="cad-station-detail"><div class="cad-station-header"><button id="closeStationDetail">Close</button><button id="newPersonnel">New Personnel</button> <button id="newUnit">New Unit</button> <button id="newEquipment">New Equipment</button></div><h3>${st.name}</h3><p>Type: ${st.type}</p><p>Department: ${st.department||''}</p>`;
   html += `<div style="display:flex; gap:20px;"><div><h4>Units</h4><ul>`;
   html += units.map(u => `<li class="cad-unit" data-id="${u.id}">${u.name}</li>`).join('');
   html += `</ul></div><div><h4>Personnel</h4><ul>`;
@@ -395,18 +394,18 @@ async function openMission(id) {
       return `<li>${u.name} - ${u.status}${etaText}</li>`;
     }).join('') + '</ul></div>';
   }
-  pane.innerHTML = `<div style="text-align:right"><button id="closeDetail">Close</button></div>
-    <h3>${mission.type}</h3>
-    ${time}
-    <div>${mission.address||''}</div>
-    ${reqHtml}
-    ${assignedHtml}
-    <div style="margin-top:8px;">
+  pane.innerHTML = `<div class="cad-detail-header">
+      <button id="closeDetail">Close</button>
       <button id="manualDispatch">Manual Dispatch</button>
       <button id="autoDispatch">Auto Dispatch</button>
       <button id="runCardDispatch">Run Card</button>
       <button id="unitTypeDispatchBtn">Unit Type Dispatch</button>
-    </div>`;
+    </div>
+    <h3>${mission.type}</h3>
+    ${time}
+    <div>${mission.address||''}</div>
+    ${reqHtml}
+    ${assignedHtml}`;
   pane.classList.remove('hidden');
   document.getElementById('closeDetail').onclick = ()=>{
     pane.classList.add('hidden');
