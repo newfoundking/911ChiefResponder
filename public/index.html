@@ -41,6 +41,7 @@
                 .unit-tag-icon.fire { background: red; }
                 .unit-tag-icon.police { background: blue; }
                 .unit-tag-icon.ambulance { background: green; }
+                .leaflet-marker-icon { overflow: visible !important; }
                 .unit-tag-icon.responding.fire,
                 .unit-tag-icon.responding.ambulance {
                         animation: flash-rw 1s infinite;
@@ -49,14 +50,32 @@
                         animation: flash-rwb 1s infinite;
                 }
                 @keyframes flash-rw {
-                        0%, 100% { border-color: red; }
-                        50% { border-color: white; }
+                        0%, 100% {
+                                border-color: red;
+                                box-shadow: 0 0 6px 2px red;
+                        }
+                        50% {
+                                border-color: white;
+                                box-shadow: 0 0 6px 2px white;
+                        }
                 }
                 @keyframes flash-rwb {
-                        0% { border-color: red; }
-                        33% { border-color: white; }
-                        66% { border-color: blue; }
-                        100% { border-color: red; }
+                        0% {
+                                border-color: red;
+                                box-shadow: 0 0 6px 2px red;
+                        }
+                        33% {
+                                border-color: white;
+                                box-shadow: 0 0 6px 2px white;
+                        }
+                        66% {
+                                border-color: blue;
+                                box-shadow: 0 0 6px 2px blue;
+                        }
+                        100% {
+                                border-color: red;
+                                box-shadow: 0 0 6px 2px red;
+                        }
                 }
         </style>
 </head>
