@@ -58,6 +58,19 @@ function haversine(aLat, aLon, bLat, bLon) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+async function fetchRouteOSRM(from, to) {
+  const url = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson&annotations=duration,distance&steps=false`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`OSRM ${res.status}`);
+  const json = await res.json();
+  if (!json.routes?.length) throw new Error('No route');
+  const route = json.routes[0];
+  const coords = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+  const duration = route.duration;
+  const annotations = route.legs?.[0]?.annotation || null;
+  return { coords, duration, annotations };
+}
+
 let cachedMissions = [];
 let cachedStations = [];
 
@@ -574,12 +587,30 @@ async function dispatchUnits(mission, units) {
       if (!st) continue;
       const from = [st.lat, st.lon];
       const to = [mission.lat, mission.lon];
-      const coords = [from, to];
-      const distKm = haversine(from[0], from[1], to[0], to[1]);
-      const baseSpeed = 56; // km/h
-      const mult = ({ fire: 1.2, police: 1.3, ambulance: 1.25 }[u.class] || 1);
-      const total_duration = Math.max(5, (distKm / (baseSpeed * mult)) * 3600);
-      const seg_durations = [total_duration];
+
+      let coords = [];
+      let seg_durations = [];
+      let total_duration = 0;
+
+      try {
+        const { coords: osrmCoords, duration, annotations } = await fetchRouteOSRM(from, to);
+        coords = osrmCoords;
+        seg_durations = (annotations?.duration?.length === coords.length - 1)
+          ? annotations.duration
+          : Array.from({ length: coords.length - 1 }, () => duration / Math.max(1, coords.length - 1));
+        const speedMultiplier = { fire: 1.2, police: 1.3, ambulance: 1.25 };
+        const mult = speedMultiplier[u.class] || 1;
+        total_duration = Math.max(5, duration / mult);
+      } catch (err) {
+        console.warn('OSRM route failed; straight-line fallback:', err);
+        coords = [from, to];
+        const distKm = haversine(from[0], from[1], to[0], to[1]);
+        const baseSpeed = 56; // km/h
+        const mult = ({ fire: 1.2, police: 1.3, ambulance: 1.25 }[u.class] || 1);
+        total_duration = Math.max(5, (distKm / (baseSpeed * mult)) * 3600);
+        seg_durations = [total_duration];
+      }
+
       await fetch('/api/unit-travel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
