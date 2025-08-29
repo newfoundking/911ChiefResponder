@@ -63,6 +63,8 @@ let cachedStations = [];
 
 async function init() {
   document.getElementById('returnMain').addEventListener('click', ()=>location.href='index.html');
+  document.getElementById('generateMission')
+          .addEventListener('click', () => generateMission());
   await updateWallet();
   await loadStations();
   await loadMissions();
@@ -676,7 +678,7 @@ async function openUnitTypeDispatch(mission) {
   });
 }
 
-async function generateMission(retry = false, excludeIndex = null) {
+export async function generateMission(retry = false, excludeIndex = null) {
   if (missionTemplates.length === 0) { alert("No mission templates loaded."); return; }
   const stations = await fetch('/api/stations').then(r => r.json()).catch(() => []);
   if (!stations.length) { alert("No stations available."); return; }
