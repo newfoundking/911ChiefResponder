@@ -8,23 +8,21 @@ export async function getMissions() {
 
 export function sortMissions(missions) {
   const level = m => {
-    if (m.warning1) return 1;
-    if (m.warning2) return 2;
-    if (m.warning3) return 3;
-    return 4;
+    if (m.resolve_at) return 3;
+    return (m.assigned_count > 0) ? 2 : 1;
   };
   return missions
     .filter(m => m.status !== 'resolved')
-    .slice()
+    .map(m => ({ ...m, level: level(m) }))
     .sort((a, b) => {
-      const diff = level(a) - level(b);
+      const diff = a.level - b.level;
       if (diff !== 0) return diff;
       return (a.id || 0) - (b.id || 0);
     });
 }
 
 export function renderMissionRow(mission) {
-  const lvl = mission.warning3 ? 3 : mission.warning2 ? 2 : mission.warning1 ? 1 : 1;
+  const lvl = mission.level || (mission.resolve_at ? 3 : (mission.assigned_count > 0 ? 2 : 1));
   const icon = `/warning${lvl}.png`;
   let time = '';
   if (mission.resolve_at) {
