@@ -254,8 +254,9 @@ async function openMission(id) {
   if (Array.isArray(mission.required_units) && mission.required_units.length) {
     reqHtml = '<div><strong>Required Units:</strong><ul>' + mission.required_units.map(r=>{
       const need = r.quantity ?? r.count ?? r.qty ?? 1;
-      const have = assignedCounts[r.type] || 0;
-      return `<li>${need} ${r.type} (${have}/${need})</li>`;
+      const types = Array.isArray(r.types) ? r.types : [r.type];
+      const have = types.reduce((s,t)=>s+(assignedCounts[t]||0),0);
+      return `<li>${need} ${types.join(' or ')} (${have}/${need})</li>`;
     }).join('') + '</ul></div>';
   }
   let assignedHtml = '';
@@ -363,7 +364,8 @@ async function autoDispatch(mission) {
     for (const r of reqUnits) {
       const need = r.quantity ?? r.count ?? r.qty ?? 1;
       for (let i=0; i<need; i++) {
-        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && u.type === r.type)
+        const types = Array.isArray(r.types) ? r.types : [r.type];
+        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && types.includes(u.type))
                                  .sort(sortUnits);
         if (!candidates.length) { alert('No available units meet the requirements.'); return; }
         const chosen = candidates.find(unitMatchesAllNeeds) ||

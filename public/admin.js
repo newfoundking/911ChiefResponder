@@ -42,7 +42,10 @@ function appendMissionRow(mission) {
     <td>${mission.trigger_type}</td>
     <td>${mission.trigger_filter}</td>
     <td>${mission.timing}</td>
-    <td>${(mission.required_units || []).map(u => `${u.quantity ?? u.count}×${u.type}`).join(", ")}</td>
+    <td>${(mission.required_units || []).map(u => {
+      const types = Array.isArray(u.types) ? u.types : [u.type];
+      return `${u.quantity ?? u.count}×${types.join(' or ')}`;
+    }).join(", ")}</td>
     <td>${(mission.required_training || []).map(t => `${t.qty ?? t.quantity ?? t.count ?? 1}×${t.training ?? t.name ?? t}`).join(", ")}</td>
     <td>${(mission.equipment_required || []).map(e => `${e.qty ?? e.quantity ?? e.count ?? 1}×${e.name ?? e}`).join(", ")}</td>
     <td>${(mission.modifiers || []).map(m => `${m.type}${m.timeReduction ? ` (${m.timeReduction}%)` : ''}${m.maxCount ? ` x${m.maxCount}` : ''}`).join(", ")}</td>
@@ -138,7 +141,7 @@ async function openMissionForm(existing = null) {
   document.getElementById('trigger-type').addEventListener('change', () => buildTriggerFilterUI());
 
   // Populate if editing
-  (Array.isArray(existing?.required_units) ? existing.required_units : []).forEach(r => addUnitRequirementRow(r.type, r.quantity ?? r.count ?? 1));
+  (Array.isArray(existing?.required_units) ? existing.required_units : []).forEach(r => addUnitRequirementRow(r.type || r.types, r.quantity ?? r.count ?? 1));
   (Array.isArray(existing?.patients) ? existing.patients : []).forEach(p => addPatientRow(p.min, p.max, p.chance, p.codes));
   (Array.isArray(existing?.prisoners) ? existing.prisoners : []).forEach(p => addPrisonerRow(p.min, p.max, p.chance, p.transportChance));
   (Array.isArray(existing?.required_training) ? existing.required_training : []).forEach(t => addTrainingRow(t.training ?? t.name ?? t, t.qty ?? 1));
@@ -153,7 +156,7 @@ async function openMissionForm(existing = null) {
       const rcRes = await fetch(rcUrl);
       if (rcRes.ok) {
         const rc = await rcRes.json();
-        (rc.units || []).forEach(u => addRCUnitRow(u.type, u.quantity ?? u.count ?? 1));
+        (rc.units || []).forEach(u => addRCUnitRow(u.type || u.types, u.quantity ?? u.count ?? 1));
         (rc.training || []).forEach(t => addRCTrainingRow(t.training ?? t.name ?? t, t.qty ?? t.quantity ?? t.count ?? 1));
         (rc.equipment || []).forEach(e => addRCEquipmentRow(e.name ?? e.type ?? e, e.qty ?? e.quantity ?? e.count ?? 1));
       }
@@ -208,11 +211,13 @@ function addUnitRequirementRow(selectedType = "", qty = 1) {
   const row = document.createElement("div");
 
   const select = document.createElement("select");
+  select.multiple = true;
+  const selArr = Array.isArray(selectedType) ? selectedType : [selectedType];
   unitTypes.forEach(u => {
     const option = document.createElement("option");
     option.value = u.type;
     option.textContent = `${u.class} - ${u.type}`;
-    if (u.type === selectedType) option.selected = true;
+    if (selArr.includes(u.type)) option.selected = true;
     select.appendChild(option);
   });
   select.name = "type";
@@ -483,7 +488,13 @@ function collectRows(containerSel) {
     const inputs = div.querySelectorAll("input, select");
     const obj = {};
     inputs.forEach(inp => {
-      obj[inp.name] = inp.type === "number" ? Number(inp.value) : inp.value;
+      if (inp.tagName === 'SELECT' && inp.multiple) {
+        const vals = Array.from(inp.selectedOptions).map(o => o.value);
+        if (vals.length <= 1) obj[inp.name] = vals[0] || '';
+        else obj[`${inp.name}s`] = vals;
+      } else {
+        obj[inp.name] = inp.type === "number" ? Number(inp.value) : inp.value;
+      }
     });
     return obj;
   });
@@ -521,7 +532,7 @@ async function editRunCard(name) {
     <button onclick="document.getElementById('runcard-form-container').style.display='none'">Close</button>
   `;
 
-  (existing?.units || []).forEach(u => addRCUnitRow(u.type, u.quantity ?? u.count ?? 1));
+  (existing?.units || []).forEach(u => addRCUnitRow(u.type || u.types, u.quantity ?? u.count ?? 1));
   (existing?.training || []).forEach(t => addRCTrainingRow(t.training ?? t.name ?? t, t.qty ?? t.quantity ?? t.count ?? 1));
   (existing?.equipment || []).forEach(e => addRCEquipmentRow(e.name ?? e.type ?? e, e.qty ?? e.quantity ?? e.count ?? 1));
 }
@@ -530,11 +541,13 @@ function addRCUnitRow(selectedType = "", qty = 1) {
   const container = document.getElementById('rc-unit-container');
   const row = document.createElement('div');
   const select = document.createElement('select');
+  select.multiple = true;
+  const selArr = Array.isArray(selectedType) ? selectedType : [selectedType];
   unitTypes.forEach(u => {
     const opt = document.createElement('option');
     opt.value = u.type;
     opt.textContent = `${u.class} - ${u.type}`;
-    if (u.type === selectedType) opt.selected = true;
+    if (selArr.includes(u.type)) opt.selected = true;
     select.appendChild(opt);
   });
   select.name = 'type';
