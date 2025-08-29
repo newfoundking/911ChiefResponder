@@ -29,13 +29,12 @@
 		.modal-content { background: white; padding: 2rem; max-width: 90%; max-height: 90%; overflow-y: auto; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.3); }
                 .mission-icon { width: 30px; height: 30px; object-fit: contain; vertical-align: middle; }
                 .unit-tag-icon {
-                        width: 24px;
-                        height: 24px;
-                        line-height: 24px;
+                        width: var(--tag-width, 36px);
+                        height: var(--tag-height, 24px);
+                        line-height: var(--tag-height, 24px);
                         text-align: center;
                         background: red;
                         color: white;
-                        border-radius: 50%;
                         border: 2px solid transparent;
                         font-size: 12px;
                         font-weight: bold;
@@ -224,13 +223,12 @@ function makeIcon(url, size) {
   });
 }
 
-function makeTagIcon(tag, responding) {
-  const size = 24;
+function makeTagIcon(tag, responding, width = 36, height = 24) {
   const cls = responding ? 'unit-tag-icon responding' : 'unit-tag-icon';
   return L.divIcon({
-    html: `<div class="${cls}">${tag || ''}</div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size],
+    html: `<div class="${cls}" style="--tag-width:${width}px; --tag-height:${height}px;">${tag || ''}</div>`,
+    iconSize: [width, height],
+    iconAnchor: [width / 2, height],
     className: ''
   });
 }
