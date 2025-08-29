@@ -551,13 +551,26 @@ async function reverseGeocode(lat, lon, id) {
   }
 }
 
+function sortMissions(missions) {
+  const level = m => {
+    if (m.resolve_at) return 3;
+    return (m.assigned_count > 0) ? 2 : 1;
+  };
+  return missions
+    .filter(m => m.status !== 'resolved')
+    .map(m => ({ ...m, level: level(m) }))
+    .sort((a, b) => {
+      const diff = a.level - b.level;
+      if (diff !== 0) return diff;
+      return (a.id || 0) - (b.id || 0);
+    });
+}
+
 async function fetchMissions() {
   try {
     const res = await fetch("/api/missions");
     let missions = await res.json();
-
-    // Remove resolved missions from display
-    missions = missions.filter(m => m.status !== 'resolved');
+    missions = sortMissions(missions);
 
     const missionIds = new Set(missions.map(m => m.id));
     for (const [id, iid] of Array.from(missionListTimers.entries())) {
