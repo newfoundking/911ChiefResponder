@@ -134,11 +134,103 @@ async function showStation(id) {
   html += `</ul></div></div></div>`;
   pane.innerHTML = html;
   document.getElementById('closeStationDetail').onclick = loadStations;
-  document.getElementById('newPersonnel').onclick = () => alert('Not implemented');
-  document.getElementById('newUnit').onclick = () => alert('Not implemented');
-  document.getElementById('newEquipment').onclick = () => alert('Not implemented');
+  document.getElementById('newPersonnel').onclick = () => openNewPersonnel(st);
+  document.getElementById('newUnit').onclick = () => openNewUnit(st);
+  document.getElementById('newEquipment').onclick = () => openNewEquipment(st);
   pane.querySelectorAll('.cad-unit').forEach(li => li.addEventListener('click', () => alert(`Edit unit ${li.dataset.id}`)));
   pane.querySelectorAll('.cad-personnel').forEach(li => li.addEventListener('click', () => alert(`Edit personnel ${li.dataset.id}`)));
+}
+
+function getTrainingsForClass(cls) {
+  const key = String(cls || '').toLowerCase();
+  if (typeof trainingsByClass !== 'undefined' && trainingsByClass[key]) {
+    return trainingsByClass[key];
+  }
+  return [];
+}
+
+function openNewPersonnel(st) {
+  const pane = document.getElementById('cadStations');
+  const trainings = getTrainingsForClass(st.type);
+  const options = trainings.length ? trainings : [{ name: 'general', cost: 0 }];
+  let html = `<div style="text-align:right"><button id="cancelNewPers">Back</button></div>`;
+  html += `<h3>Add Personnel - ${st.name}</h3>`;
+  html += `<input id="persName" placeholder="Name"/><div id="persTrainings">`;
+  html += options.map((t, idx)=>{
+    const name = typeof t === 'string' ? t : t.name;
+    const cost = typeof t === 'object' && t.cost ? t.cost : 0;
+    return `<label><input type="checkbox" value="${name}" data-cost="${cost}" ${idx===0?'checked':''}/> ${name}${cost?` ($${cost})`:''}</label><br>`;
+  }).join('');
+  html += `</div><div id="persCost"></div><button id="createPers">Create</button>`;
+  pane.innerHTML = html;
+  document.getElementById('cancelNewPers').onclick = () => showStation(st.id);
+  const nameInput = document.getElementById('persName');
+  fetch('/api/random-name').then(r=>r.json()).then(n=>{
+    if (n.first && n.last) nameInput.value = `${n.first} ${n.last}`;
+  }).catch(()=>{});
+  function updateCost(){
+    const base = 100;
+    const selected = Array.from(document.querySelectorAll('#persTrainings input:checked'));
+    const cost = base + selected.reduce((sum,cb)=>sum+Number(cb.dataset.cost||0),0);
+    document.getElementById('persCost').textContent = `Cost: $${cost}`;
+  }
+  document.querySelectorAll('#persTrainings input').forEach(cb=>cb.addEventListener('change', updateCost));
+  updateCost();
+  document.getElementById('createPers').onclick = async ()=>{
+    const name = nameInput.value.trim();
+    const training = Array.from(document.querySelectorAll('#persTrainings input:checked')).map(cb=>cb.value);
+    if (!name) return alert('Missing name');
+    const res = await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, station_id: st.id, training })});
+    const data = await res.json();
+    if (!res.ok) { alert(`Failed: ${data.error || res.statusText}`); return; }
+    alert(`Personnel added. Cost: $${data.charged}`);
+    showStation(st.id);
+  };
+}
+
+function openNewUnit(st) {
+  const pane = document.getElementById('cadStations');
+  const types = (typeof unitTypes !== 'undefined' ? unitTypes : []).filter(u=>u.class===st.type);
+  const options = types.map(t=>`<option value="${t.type}">${t.type}</option>`).join('');
+  let html = `<div style="text-align:right"><button id="cancelNewUnit">Back</button></div>`;
+  html += `<h3>New Unit - ${st.name}</h3>`;
+  html += `<label>Type: <select id="unitType">${options}</select></label><br>`;
+  html += `<label>Name: <input id="unitName"/></label><br>`;
+  html += `<label>Priority: <input id="unitPriority" type="number" min="1" max="5" value="1" style="width:60px;"></label><br>`;
+  html += `<button id="createUnitBtn">Create</button>`;
+  pane.innerHTML = html;
+  document.getElementById('cancelNewUnit').onclick = () => showStation(st.id);
+  document.getElementById('createUnitBtn').onclick = async ()=>{
+    const type = document.getElementById('unitType').value;
+    const name = document.getElementById('unitName').value.trim();
+    const priority = Number(document.getElementById('unitPriority').value)||1;
+    if (!type || !name) return alert('Missing name or type');
+    const res = await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id: st.id,class: st.type,type,name,priority})});
+    if(!res.ok){ const data = await res.json().catch(()=>({})); alert(`Failed: ${data.error || res.statusText}`); return; }
+    showStation(st.id);
+  };
+}
+
+function openNewEquipment(st) {
+  const pane = document.getElementById('cadStations');
+  const list = (typeof equipment !== 'undefined' && equipment[st.type]) ? equipment[st.type] : [];
+  const options = list.map(e=>`<option value="${e.name}" data-cost="${e.cost}">${e.name} ($${e.cost})</option>`).join('');
+  let html = `<div style="text-align:right"><button id="cancelNewEquip">Back</button></div>`;
+  html += `<h3>Buy Equipment - ${st.name}</h3>`;
+  html += `<label>Equipment: <select id="equipSelect">${options}</select></label><br>`;
+  html += `<button id="buyEquipBtn">Buy</button>`;
+  pane.innerHTML = html;
+  document.getElementById('cancelNewEquip').onclick = () => showStation(st.id);
+  document.getElementById('buyEquipBtn').onclick = async ()=>{
+    const select = document.getElementById('equipSelect');
+    const name = select.value;
+    if (!name) return alert('Select equipment');
+    const res = await fetch(`/api/stations/${st.id}/equipment`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name })});
+    const data = await res.json();
+    if (!res.ok) { alert(`Failed: ${data.error || res.statusText}`); return; }
+    alert(`Purchased ${name} for $${data.cost}`);
+    showStation(st.id);
+  };
 }
 
 async function openMission(id) {
