@@ -1,4 +1,4 @@
-import { fetchNoCache, formatTime } from './common.js';
+import { fetchNoCache, formatTime, playSound } from './common.js';
 import { getMissions, renderMissionRow } from './missions.js';
 import { getStations, renderStationList } from './stations.js';
 import { editUnit, editPersonnel } from './edit-dialogs.js';
@@ -433,6 +433,7 @@ async function dispatchUnits(missionId, unitIds) {
       body: JSON.stringify({ mission_id: missionId, unit_id: id })
     });
   }
+  if (unitIds.length) playSound('/audio/dispatch.mp3');
 }
 
 async function openManualDispatch(mission) {
@@ -562,6 +563,7 @@ async function generateMission(retry = false, excludeIndex = null) {
   try {
     const res = await fetch('/api/missions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(missionData) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    playSound('/audio/newalert.mp3');
     await loadMissions();
   } catch (err) { console.error("Failed to create mission:", err); alert("Failed to create mission."); }
 }
