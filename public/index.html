@@ -27,8 +27,27 @@
 		.hidden { display: none; }
 		.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; overflow: auto; }
 		.modal-content { background: white; padding: 2rem; max-width: 90%; max-height: 90%; overflow-y: auto; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.3); }
-		.mission-icon { width: 30px; height: 30px; object-fit: contain; vertical-align: middle; }
-	</style>
+                .mission-icon { width: 30px; height: 30px; object-fit: contain; vertical-align: middle; }
+                .unit-tag-icon {
+                        width: 24px;
+                        height: 24px;
+                        line-height: 24px;
+                        text-align: center;
+                        background: red;
+                        color: white;
+                        border-radius: 50%;
+                        border: 2px solid transparent;
+                        font-size: 12px;
+                        font-weight: bold;
+                }
+                .unit-tag-icon.responding {
+                        animation: flash 1s infinite;
+                }
+                @keyframes flash {
+                        0%, 100% { border-color: transparent; }
+                        50% { border-color: yellow; }
+                }
+        </style>
 </head>
 <body>
 
@@ -205,6 +224,17 @@ function makeIcon(url, size) {
   });
 }
 
+function makeTagIcon(tag, responding) {
+  const size = 24;
+  const cls = responding ? 'unit-tag-icon responding' : 'unit-tag-icon';
+  return L.divIcon({
+    html: `<div class="${cls}">${tag || ''}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size],
+    className: ''
+  });
+}
+
 const missionIcons = {
   none: makeIcon("/warning1.png", 30),
   partial: makeIcon("/warning2.png", 30),
@@ -262,6 +292,10 @@ document.querySelectorAll(".tab-button").forEach(button => {
 });
 
 function unitIconFor(unit) {
+  if (!unit.icon && !unit.responding_icon) {
+    const tag = (unit.tag || unit.name || '').split(' ')[0].slice(0, 4).toUpperCase();
+    return makeTagIcon(tag, unit.responding);
+  }
   const sanitizedType = (unit.type || '').replace(/\s+/g, '');
   const baseIcon = sanitizedType ? `/images/${sanitizedType}.png` : null;
   const respDefault = sanitizedType ? `/images/${sanitizedType}-responding.png` : null;
