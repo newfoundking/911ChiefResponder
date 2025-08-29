@@ -2,6 +2,52 @@ import { fetchNoCache, formatTime } from './common.js';
 import { getMissions, renderMissionRow } from './missions.js';
 import { getStations, renderStationList } from './stations.js';
 
+let missionTemplates = [];
+fetch('/api/mission-templates')
+  .then(r => r.json())
+  .then(data => { missionTemplates = data.map(t => ({ ...t, frequency: Number(t.frequency) || 3 })); })
+  .catch(err => console.error('Failed to load mission templates:', err));
+
+const missionAddressCache = {};
+async function reverseGeocode(lat, lon, id) {
+  if (id && missionAddressCache[id]) return missionAddressCache[id];
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`);
+    const data = await res.json();
+    const addr = data?.display_name || '';
+    if (id) missionAddressCache[id] = addr;
+    return addr;
+  } catch {
+    return '';
+  }
+}
+
+function randomCount({min=0, max=0, chance=1}) {
+  min = Math.floor(min); max = Math.floor(max);
+  if (max <= min) return min;
+  if (Math.random() < chance) return max;
+  return min + Math.floor(Math.random() * (max - min));
+}
+
+function instantiatePatients(arr) {
+  return (arr || []).map(p => {
+    const count = randomCount(p);
+    return { count, codes: p.codes };
+  }).filter(p => p.count > 0);
+}
+
+function instantiatePrisoners(arr) {
+  return (arr || []).map(p => {
+    const count = randomCount(p);
+    const transportChance = Number(p.transportChance) || 0;
+    let transport = 0;
+    for (let i = 0; i < count; i++) {
+      if (Math.random() < transportChance) transport++;
+    }
+    return { count, transport };
+  }).filter(p => p.count > 0);
+}
+
 function haversine(aLat, aLon, bLat, bLon) {
   const R = 6371;
   const dLat = (bLat - aLat) * Math.PI / 180;
@@ -20,6 +66,27 @@ async function init() {
   await loadStations();
   await loadMissions();
   setInterval(loadMissions, 5000);
+
+  document.querySelectorAll('.cad-speed').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.cad-speed').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      switch (btn.dataset.speed) {
+        case 'pause':
+          setMissionGenerationSpeed(null);
+          break;
+        case 'slow':
+          setMissionGenerationSpeed([90,150]);
+          break;
+        case 'medium':
+          setMissionGenerationSpeed([30,90]);
+          break;
+        case 'fast':
+          setMissionGenerationSpeed([10,30]);
+          break;
+      }
+    });
+  });
 }
 
 async function updateWallet() {
@@ -207,6 +274,119 @@ async function openManualDispatch(mission) {
     await loadMissions();
     await openMission(mission.id);
   };
+}
+
+async function generateMission(retry = false, excludeIndex = null) {
+  if (missionTemplates.length === 0) { alert("No mission templates loaded."); return; }
+  const stations = await fetch('/api/stations').then(r => r.json()).catch(() => []);
+  if (!stations.length) { alert("No stations available."); return; }
+  const st = stations[Math.floor(Math.random() * stations.length)];
+  const radius = 5000;
+
+  let availableTemplates = missionTemplates;
+  if (excludeIndex !== null) {
+    availableTemplates = missionTemplates.filter((_, idx) => idx !== excludeIndex);
+    if (!availableTemplates.length) return;
+  }
+  const weights = availableTemplates.map(t => Math.max(1, 6 - (Number(t.frequency) || 3)));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  let pick = Math.random() * totalWeight;
+  let template = availableTemplates[0];
+  for (let i = 0; i < availableTemplates.length; i++) {
+    if ((pick -= weights[i]) < 0) { template = availableTemplates[i]; break; }
+  }
+  const templateIndex = missionTemplates.indexOf(template);
+
+  let lat, lon;
+  if (template.trigger_type === 'poi' && template.trigger_filter) {
+    try {
+      const pois = await fetch(`/api/pois?lat=${st.lat}&lon=${st.lon}&radius=${radius}`)
+        .then(r => r.json()).catch(() => []);
+      const matches = pois.filter(p => p.tags && p.tags.amenity === template.trigger_filter);
+      if (matches.length) {
+        const poi = matches[Math.floor(Math.random() * matches.length)];
+        lat = poi.lat; lon = poi.lon;
+      } else {
+        console.warn('No matching POI found.');
+        if (!retry) return generateMission(true, templateIndex);
+        return;
+      }
+    } catch (e) {
+      console.error('POI lookup failed', e);
+      alert('POI lookup failed.');
+      return;
+    }
+  } else if (template.trigger_type === 'intersection' && template.trigger_filter) {
+    const [road1, road2] = String(template.trigger_filter).split('|');
+    if (road1 && road2) {
+      try {
+        const query = `[out:json];way["name"="${road1}"](around:${radius},${st.lat},${st.lon});way["name"="${road2}"](around:${radius},${st.lat},${st.lon});node(w["name"="${road1}"])(w["name"="${road2}"]);out;`;
+        const resp = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
+        const data = await resp.json();
+        if (Array.isArray(data.elements) && data.elements.length) {
+          const inter = data.elements[0];
+          lat = inter.lat; lon = inter.lon;
+        }
+      } catch (e) { console.error('Intersection lookup failed', e); }
+    }
+  }
+  if (lat === undefined || lon === undefined) {
+    try {
+      const roadQuery = `[out:json];way["highway"](around:${radius},${st.lat},${st.lon});out geom;`;
+      const roadResp = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(roadQuery));
+      const roadData = await roadResp.json();
+      if (Array.isArray(roadData.elements) && roadData.elements.length) {
+        const way = roadData.elements[Math.floor(Math.random() * roadData.elements.length)];
+        const geom = Array.isArray(way.geometry) ? way.geometry : [];
+        if (geom.length) {
+          const pt = geom[Math.floor(Math.random() * geom.length)];
+          lat = pt.lat;
+          lon = pt.lon;
+        }
+      }
+    } catch (e) { console.error('Road lookup failed', e); }
+  }
+  if (lat === undefined || lon === undefined) {
+    lat = st.lat;
+    lon = st.lon;
+  }
+
+  const missionData = {
+    type: template.name, lat, lon,
+    required_units: template.required_units,
+    required_training: template.required_training || [],
+    equipment_required: template.equipment_required || [],
+    patients: instantiatePatients(template.patients),
+    prisoners: instantiatePrisoners(template.prisoners),
+    modifiers: template.modifiers || [],
+    penalty_options: template.penalty_options || [],
+    penalties: [],
+    timing: template.timing ?? 10
+  };
+  try {
+    const res = await fetch('/api/missions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(missionData) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await loadMissions();
+  } catch (err) { console.error("Failed to create mission:", err); alert("Failed to create mission."); }
+}
+
+let missionGenTimer = null;
+let missionGenRange = null;
+
+function scheduleMissionGeneration() {
+  if (!missionGenRange) return;
+  const [min, max] = missionGenRange;
+  const delay = (Math.floor(Math.random() * (max - min + 1)) + min) * 1000;
+  missionGenTimer = setTimeout(() => {
+    generateMission();
+    scheduleMissionGeneration();
+  }, delay);
+}
+
+function setMissionGenerationSpeed(range) {
+  if (missionGenTimer) clearTimeout(missionGenTimer);
+  missionGenRange = range;
+  if (range) scheduleMissionGeneration();
 }
 
 document.addEventListener('DOMContentLoaded', init);
