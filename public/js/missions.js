@@ -8,18 +8,19 @@ export async function getMissions() {
 
 export function sortMissions(missions) {
   const level = m => {
-    if (m.warning3) return 3;
-    if (m.warning2) return 2;
     if (m.warning1) return 1;
-    return 0;
+    if (m.warning2) return 2;
+    if (m.warning3) return 3;
+    return 4;
   };
-  return missions.slice().sort((a,b)=>{
-    const diff = level(b) - level(a);
-    if (diff !== 0) return diff;
-    const ta = a.resolve_at ? a.resolve_at : 0;
-    const tb = b.resolve_at ? b.resolve_at : 0;
-    return ta - tb;
-  });
+  return missions
+    .filter(m => m.status !== 'resolved')
+    .slice()
+    .sort((a, b) => {
+      const diff = level(a) - level(b);
+      if (diff !== 0) return diff;
+      return (a.id || 0) - (b.id || 0);
+    });
 }
 
 export function renderMissionRow(mission) {
