@@ -2743,6 +2743,7 @@ async function rebuildEnrouteMarkers() {
 (async () => {
   await fetchStations();
   await fetchMissions();
+  setInterval(fetchMissions, 5000);
   await fetchZones();
   rebuildEnrouteMarkers();
 })();
