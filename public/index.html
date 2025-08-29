@@ -1113,13 +1113,15 @@ function showMissionDetails(mission) {
     ${patientHtml ? '<p><strong>Patients:</strong></p>' + patientHtml : ''}
     ${prisonerHtml ? '<p><strong>Prisoners:</strong></p>' + prisonerHtml : ''}
     <div id="assignedUnitsArea" style="margin-top:8px;"></div>
-    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button> <button id="autoDispatchBtn">Auto Dispatch</button> <button id="runCardDispatchBtn">Run Card Dispatch</button></div>
+    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button> <button id="autoDispatchBtn">Auto Dispatch</button> <button id="runCardDispatchBtn">Run Card Dispatch</button> <button id="classDispatchBtn">Class Dispatch</button></div>
     <div id="manualDispatchArea" style="margin-top:8px;"></div>
+    <div id="classDispatchArea" style="margin-top:8px;"></div>
     <div id="missionTimerArea" style="margin-top:8px;"></div>
   `;
   document.getElementById('manualDispatchBtn').onclick = () => openManualDispatch(mission);
   document.getElementById('autoDispatchBtn').onclick = () => autoDispatch(mission);
   document.getElementById('runCardDispatchBtn').onclick = () => runCardDispatch(mission);
+  document.getElementById('classDispatchBtn').onclick = () => openClassDispatch(mission);
   refreshAssignedUnitsUI(mission.id).then(assigned => {
     const reqDiv = document.getElementById('reqDynamic');
     if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
@@ -2144,6 +2146,44 @@ async function dispatchSelectedUnits(missionId) {
   } catch (e) {
     console.error(e);
     alert('Failed to dispatch one or more units.');
+  }
+}
+
+async function openClassDispatch(mission) {
+  const area = document.getElementById('classDispatchArea');
+  area.innerHTML = 'Loading units…';
+  try {
+    const [stations, units] = await Promise.all([
+      fetch('/api/stations').then(r=>r.json()),
+      fetch('/api/units?status=available').then(r=>r.json())
+    ]);
+    const stMap = new Map(stations.map(s=>[s.id,s]));
+    const groups = { fire: [], police: [], ambulance: [] };
+    units.forEach(u=>{
+      const st = stMap.get(u.station_id);
+      const dist = st ? haversineKm(mission.lat, mission.lon, st.lat, st.lon) : Infinity;
+      if (groups[u.class]) groups[u.class].push({ ...u, distance: dist });
+    });
+    let html = '<div style="margin-bottom:6px;"><button id="closeClassDispatch">Close</button></div>';
+    for (const cls of Object.keys(groups)) {
+      const arr = groups[cls].sort((a,b)=>a.distance-b.distance);
+      html += `<div><strong>${cls.charAt(0).toUpperCase()+cls.slice(1)}</strong> (${arr.length}) <button data-class="${cls}" class="cd-send">Send 1</button></div>`;
+    }
+    area.innerHTML = html;
+    document.getElementById('closeClassDispatch').onclick = () => { area.innerHTML = ''; };
+    area.querySelectorAll('.cd-send').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const cls = btn.dataset.class;
+        const list = groups[cls];
+        if (!list.length) { alert('No available units'); return; }
+        const unit = list.shift();
+        await sendUnitsToMission(mission, [unit.id]);
+        openClassDispatch(mission);
+      });
+    });
+  } catch (e) {
+    console.error(e);
+    area.innerHTML = '<span style="color:#b00;">Failed to load units.</span>';
   }
 }
 
