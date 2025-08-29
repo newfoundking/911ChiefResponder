@@ -9,6 +9,7 @@
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
         <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+        <script type="module" src="js/common.js"></script>
 	<style>
 		body { margin: 0; display: flex; height: 100vh; font-family: sans-serif; }
 		#sidebar { max-width: 30%; width: 100%; overflow-y: auto; padding: 10px; box-sizing: border-box; }
@@ -31,7 +32,8 @@
 <body>
 
 <div id="sidebar">
-	<h2>Mission Chief Clone</h2>
+        <h2>Mission Chief Clone</h2>
+        <button id="openCad" onclick="location.href='cad.html'" style="margin-bottom:1em;">Open CAD</button>
 	<div style="display: flex; gap: 1em; margin-bottom: 1em;">
                 <button class="tab-button active" data-tab="missions">Missions</button>
                 <button class="tab-button" data-tab="stations">Stations</button>
@@ -183,12 +185,6 @@ function haversineKm(aLat, aLon, bLat, bLon) {
   const la1 = aLat * Math.PI/180, la2 = bLat * Math.PI/180;
   const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
-}
-
-// Force-fresh GETs to avoid 304s when we need updated data
-function fetchNoCache(url) {
-  const sep = url.includes('?') ? '&' : '?';
-  return fetch(`${url}${sep}t=${Date.now()}`, { cache: 'no-store' });
 }
 
 // Refresh a single station panel with fresh data (no cache)
