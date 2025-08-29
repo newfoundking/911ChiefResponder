@@ -324,22 +324,6 @@ function addFacilityLoad(stationId, type, expiresAt) {
   });
 }
 
-async function hasTransportUnit(missionId, attr) {
-  return new Promise((resolve, reject) => {
-    db.all(
-      `SELECT u.type FROM mission_units mu JOIN units u ON mu.unit_id = u.id WHERE mu.mission_id=?`,
-      [missionId],
-      (err, rows) => {
-        if (err) return reject(err);
-        const ok = rows.some(r => {
-          const ut = unitTypes.find(t => t.type === r.type);
-          return ut && Array.isArray(ut.attributes) && ut.attributes.includes(attr);
-        });
-        resolve(ok);
-      }
-    );
-  });
-}
 
 async function allocateTransport(kind, lat, lon, unitClass) {
   const facilities = await new Promise((resolve, reject) => {
@@ -385,20 +369,39 @@ async function allocateTransport(kind, lat, lon, unitClass) {
   return first.id;
 }
 
-async function handleTransports(missionId, lat, lon, patients, prisoners) {
+async function handleTransports(unitIds, lat, lon, patients, prisoners) {
   let patientCount = 0;
   for (const p of patients) patientCount += Number(p.count || 0);
   let prisonerCount = 0;
   for (const p of prisoners) prisonerCount += Number(p.transport || 0);
-  if (patientCount > 0 && await hasTransportUnit(missionId, 'medicaltransport')) {
-    for (let i = 0; i < patientCount; i++) {
-      await allocateTransport('patient', lat, lon, 'ambulance');
-    }
+  if (!unitIds.length) return;
+
+  const placeholders = unitIds.map(() => '?').join(',');
+  const rows = await new Promise((resolve, reject) => {
+    db.all(`SELECT id, type FROM units WHERE id IN (${placeholders})`, unitIds, (err, r) =>
+      err ? reject(err) : resolve(r || [])
+    );
+  });
+
+  const medUnits = [];
+  const prisUnits = [];
+  for (const r of rows) {
+    const ut = unitTypes.find(t => t.type === r.type);
+    const attrs = Array.isArray(ut?.attributes) ? ut.attributes : [];
+    if (attrs.includes('medicaltransport')) medUnits.push(r.id);
+    if (attrs.includes('prisonertransport')) prisUnits.push(r.id);
   }
-  if (prisonerCount > 0 && await hasTransportUnit(missionId, 'prisonerTransport')) {
-    for (let i = 0; i < prisonerCount; i++) {
-      await allocateTransport('prisoner', lat, lon, 'police');
-    }
+
+  const medTransports = Math.min(patientCount, medUnits.length);
+  for (let i = 0; i < medTransports; i++) {
+    await allocateTransport('patient', lat, lon, 'ambulance');
+    await adjustBalance(500);
+  }
+
+  const prisTransports = Math.min(prisonerCount, prisUnits.length);
+  for (let i = 0; i < prisTransports; i++) {
+    await allocateTransport('prisoner', lat, lon, 'police');
+    await adjustBalance(500);
   }
 }
 
@@ -437,7 +440,7 @@ function resolveMissionById(missionId, cb) {
                 const reward = Math.max(0, baseReward * (1 - rewardPenalty/100));
                 try {
                   if (reward > 0) await adjustBalance(+reward);
-                  await handleTransports(missionId, m.lat, m.lon, pats, pris);
+                  await handleTransports(ids, m.lat, m.lon, pats, pris);
                   const bal = await getBalance();
                   clearMissionClock(missionId);
                   cb && cb(null, { freed: ids.length, reward, balance: bal });
