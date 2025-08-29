@@ -143,7 +143,72 @@ async function loadMissions() {
   existing.forEach(el => el.remove());
 
   container.scrollTop = scrollPos;
+  missions.forEach((m, idx) => {
+    setTimeout(() => {
+      checkMissionCompletion(m).catch(() => {});
+    }, idx * 100);
+  });
   cachedMissions = missions;
+}
+
+async function checkMissionCompletion(mission) {
+  try {
+    const assigned = await fetchNoCache(`/api/missions/${mission.id}/units`).then(r => r.json());
+    const unitOnScene = new Map();
+    const equipOnScene = new Map();
+    const trainOnScene = new Map();
+    for (const u of assigned) {
+      if (u.status === 'on_scene') {
+        unitOnScene.set(u.type, (unitOnScene.get(u.type) || 0) + 1);
+        for (const e of Array.isArray(u.equipment) ? u.equipment : []) {
+          equipOnScene.set(e, (equipOnScene.get(e) || 0) + 1);
+        }
+        for (const p of Array.isArray(u.personnel) ? u.personnel : []) {
+          for (const t of Array.isArray(p.training) ? p.training : []) {
+            trainOnScene.set(t, (trainOnScene.get(t) || 0) + 1);
+          }
+        }
+      }
+    }
+    const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
+    const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
+    const reqTrain = Array.isArray(mission.required_training) ? mission.required_training : [];
+    const unitsMet = reqUnits.every(r => {
+      const types = Array.isArray(r.types) ? r.types : [r.type];
+      const qty = r.quantity ?? r.count ?? r.qty ?? 1;
+      const count = types.reduce((s, t) => s + (unitOnScene.get(t) || 0), 0);
+      return count >= qty;
+    });
+    const equipMet = reqEquip.every(r => (equipOnScene.get(r.name || r.type || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
+    const trainMet = reqTrain.every(r => (trainOnScene.get(r.training || r.name || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
+    if (!unitsMet || !equipMet || !trainMet) return;
+
+    let reduction = 0;
+    for (const mod of Array.isArray(mission.modifiers) ? mission.modifiers : []) {
+      if (!mod || typeof mod !== 'object') continue;
+      const per = Number(mod.timeReduction) || 0;
+      if (!per) continue;
+      const have = unitOnScene.get(mod.type) || 0;
+      const maxCount = Number(mod.maxCount) || 1;
+      reduction += Math.min(have, maxCount) * per;
+    }
+    const penaltyTime = (Array.isArray(mission.penalties) ? mission.penalties : [])
+      .reduce((s, p) => s + (Number(p.timePenalty) || 0), 0);
+    reduction = Math.max(-100, Math.min(100, reduction - penaltyTime));
+
+    if (!mission.resolve_at) {
+      await fetch(`/api/missions/${mission.id}/timer`, { method: 'POST' });
+    }
+    const resp = await fetch(`/api/missions/${mission.id}/timer`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reduction })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (data.resolve_at) mission.resolve_at = Number(data.resolve_at);
+  } catch {
+    /* ignore */
+  }
 }
 
 async function loadStations() {
