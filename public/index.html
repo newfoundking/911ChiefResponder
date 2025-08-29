@@ -33,18 +33,30 @@
                         height: var(--tag-height, 24px);
                         line-height: var(--tag-height, 24px);
                         text-align: center;
-                        background: red;
                         color: white;
                         border: 2px solid transparent;
                         font-size: 12px;
                         font-weight: bold;
                 }
-                .unit-tag-icon.responding {
-                        animation: flash 1s infinite;
+                .unit-tag-icon.fire { background: red; }
+                .unit-tag-icon.police { background: blue; }
+                .unit-tag-icon.ambulance { background: green; }
+                .unit-tag-icon.responding.fire,
+                .unit-tag-icon.responding.ambulance {
+                        animation: flash-rw 1s infinite;
                 }
-                @keyframes flash {
-                        0%, 100% { border-color: transparent; }
-                        50% { border-color: yellow; }
+                .unit-tag-icon.responding.police {
+                        animation: flash-rwb 1s infinite;
+                }
+                @keyframes flash-rw {
+                        0%, 100% { border-color: red; }
+                        50% { border-color: white; }
+                }
+                @keyframes flash-rwb {
+                        0% { border-color: red; }
+                        33% { border-color: white; }
+                        66% { border-color: blue; }
+                        100% { border-color: red; }
                 }
         </style>
 </head>
@@ -223,8 +235,11 @@ function makeIcon(url, size) {
   });
 }
 
-function makeTagIcon(tag, responding, width = 36, height = 24) {
-  const cls = responding ? 'unit-tag-icon responding' : 'unit-tag-icon';
+function makeTagIcon(tag, unitClass, responding, width = 36, height = 24) {
+  const classes = ['unit-tag-icon'];
+  if (unitClass) classes.push(unitClass);
+  if (responding) classes.push('responding');
+  const cls = classes.join(' ');
   return L.divIcon({
     html: `<div class="${cls}" style="--tag-width:${width}px; --tag-height:${height}px;">${tag || ''}</div>`,
     iconSize: [width, height],
@@ -292,7 +307,7 @@ document.querySelectorAll(".tab-button").forEach(button => {
 function unitIconFor(unit) {
   if (!unit.icon && !unit.responding_icon) {
     const tag = (unit.tag || unit.name || '').split(' ')[0].slice(0, 4).toUpperCase();
-    return makeTagIcon(tag, unit.responding);
+    return makeTagIcon(tag, unit.class, unit.responding);
   }
   const sanitizedType = (unit.type || '').replace(/\s+/g, '');
   const baseIcon = sanitizedType ? `/images/${sanitizedType}.png` : null;
