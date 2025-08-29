@@ -163,8 +163,8 @@ async function showStation(id) {
   document.getElementById('newPersonnel').onclick = () => openNewPersonnel(st);
   document.getElementById('newUnit').onclick = () => openNewUnit(st);
   document.getElementById('newEquipment').onclick = () => openNewEquipment(st);
-  pane.querySelectorAll('.cad-unit').forEach(li => li.addEventListener('click', () => editUnit(Number(li.dataset.id))));
-  pane.querySelectorAll('.cad-personnel').forEach(li => li.addEventListener('click', () => editPersonnel(Number(li.dataset.id))));
+  pane.querySelectorAll('.cad-unit').forEach(li => li.addEventListener('click', () => showUnitDetail(Number(li.dataset.id))));
+  pane.querySelectorAll('.cad-personnel').forEach(li => li.addEventListener('click', () => editPersonnel(Number(li.dataset.id), st)));
 }
 
 window.refreshStationPanelNoCache = showStation;
@@ -175,6 +175,10 @@ function getTrainingsForClass(cls) {
     return trainingsByClass[key];
   }
   return [];
+}
+
+if (typeof window !== 'undefined') {
+  window.getTrainingsForClass = getTrainingsForClass;
 }
 
 function openNewPersonnel(st) {
@@ -259,6 +263,103 @@ function openNewEquipment(st) {
     alert(`Purchased ${name} for $${data.cost}`);
     showStation(st.id);
   };
+}
+
+async function showUnitDetail(unitId) {
+  const modal = document.getElementById('unitDetailModal');
+  const content = document.getElementById('unitDetailContent');
+  try {
+    const unit = await fetchNoCache(`/api/units/${unitId}`).then(r=>r.json());
+    const station = await fetchNoCache(`/api/stations/${unit.station_id}`).then(r=>r.json());
+    let mission = null;
+    try {
+      mission = await fetchNoCache(`/api/units/${unitId}/mission`).then(r=>r.ok ? r.json() : null);
+    } catch {}
+    const personnel = await fetchNoCache(`/api/personnel?station_id=${unit.station_id}`).then(r=>r.json());
+    const assigned = personnel.filter(p=>p.unit_id===unitId);
+    const eqNames = Array.isArray(unit.equipment)
+      ? unit.equipment.map(e => typeof e === 'string' ? e : e?.name).filter(Boolean)
+      : [];
+    const equipmentHtml = eqNames.length
+      ? `<ul>${eqNames.map(n => `<li>${n} <button class="remove-equip-btn" data-name="${n}">Remove</button></li>`).join('')}</ul>`
+      : '<em>No equipment</em>';
+    const availableEq = Array.isArray(station?.equipment) ? station.equipment : [];
+    const assignHtml = availableEq.length
+      ? `<select id="unit-equip-select">${availableEq.map(n=>`<option value="${n}">${n}</option>`).join('')}</select> <button id="assign-equip-btn">Assign</button>`
+      : '<p><em>No equipment in station storage.</em></p>';
+    const personnelHtml = assigned.length
+      ? `<ul>${assigned.map(p=>`<li>${p.name || '(no name)'} ${Array.isArray(p.training)&&p.training.length?`(${p.training.join(', ')})`:''} <button class="unassign-btn" data-person-id="${p.id}" data-station-id="${p.station_id}">Unassign</button></li>`).join('')}</ul>`
+      : '<p>No personnel assigned to this unit.</p>';
+    const missionHtml = mission && mission.id
+      ? `<p><strong>Current Mission:</strong> #${mission.id} ${mission.type}</p>`
+      : '<p><strong>Current Mission:</strong> None</p>';
+    content.innerHTML = `
+      <p><strong>Name:</strong> ${unit.name || ''} <button id="edit-unit-btn">Edit</button></p>
+      <p><strong>Priority:</strong> ${unit.priority ?? 1}</p>
+      <p><strong>Station:</strong> ${station?.name || ''}</p>
+      <p><strong>Vehicle Class:</strong> ${unit.class || ''} (${unit.type || ''})</p>
+      ${missionHtml}
+      <h4>Equipment Aboard</h4>
+      ${equipmentHtml}
+      <h4>Assign Equipment from Station</h4>
+      ${assignHtml}
+      <h4>Assigned Personnel</h4>
+      ${personnelHtml}
+    `;
+    content.querySelectorAll('.unassign-btn').forEach(btn=>{
+      btn.addEventListener('click', async()=>{
+        const pid = Number(btn.dataset.personId);
+        await fetch(`/api/personnel/${pid}`, {
+          method:'PATCH',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ unit_id: null })
+        });
+        modal.style.display = 'none';
+        showStation(unit.station_id);
+      });
+    });
+    content.querySelectorAll('.remove-equip-btn').forEach(btn=>{
+      btn.addEventListener('click', async()=>{
+        const name = btn.dataset.name;
+        const res = await fetch(`/api/units/${unitId}/equipment`, {
+          method:'DELETE',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ station_id: unit.station_id, name })
+        });
+        if(res.ok){
+          modal.style.display='none';
+          showStation(unit.station_id);
+        } else {
+          const data = await res.json().catch(()=>({}));
+          alert(`Failed: ${data.error || res.statusText}`);
+        }
+      });
+    });
+    const assignBtn = content.querySelector('#assign-equip-btn');
+    assignBtn?.addEventListener('click', async()=>{
+      const name = content.querySelector('#unit-equip-select').value;
+      const res = await fetch(`/api/units/${unitId}/equipment`, {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ station_id: unit.station_id, name })
+      });
+      const data = await res.json().catch(()=>({}));
+      if(!res.ok || !data.success){
+        alert(`Failed: ${data.error || res.statusText}`);
+        return;
+      }
+      modal.style.display='none';
+      showStation(unit.station_id);
+    });
+    content.querySelector('#edit-unit-btn')?.addEventListener('click', ()=>{
+      modal.style.display='none';
+      editUnit(unit.id);
+    });
+    modal.style.display = 'block';
+  } catch {
+    content.textContent = 'Failed to load unit details.';
+    modal.style.display = 'block';
+  }
 }
 
 async function openMission(id) {
