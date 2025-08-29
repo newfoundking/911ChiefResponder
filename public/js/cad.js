@@ -284,44 +284,144 @@ async function openMission(id) {
 }
 
 async function autoDispatch(mission) {
-  // Simple auto dispatch: pick first available units matching required types
-  const [stations, units] = await Promise.all([
-    getStations(),
-    fetchNoCache('/api/units?status=available').then(r=>r.json())
-  ]);
-  const stMap = new Map(stations.map(s=>[s.id,s]));
-  const missionDepts = Array.isArray(mission.departments) ? mission.departments : [];
-  const available = units.filter(u=>{
-    const st = stMap.get(u.station_id);
-    return u.status==='available' && (missionDepts.length===0 || (st && missionDepts.includes(st.department)));
-  });
-  const reqs = Array.isArray(mission.required_units) ? mission.required_units : [];
-  const selected = [];
-  reqs.forEach(r=>{
-    const need = r.quantity ?? r.count ?? r.qty ?? 1;
-    const matches = available.filter(u=>u.type===r.type && !selected.includes(u)).slice(0, need);
-    selected.push(...matches);
-  });
-  await dispatchUnits(mission.id, selected.map(u=>u.id));
-  await loadMissions();
-  await openMission(mission.id);
+  try {
+    const [stations, allUnitsRaw] = await Promise.all([
+      getStations(),
+      fetchNoCache('/api/units?status=available').then(r=>r.json())
+    ]);
+    const stMap = new Map(stations.map(s=>[s.id,s]));
+    const missionDepts = Array.isArray(mission.departments) ? mission.departments : [];
+    const allUnits = allUnitsRaw
+      .filter(u=>{
+        const st = stMap.get(u.station_id);
+        return missionDepts.length===0 || (st && missionDepts.includes(st.department));
+      })
+      .map(u=>{
+        const st = stMap.get(u.station_id);
+        const dist = st ? haversine(mission.lat, mission.lon, st.lat, st.lon) : Infinity;
+        const priority = Number(u.priority) || 1;
+        return { ...u, priority, _dist: dist };
+      });
+
+    const sortUnits = (a,b)=>{
+      if (a.station_id === b.station_id) return a.priority - b.priority;
+      return a._dist - b._dist;
+    };
+
+    function trainingCount(u, name) {
+      let c = 0;
+      for (const p of Array.isArray(u.personnel)?u.personnel:[]) {
+        for (const t of Array.isArray(p.training)?p.training:[]) {
+          if (String(t).toLowerCase() === String(name).toLowerCase()) c++;
+        }
+      }
+      return c;
+    }
+    function equipmentCount(u, name) {
+      return Array.isArray(u.equipment)
+        ? u.equipment.filter(e=>String(e).toLowerCase()===String(name).toLowerCase()).length
+        : 0;
+    }
+
+    const selected = [];
+    const selectedIds = new Set();
+
+    const trainingNeeds = (Array.isArray(mission.required_training)?mission.required_training:[])
+      .map(r=>({ name: r.training || r.name || r, qty: r.qty ?? r.quantity ?? r.count ?? 1 }));
+    const equipmentNeeds = (Array.isArray(mission.equipment_required)?mission.equipment_required:[])
+      .map(r=>({ name: r.name || r.type || r, qty: r.qty ?? r.quantity ?? r.count ?? 1 }));
+
+    function applyNeeds(u) {
+      for (const n of trainingNeeds) n.qty -= trainingCount(u, n.name);
+      for (const n of equipmentNeeds) n.qty -= equipmentCount(u, n.name);
+    }
+
+    function unitMatchesNeed(u) {
+      return trainingNeeds.some(n=>n.qty>0 && trainingCount(u,n.name)>0) ||
+             equipmentNeeds.some(n=>n.qty>0 && equipmentCount(u,n.name)>0);
+    }
+
+    function unitMatchesAllNeeds(u) {
+      return trainingNeeds.every(n=>n.qty<=0 || trainingCount(u,n.name)>0) &&
+             equipmentNeeds.every(n=>n.qty<=0 || equipmentCount(u,n.name)>0);
+    }
+
+    function selectUnit(u) {
+      selectedIds.add(u.id);
+      selected.push(u);
+      applyNeeds(u);
+    }
+
+    const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
+    for (const r of reqUnits) {
+      const need = r.quantity ?? r.count ?? r.qty ?? 1;
+      for (let i=0; i<need; i++) {
+        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && u.type === r.type)
+                                 .sort(sortUnits);
+        if (!candidates.length) { alert('No available units meet the requirements.'); return; }
+        const chosen = candidates.find(unitMatchesAllNeeds) ||
+                       candidates.find(unitMatchesNeed) ||
+                       candidates[0];
+        selectUnit(chosen);
+      }
+    }
+
+    for (const n of trainingNeeds) {
+      while (n.qty > 0) {
+        const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && trainingCount(u,n.name)>0)
+                                   .sort(sortUnits);
+        if (!candidates.length) { alert('Insufficient training to meet requirements.'); return; }
+        selectUnit(candidates[0]);
+      }
+    }
+
+    for (const n of equipmentNeeds) {
+      while (n.qty > 0) {
+        const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && equipmentCount(u,n.name)>0)
+                                   .sort(sortUnits);
+        if (!candidates.length) { alert('Insufficient equipment to meet requirements.'); return; }
+        selectUnit(candidates[0]);
+      }
+    }
+
+    if (!selected.length) { alert('No available units meet the requirements.'); return; }
+    const ids = selected.map(u=>u.id);
+    await dispatchUnits(mission.id, ids);
+    await loadMissions();
+    await openMission(mission.id);
+  } catch (e) {
+    console.error(e);
+    alert('Auto dispatch failed.');
+  }
 }
 
 async function runCardDispatch(mission) {
+  let area = document.getElementById('manualDispatchArea');
+  let tempArea = false;
+  if (!area) {
+    area = document.createElement('div');
+    area.id = 'manualDispatchArea';
+    area.style.display = 'none';
+    document.body.appendChild(area);
+    tempArea = true;
+  }
   try {
-    const rc = await fetchNoCache(`/api/run-cards/${encodeURIComponent(mission.type)}`).then(r=>r.json());
-    const unitTypes = rc.units || [];
-    const units = await fetchNoCache('/api/units?status=available').then(r=>r.json());
-    const selected = [];
-    unitTypes.forEach(t=>{
-      const match = units.find(u=>u.type===t && !selected.includes(u));
-      if (match) selected.push(match);
-    });
-    await dispatchUnits(mission.id, selected.map(u=>u.id));
-    await loadMissions();
-    await openMission(mission.id);
-  } catch(e) {
+    const res = await fetch(`/api/run-cards/${encodeURIComponent(mission.type)}`);
+    if (!res.ok) { alert('No run card for this mission.'); return; }
+    const rc = await res.json();
+    const rcMission = {
+      ...mission,
+      departments: mission.departments || [],
+      required_units: rc.units || [],
+      required_training: rc.training || [],
+      equipment_required: rc.equipment || []
+    };
+    await autoDispatch(rcMission);
+  } catch (e) {
     console.error(e);
+    alert('Run card dispatch failed.');
+  } finally {
+    if (tempArea) area.remove();
   }
 }
 
