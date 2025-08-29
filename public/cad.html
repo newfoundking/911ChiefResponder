@@ -10,6 +10,7 @@
   <script type="module" src="js/common.js"></script>
   <script type="module" src="js/missions.js"></script>
   <script type="module" src="js/stations.js"></script>
+  <script type="module" src="js/edit-dialogs.js"></script>
   <script type="module" src="js/cad.js"></script>
 </head>
 <body class="cad-layout">
@@ -28,6 +29,28 @@
     <div id="cadDetail" class="hidden"></div>
     <div id="cadStations"></div>
     <div id="cadUnits" class="hidden"></div>
+  </div>
+
+  <!-- Edit Personnel Modal -->
+  <div id="editPersonnelModal" style="
+        position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+        background: white; border: 2px solid #444; padding: 1em;
+        width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        display: none; z-index: 10001;">
+        <h3>Edit Personnel</h3>
+        <div id="editPersonnelContent">Loading...</div>
+        <button onclick="document.getElementById('editPersonnelModal').style.display = 'none';">Close</button>
+  </div>
+
+  <!-- Edit Unit Modal -->
+  <div id="editUnitModal" style="
+        position: fixed; top: 20%; left: 50%; transform: translateX(-50%);
+        background: white; border: 2px solid #444; padding: 1em;
+        width: 300px; box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        display: none; z-index: 10001;">
+        <h3>Edit Unit</h3>
+        <div id="editUnitContent">Loading...</div>
+        <button onclick="document.getElementById('editUnitModal').style.display = 'none';">Close</button>
   </div>
 </body>
 </html>

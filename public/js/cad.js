@@ -1,6 +1,7 @@
 import { fetchNoCache, formatTime } from './common.js';
 import { getMissions, renderMissionRow } from './missions.js';
 import { getStations, renderStationList } from './stations.js';
+import { editUnit, editPersonnel } from './edit-dialogs.js';
 
 let missionTemplates = [];
 fetch('/api/mission-templates')
@@ -121,6 +122,7 @@ async function showStation(id) {
     fetchNoCache(`/api/units?station_id=${id}`).then(r=>r.json()),
     fetchNoCache(`/api/stations/${id}/personnel`).then(r=>r.json()).catch(()=>[])
   ]);
+  window.currentStation = st;
   const pane = document.getElementById('cadStations');
   const personnel = [];
   units.forEach(u => (u.personnel || []).forEach(p => personnel.push({ ...p, unit: u.name })));
@@ -137,9 +139,11 @@ async function showStation(id) {
   document.getElementById('newPersonnel').onclick = () => openNewPersonnel(st);
   document.getElementById('newUnit').onclick = () => openNewUnit(st);
   document.getElementById('newEquipment').onclick = () => openNewEquipment(st);
-  pane.querySelectorAll('.cad-unit').forEach(li => li.addEventListener('click', () => alert(`Edit unit ${li.dataset.id}`)));
-  pane.querySelectorAll('.cad-personnel').forEach(li => li.addEventListener('click', () => alert(`Edit personnel ${li.dataset.id}`)));
+  pane.querySelectorAll('.cad-unit').forEach(li => li.addEventListener('click', () => editUnit(Number(li.dataset.id))));
+  pane.querySelectorAll('.cad-personnel').forEach(li => li.addEventListener('click', () => editPersonnel(Number(li.dataset.id))));
 }
+
+window.refreshStationPanelNoCache = showStation;
 
 function getTrainingsForClass(cls) {
   const key = String(cls || '').toLowerCase();
