@@ -1129,15 +1129,15 @@ function showMissionDetails(mission) {
     ${patientHtml ? '<p><strong>Patients:</strong></p>' + patientHtml : ''}
     ${prisonerHtml ? '<p><strong>Prisoners:</strong></p>' + prisonerHtml : ''}
     <div id="assignedUnitsArea" style="margin-top:8px;"></div>
-    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button> <button id="autoDispatchBtn">Auto Dispatch</button> <button id="runCardDispatchBtn">Run Card Dispatch</button> <button id="classDispatchBtn">Class Dispatch</button></div>
+    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button> <button id="autoDispatchBtn">Auto Dispatch</button> <button id="runCardDispatchBtn">Run Card Dispatch</button> <button id="unitTypeDispatchBtn">Unit Type Dispatch</button></div>
     <div id="manualDispatchArea" style="margin-top:8px;"></div>
-    <div id="classDispatchArea" style="margin-top:8px;"></div>
+    <div id="unitTypeDispatchArea" style="margin-top:8px;"></div>
     <div id="missionTimerArea" style="margin-top:8px;"></div>
   `;
   document.getElementById('manualDispatchBtn').onclick = () => openManualDispatch(mission);
   document.getElementById('autoDispatchBtn').onclick = () => autoDispatch(mission);
   document.getElementById('runCardDispatchBtn').onclick = () => runCardDispatch(mission);
-  document.getElementById('classDispatchBtn').onclick = () => openClassDispatch(mission);
+  document.getElementById('unitTypeDispatchBtn').onclick = () => openUnitTypeDispatch(mission);
   refreshAssignedUnitsUI(mission.id).then(assigned => {
     const reqDiv = document.getElementById('reqDynamic');
     if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
@@ -2165,8 +2165,8 @@ async function dispatchSelectedUnits(missionId) {
   }
 }
 
-async function openClassDispatch(mission) {
-  const area = document.getElementById('classDispatchArea');
+async function openUnitTypeDispatch(mission) {
+  const area = document.getElementById('unitTypeDispatchArea');
   area.innerHTML = 'Loading units…';
   try {
     const [stations, units] = await Promise.all([
@@ -2174,27 +2174,29 @@ async function openClassDispatch(mission) {
       fetch('/api/units?status=available').then(r=>r.json())
     ]);
     const stMap = new Map(stations.map(s=>[s.id,s]));
-    const groups = { fire: [], police: [], ambulance: [] };
+    const groups = new Map();
     units.forEach(u=>{
       const st = stMap.get(u.station_id);
       const dist = st ? haversineKm(mission.lat, mission.lon, st.lat, st.lon) : Infinity;
-      if (groups[u.class]) groups[u.class].push({ ...u, distance: dist });
+      const arr = groups.get(u.type) || [];
+      arr.push({ ...u, distance: dist });
+      groups.set(u.type, arr);
     });
-    let html = '<div style="margin-bottom:6px;"><button id="closeClassDispatch">Close</button></div>';
-    for (const cls of Object.keys(groups)) {
-      const arr = groups[cls].sort((a,b)=>a.distance-b.distance);
-      html += `<div><strong>${cls.charAt(0).toUpperCase()+cls.slice(1)}</strong> (${arr.length}) <button data-class="${cls}" class="cd-send">Send 1</button></div>`;
+    let html = '<div style="margin-bottom:6px;"><button id="closeUnitTypeDispatch">Close</button></div>';
+    for (const [type, list] of groups.entries()) {
+      const arr = list.sort((a,b)=>a.distance-b.distance);
+      html += `<div><strong>${type}</strong> (${arr.length}) <button data-type="${type}" class="utd-send">Send 1</button></div>`;
     }
     area.innerHTML = html;
-    document.getElementById('closeClassDispatch').onclick = () => { area.innerHTML = ''; };
-    area.querySelectorAll('.cd-send').forEach(btn=>{
+    document.getElementById('closeUnitTypeDispatch').onclick = () => { area.innerHTML = ''; };
+    area.querySelectorAll('.utd-send').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
-        const cls = btn.dataset.class;
-        const list = groups[cls];
+        const type = btn.dataset.type;
+        const list = groups.get(type) || [];
         if (!list.length) { alert('No available units'); return; }
         const unit = list.shift();
         await sendUnitsToMission(mission, [unit.id]);
-        openClassDispatch(mission);
+        openUnitTypeDispatch(mission);
       });
     });
   } catch (e) {
