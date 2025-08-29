@@ -180,6 +180,7 @@ db.serialize(() => {
       class TEXT,
       type TEXT,
       name TEXT,
+      priority INTEGER DEFAULT 1,
       personnel TEXT DEFAULT '[]',
       equipment TEXT DEFAULT '[]',
       status TEXT DEFAULT 'available',
@@ -195,6 +196,8 @@ db.serialize(() => {
   db.run(`UPDATE units SET status='available', responding=0 WHERE status IS NULL OR status='[]'`);
   // Add patrol column for legacy DBs
   db.run(`ALTER TABLE units ADD COLUMN patrol INTEGER DEFAULT 0`, () => {});
+  // Add priority column for legacy DBs
+  db.run(`ALTER TABLE units ADD COLUMN priority INTEGER DEFAULT 1`, () => {});
 
   // Personnel
   db.run(`
@@ -614,8 +617,13 @@ function stationBayUsage(stationId){
 app.post('/api/units', async (req, res) => {
   try {
     const { station_id, class: unitClass, type, name } = req.body || {};
+    let { priority } = req.body || {};
     if (!station_id || !unitClass || !type || !name)
       return res.status(400).json({ error: 'station_id, class, type, name are required' });
+
+    priority = Number(priority);
+    if (!Number.isFinite(priority)) priority = 1;
+    priority = Math.min(5, Math.max(1, priority));
 
     const usage = await stationBayUsage(Number(station_id));
     if (!usage.ok) return res.status(404).json({ error: usage.reason });
@@ -626,8 +634,8 @@ app.post('/api/units', async (req, res) => {
     if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: cost });
 
     db.run(
-      `INSERT INTO units (station_id, class, type, name, status) VALUES (?,?,?,?, 'available')`,
-      [station_id, unitClass, type, name],
+      `INSERT INTO units (station_id, class, type, name, priority, status) VALUES (?,?,?,?,?, 'available')`,
+      [station_id, unitClass, type, name, priority],
       async function (err) {
         if (err) return res.status(500).json({ error: err.message });
         if (cost > 0) await adjustBalance(-cost);
@@ -1158,6 +1166,7 @@ app.get('/api/units', (req, res) => {
 
       const parsed = rows.map(u => ({
         ...u,
+        priority: Number(u.priority) || 1,
         patrol: u.patrol === 1 || u.patrol === true,
         responding: u.responding === 1 || u.responding === true,
         equipment: (() => { try { return JSON.parse(u.equipment || '[]'); } catch { return []; } })(),
@@ -1178,6 +1187,13 @@ app.patch('/api/units/:id', (req, res) => {
   if (req.body.name !== undefined) { fields.push('name = ?'); params.push(req.body.name); }
   if (req.body.type !== undefined) { fields.push('type = ?'); params.push(req.body.type); }
   if (req.body.class !== undefined) { fields.push('class = ?'); params.push(req.body.class); }
+  if (req.body.priority !== undefined) {
+    let pr = Number(req.body.priority);
+    if (!Number.isFinite(pr)) pr = 1;
+    pr = Math.min(5, Math.max(1, pr));
+    fields.push('priority = ?');
+    params.push(pr);
+  }
   if (!fields.length) return res.status(400).json({ error: 'No updatable fields provided' });
 
   params.push(id);
