@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CAD Interface</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="module" src="js/common.js"></script>
+  <script type="module" src="js/missions.js"></script>
+  <script type="module" src="js/stations.js"></script>
+  <script type="module" src="js/cad.js"></script>
+</head>
+<body class="cad-layout">
+  <div id="cadTop">
+    <button id="returnMain">Return to Main Page</button>
+    <div id="currentCase">Case: N/A</div>
+    <div id="cadSpeeds">
+      <button class="cad-speed" data-speed="pause">Pause</button>
+      <button class="cad-speed" data-speed="slow">Slow</button>
+      <button class="cad-speed" data-speed="medium">Medium</button>
+      <button class="cad-speed" data-speed="fast">Fast</button>
+    </div>
+  </div>
+  <div id="cadContent">
+    <div id="cadMissions"></div>
+    <div id="cadDetail" class="hidden"></div>
+    <div id="cadStations"></div>
+    <div id="cadUnits" class="hidden"></div>
+  </div>
+</body>
+</html>
