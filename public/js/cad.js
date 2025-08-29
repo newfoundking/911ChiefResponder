@@ -647,9 +647,12 @@ async function openUnitTypeDispatch(mission) {
     fetchNoCache('/api/units?status=available').then(r=>r.json())
   ]);
   const stMap = new Map(stations.map(s=>[s.id,s]));
+  const missionDepts = Array.isArray(mission.departments) ? mission.departments : [];
   const groups = new Map();
   units.forEach(u=>{
     const st = stMap.get(u.station_id);
+    const dept = st?.department;
+    if (missionDepts.length && (!dept || !missionDepts.includes(dept))) return;
     const dist = st ? haversine(mission.lat, mission.lon, st.lat, st.lon) : Infinity;
     const arr = groups.get(u.type) || [];
     arr.push({ ...u, distance: dist });
