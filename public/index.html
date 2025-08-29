@@ -736,7 +736,13 @@ async function generateMissionAtPOI(poi) {
   const { name, required_units } = mission;
   document.getElementById("cadTitle").textContent = name;
   document.getElementById("cadType").textContent = `POI: ${poi.tags.amenity || poi.tags.name}`;
-  document.getElementById("cadRequired").textContent = required_units.map(r => `${r.count}x ${r.type}`).join(', ');
+  const formatReq = r => {
+    const types = Array.isArray(r.types) ? r.types : [r.type];
+    const typeStr = types.join(' or ');
+    const count = r.count ?? r.quantity ?? r.qty ?? 1;
+    return `${count}x ${typeStr}`;
+  };
+  document.getElementById("cadRequired").textContent = required_units.map(formatReq).join(', ');
   document.getElementById("cadPopup").classList.remove('hidden');
   window.currentMission = mission;
 }
@@ -968,13 +974,15 @@ function renderRequirementsDynamic(mission, assigned) {
     else if (u.status === 'enroute') counts.enroute.set(u.type, (counts.enroute.get(u.type)||0)+1);
   }
   const items = req.map(r => {
+    const types = Array.isArray(r.types) ? r.types : [r.type];
+    const typeStr = types.join(' or ');
     const baseNeed = r.quantity ?? r.count ?? 1;
-    const ignored = penalties.filter(p => p.type === r.type).reduce((s,p)=>s+(p.quantity||0),0);
+    const ignored = penalties.filter(p => types.includes(p.type)).reduce((s,p)=>s+(p.quantity||0),0);
     const need = Math.max(0, baseNeed - ignored);
-    const onScene = counts.on_scene.get(r.type) || 0;
-    const enroute = counts.enroute.get(r.type) || 0;
+    const onScene = types.reduce((s,t)=>s+(counts.on_scene.get(t)||0),0);
+    const enroute = types.reduce((s,t)=>s+(counts.enroute.get(t)||0),0);
     const outstanding = Math.max(0, need - enroute - onScene);
-    return `<li>${need} × ${r.type} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
+    return `<li>${need} × ${typeStr} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
   });
   const options = Array.isArray(mission.penalty_options) ? mission.penalty_options : [];
   let optHtml = '';
@@ -2217,7 +2225,8 @@ async function autoDispatch(mission) {
     for (const r of reqUnits) {
       const need = r.quantity ?? r.count ?? r.qty ?? 1;
       for (let i=0; i<need; i++) {
-        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && u.type === r.type)
+        const types = Array.isArray(r.types) ? r.types : [r.type];
+        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && types.includes(u.type))
                                  .sort(sortUnits);
         if (!candidates.length) { area.innerHTML = '<em>No available units meet the requirements.</em>'; return; }
         const chosen = candidates.find(unitMatchesAllNeeds) ||
@@ -2446,13 +2455,17 @@ async function checkMissionCompletion(mission, assigned) {
     }
     const reqUnits = Array.isArray(mission.required_units) ? mission.required_units.map(r => {
       const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
-      const ignored = penalties.filter(p => p.type === r.type).reduce((s, p) => s + (p.quantity || 0), 0);
+      const types = Array.isArray(r.types) ? r.types : [r.type];
+      const ignored = penalties.filter(p => types.includes(p.type)).reduce((s, p) => s + (p.quantity || 0), 0);
       const qty = Math.max(0, (r.quantity ?? r.count ?? 1) - ignored);
-      return { ...r, quantity: qty };
+      return { ...r, quantity: qty, types };
     }) : [];
     const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
     const reqTrain = Array.isArray(mission.required_training) ? mission.required_training : [];
-    const unitsMet = reqUnits.every(r => (unitOnScene.get(r.type) || 0) >= (r.quantity ?? r.count ?? 1));
+    const unitsMet = reqUnits.every(r => {
+      const count = r.types.reduce((s,t)=>s+(unitOnScene.get(t)||0),0);
+      return count >= (r.quantity ?? r.count ?? 1);
+    });
     const equipMet = reqEquip.every(r => (equipOnScene.get(r.name || r.type || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
     const trainMet = reqTrain.every(r => (trainOnScene.get(r.training || r.name || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
     return { allMet: unitsMet && equipMet && trainMet, unitOnScene, equipOnScene, trainOnScene };
