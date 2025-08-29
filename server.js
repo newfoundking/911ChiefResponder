@@ -1684,29 +1684,41 @@ app.post('/api/mission-units', (req, res) => {
   const { mission_id, unit_id } = req.body || {};
   if (!mission_id || !unit_id) return res.status(400).json({ error: 'mission_id and unit_id are required' });
 
-  // Guard: prevent double-dispatch across all missions
-  db.get('SELECT status FROM units WHERE id=?', [unit_id], (e, unitRow) => {
-    if (e) return res.status(500).json({ error: e.message });
-    if (!unitRow) return res.status(404).json({ error: 'unit not found' });
-    if (unitRow.status !== 'available') return res.status(409).json({ error: 'unit busy' });
+  // Guard: prevent double-dispatch across all missions and fetch department
+  db.get(
+    'SELECT u.status, s.department FROM units u LEFT JOIN stations s ON u.station_id = s.id WHERE u.id=?',
+    [unit_id],
+    (e, unitRow) => {
+      if (e) return res.status(500).json({ error: e.message });
+      if (!unitRow) return res.status(404).json({ error: 'unit not found' });
+      if (unitRow.status !== 'available') return res.status(409).json({ error: 'unit busy' });
 
-    // Prevent duplicates for same mission
-    db.get('SELECT id FROM mission_units WHERE mission_id=? AND unit_id=?', [mission_id, unit_id], (err, row) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (row) return res.json({ ok: true, alreadyAssigned: true });
+      // Prevent duplicates for same mission
+      db.get('SELECT id FROM mission_units WHERE mission_id=? AND unit_id=?', [mission_id, unit_id], (err, row) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (row) return res.json({ ok: true, alreadyAssigned: true });
 
-      db.get('SELECT non_emergency FROM missions WHERE id=?', [mission_id], (err2, m) => {
-        if (err2) return res.status(500).json({ error: err2.message });
-        if (!m) return res.status(404).json({ error: 'mission not found' });
-        const responding = m.non_emergency ? 0 : 1;
-        db.run('INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)', [mission_id, unit_id], function (err3) {
-          if (err3) return res.status(500).json({ error: err3.message });
-          // Flip unit to enroute immediately (front-end may PATCH too, that’s fine)
-          db.run('UPDATE units SET status=?, responding=? WHERE id=?', ['enroute', responding, unit_id], () => res.json({ ok: true, id: this?.lastID }));
+        db.get('SELECT non_emergency, departments FROM missions WHERE id=?', [mission_id], (err2, m) => {
+          if (err2) return res.status(500).json({ error: err2.message });
+          if (!m) return res.status(404).json({ error: 'mission not found' });
+
+          const allowed = parseArrayField(m.departments);
+          if (allowed.length && !allowed.includes(unitRow.department)) {
+            return res.status(403).json({ error: 'department not allowed' });
+          }
+
+          const responding = m.non_emergency ? 0 : 1;
+          db.run('INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)', [mission_id, unit_id], function (err3) {
+            if (err3) return res.status(500).json({ error: err3.message });
+            // Flip unit to enroute immediately (front-end may PATCH too, that’s fine)
+            db.run('UPDATE units SET status=?, responding=? WHERE id=?', ['enroute', responding, unit_id], () =>
+              res.json({ ok: true, id: this?.lastID })
+            );
+          });
         });
       });
-    });
-  });
+    }
+  );
 });
 
 app.delete('/api/mission-units', (req, res) => {
