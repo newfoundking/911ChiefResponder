@@ -604,9 +604,18 @@ async function fetchMissions() {
       el.innerHTML = `
         <img src="${missionIconUrl(m, assigned)}" class="mission-icon">
         <strong class="focus-mission" data-lat="${m.lat}" data-lon="${m.lon}" style="cursor:pointer;">${m.type}</strong>
-        ${timerSpan}
-        <button onclick='showMissionDetails(${JSON.stringify(m)})' style="margin-left:8px;">Details</button><br>
+        ${timerSpan}<br>
         Address: ${address}<br>`;
+      const btn = document.createElement('button');
+      btn.textContent = 'Details';
+      btn.style.marginLeft = '8px';
+      btn.addEventListener('click', () => showMissionDetails(m));
+      const firstBr = el.querySelector('br');
+      if (firstBr) {
+        el.insertBefore(btn, firstBr);
+      } else {
+        el.appendChild(btn);
+      }
       missionList.appendChild(el);
       if (Number.isFinite(endTime)) startMissionListTimer(m.id, endTime);
     }
@@ -759,8 +768,11 @@ async function fetchStations() {
     } else {
       info = `Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
     }
-    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>Department: ${st.department || ''}<br>${info}<br>
-      <button onclick='showStationDetails(${JSON.stringify(st)})'>Details</button>`;
+    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>Department: ${st.department || ''}<br>${info}<br>`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Details';
+    btn.addEventListener('click', () => showStationDetails(st));
+    el.appendChild(btn);
     list.appendChild(el);
   });
 }
