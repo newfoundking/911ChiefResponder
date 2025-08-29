@@ -260,7 +260,14 @@ async function openMission(id) {
   }
   let assignedHtml = '';
   if (assigned.length) {
-    assignedHtml = '<div style="margin-top:8px;"><strong>Assigned Units:</strong><ul>' + assigned.map(u=>`<li>${u.name} - ${u.status}</li>`).join('') + '</ul></div>';
+    assignedHtml = '<div style="margin-top:8px;"><strong>Assigned Units:</strong><ul>' + assigned.map(u=>{
+      let etaText = '';
+      if (u.eta) {
+        const sec = Math.max(0, (u.eta - Date.now()) / 1000);
+        etaText = ` (${formatTime(sec)})`;
+      }
+      return `<li>${u.name} - ${u.status}${etaText}</li>`;
+    }).join('') + '</ul></div>';
   }
   pane.innerHTML = `<div style="text-align:right"><button id="closeDetail">Close</button></div>
     <h3>${mission.type}</h3>

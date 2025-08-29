@@ -795,32 +795,46 @@ app.get('/api/missions/:id/units', (req, res) => {
   db.all(
     `SELECT
        u.id, u.station_id, u.class, u.type, u.name, u.status, u.responding, u.icon, u.responding_icon, u.equipment,
+       MIN(ut.started_at) AS travel_started_at,
+       MIN(ut.total_duration) AS travel_total_duration,
        COALESCE(json_group_array(
          json_object('id', p.id, 'name', p.name, 'training', p.training)
        ), '[]') AS personnel
      FROM mission_units mu
      JOIN units u ON u.id = mu.unit_id
+     LEFT JOIN unit_travel ut ON ut.unit_id = mu.unit_id
+       AND ut.phase = 'to_scene'
+       AND ut.mission_id = mu.mission_id
+       AND (strftime('%s','now') - strftime('%s', ut.started_at)) < ut.total_duration
      LEFT JOIN personnel p ON p.unit_id = u.id
      WHERE mu.mission_id = ?
      GROUP BY u.id`,
     [req.params.id],
     (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
-      const parsed = rows.map(r => ({
-        ...r,
-        responding: r.responding === 1 || r.responding === true,
-        equipment: (()=>{ try { return JSON.parse(r.equipment||'[]'); } catch { return []; } })(),
-        personnel: (()=>{
-          try {
-            return JSON.parse(r.personnel||'[]').map(p => ({
-              ...p,
-              training: (()=>{ try { return JSON.parse(p.training||'[]'); } catch { return []; } })()
-            }));
-          } catch {
-            return [];
-          }
-        })()
-      }));
+      const parsed = rows.map(r => {
+        const { travel_started_at, travel_total_duration, ...rest } = r;
+        const base = {
+          ...rest,
+          responding: r.responding === 1 || r.responding === true,
+          equipment: (()=>{ try { return JSON.parse(r.equipment||'[]'); } catch { return []; } })(),
+          personnel: (()=>{
+            try {
+              return JSON.parse(r.personnel||'[]').map(p => ({
+                ...p,
+                training: (()=>{ try { return JSON.parse(p.training||'[]'); } catch { return []; } })()
+              }));
+            } catch {
+              return [];
+            }
+          })()
+        };
+        if (travel_started_at && travel_total_duration) {
+          const eta = new Date(travel_started_at).getTime() + Number(travel_total_duration) * 1000;
+          if (eta > Date.now()) base.eta = eta;
+        }
+        return base;
+      });
       res.json(parsed);
     }
   );
