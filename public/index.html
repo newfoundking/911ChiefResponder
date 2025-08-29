@@ -1534,6 +1534,7 @@ async function generateMission(retry = false, excludeIndex = null) {
   try {
     const res = await fetch('/api/missions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(missionData) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    playSound('/audio/newalert.mp3');
     await fetchMissions();
   } catch (err) { console.error("Failed to create mission:", err); alert("Failed to create mission."); }
 }
@@ -2049,6 +2050,7 @@ async function openManualDispatch(mission) {
 
 async function sendUnitsToMission(mission, ids, area) {
   await Promise.all(ids.map(id => fetch('/api/mission-units',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mission_id: mission.id, unit_id: id }) })));
+  if (ids.length) playSound('/audio/dispatch.mp3');
   if (area) area.innerHTML = `<strong>Dispatched ${ids.length} unit(s) to mission #${mission.id}.</strong>`;
   const assigned = await refreshAssignedUnitsUI(mission.id);
   const reqDiv = document.getElementById('reqDynamic');

@@ -26,7 +26,19 @@ export function formatTime(seconds) {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
+// Play an audio file from the given path. Errors are ignored so a
+// missing file or blocked autoplay does not break the UI.
+export function playSound(path) {
+  try {
+    const audio = new Audio(path);
+    audio.play();
+  } catch {
+    // noop
+  }
+}
+
 // Expose helpers globally for legacy scripts
 window.fetchNoCache = fetchNoCache;
 window.haversineKm = haversineKm;
 window.formatTime = formatTime;
+window.playSound = playSound;
