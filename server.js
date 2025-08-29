@@ -184,6 +184,7 @@ db.serialize(() => {
       class TEXT,
       type TEXT,
       name TEXT,
+      tag TEXT,
       priority INTEGER DEFAULT 1,
       personnel TEXT DEFAULT '[]',
       equipment TEXT DEFAULT '[]',
@@ -202,6 +203,8 @@ db.serialize(() => {
   db.run(`ALTER TABLE units ADD COLUMN patrol INTEGER DEFAULT 0`, () => {});
   // Add priority column for legacy DBs
   db.run(`ALTER TABLE units ADD COLUMN priority INTEGER DEFAULT 1`, () => {});
+  // Add tag column for legacy DBs
+  db.run(`ALTER TABLE units ADD COLUMN tag TEXT`, () => {});
 
   // Personnel
   db.run(`
@@ -287,6 +290,9 @@ db.run(`
 `, () => { /* ignore if exists */ });
 db.run(`
   ALTER TABLE units ADD COLUMN responding INTEGER DEFAULT 0
+`, () => { /* ignore if exists */ });
+db.run(`
+  ALTER TABLE units ADD COLUMN tag TEXT
 `, () => { /* ignore if exists */ });
 db.run(`
   CREATE TABLE IF NOT EXISTS facility_load (
@@ -623,7 +629,7 @@ function stationBayUsage(stationId){
 // Create a unit (charges the unit type cost)
 app.post('/api/units', async (req, res) => {
   try {
-    const { station_id, class: unitClass, type, name } = req.body || {};
+    const { station_id, class: unitClass, type, name, tag } = req.body || {};
     let { priority } = req.body || {};
     if (!station_id || !unitClass || !type || !name)
       return res.status(400).json({ error: 'station_id, class, type, name are required' });
@@ -641,8 +647,8 @@ app.post('/api/units', async (req, res) => {
     if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: cost });
 
     db.run(
-      `INSERT INTO units (station_id, class, type, name, priority, status) VALUES (?,?,?,?,?, 'available')`,
-      [station_id, unitClass, type, name, priority],
+      `INSERT INTO units (station_id, class, type, name, tag, priority, status) VALUES (?,?,?,?,?,?, 'available')`,
+      [station_id, unitClass, type, name, tag, priority],
       async function (err) {
         if (err) return res.status(500).json({ error: err.message });
         if (cost > 0) await adjustBalance(-cost);
@@ -1209,6 +1215,26 @@ app.get('/api/units', (req, res) => {
   });
 });
 
+app.get('/api/units/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid unit id' });
+  db.get('SELECT * FROM units WHERE id=?', [id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    let equipment;
+    try { equipment = JSON.parse(row.equipment || '[]'); }
+    catch { equipment = []; }
+    const parsed = {
+      ...row,
+      priority: Number(row.priority) || 1,
+      patrol: row.patrol === 1 || row.patrol === true,
+      responding: row.responding === 1 || row.responding === true,
+      equipment
+    };
+    res.json(parsed);
+  });
+});
+
 // Update basic unit fields (e.g., name/type)
 app.patch('/api/units/:id', (req, res) => {
   const id = Number(req.params.id);
@@ -1219,6 +1245,7 @@ app.patch('/api/units/:id', (req, res) => {
   if (req.body.name !== undefined) { fields.push('name = ?'); params.push(req.body.name); }
   if (req.body.type !== undefined) { fields.push('type = ?'); params.push(req.body.type); }
   if (req.body.class !== undefined) { fields.push('class = ?'); params.push(req.body.class); }
+  if (req.body.tag !== undefined) { fields.push('tag = ?'); params.push(req.body.tag); }
   if (req.body.priority !== undefined) {
     let pr = Number(req.body.priority);
     if (!Number.isFinite(pr)) pr = 1;
