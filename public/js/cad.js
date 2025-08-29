@@ -385,8 +385,7 @@ async function autoDispatch(mission) {
     }
 
     if (!selected.length) { alert('No available units meet the requirements.'); return; }
-    const ids = selected.map(u=>u.id);
-    await dispatchUnits(mission.id, ids);
+    await dispatchUnits(mission, selected);
     await loadMissions();
     await openMission(mission.id);
   } catch (e) {
@@ -425,15 +424,45 @@ async function runCardDispatch(mission) {
   }
 }
 
-async function dispatchUnits(missionId, unitIds) {
-  for (const id of unitIds) {
+async function dispatchUnits(mission, units) {
+  for (const u of units) {
     await fetch('/api/mission-units', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mission_id: missionId, unit_id: id })
+      body: JSON.stringify({ mission_id: mission.id, unit_id: u.id })
     });
+
+    try {
+      const st = cachedStations.find(s => s.id === u.station_id);
+      if (!st) continue;
+      const from = [st.lat, st.lon];
+      const to = [mission.lat, mission.lon];
+      const coords = [from, to];
+      const distKm = haversine(from[0], from[1], to[0], to[1]);
+      const baseSpeed = 56; // km/h
+      const mult = ({ fire: 1.2, police: 1.3, ambulance: 1.25 }[u.class] || 1);
+      const total_duration = Math.max(5, (distKm / (baseSpeed * mult)) * 3600);
+      const seg_durations = [total_duration];
+      await fetch('/api/unit-travel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          unit_id: u.id,
+          mission_id: mission.id,
+          phase: 'to_scene',
+          started_at: new Date().toISOString(),
+          from,
+          to,
+          coords,
+          seg_durations,
+          total_duration
+        })
+      });
+    } catch (e) {
+      console.warn('Failed to record unit travel', e);
+    }
   }
-  if (unitIds.length) playSound('/audio/dispatch.mp3');
+  if (units.length) playSound('/audio/dispatch.mp3');
 }
 
 async function openManualDispatch(mission) {
@@ -466,7 +495,8 @@ async function openManualDispatch(mission) {
   document.getElementById('closeUnits').onclick = ()=>unitsPane.classList.add('hidden');
   document.getElementById('dispatchUnits').onclick = async ()=>{
     const ids = Array.from(unitsPane.querySelectorAll('input[type=checkbox]:checked')).map(c=>Number(c.value));
-    await dispatchUnits(mission.id, ids);
+    const selectedUnits = ids.map(id => available.find(u => u.id === id)).filter(Boolean);
+    await dispatchUnits(mission, selectedUnits);
     unitsPane.classList.add('hidden');
     await loadMissions();
     await openMission(mission.id);
