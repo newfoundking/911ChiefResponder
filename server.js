@@ -506,6 +506,59 @@ db.all('SELECT id, resolve_at, timing FROM missions WHERE resolve_at IS NOT NULL
   });
 });
 
+function missionRequirementsMet(mission, assigned) {
+  const unitOnScene = new Map();
+  const equipOnScene = new Map();
+  const trainOnScene = new Map();
+
+  for (const u of assigned) {
+    if (u.status !== 'on_scene') continue;
+    unitOnScene.set(u.type, (unitOnScene.get(u.type) || 0) + 1);
+
+    const eqArr = parseArrayField(u.equipment);
+    for (const e of eqArr) {
+      equipOnScene.set(e, (equipOnScene.get(e) || 0) + 1);
+    }
+
+    const personnel = parseArrayField(u.personnel);
+    for (const p of personnel) {
+      const tList = Array.isArray(p.training) ? p.training : parseArrayField(p.training);
+      for (const t of tList) {
+        trainOnScene.set(t, (trainOnScene.get(t) || 0) + 1);
+      }
+    }
+  }
+
+  const penalties = parseArrayField(mission.penalties);
+  const reqUnits = parseArrayField(mission.required_units).map(r => {
+    const types = Array.isArray(r.types) ? r.types : (r.type ? [r.type] : []);
+    const ignored = penalties
+      .filter(p => types.includes(p.type))
+      .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+    const qty = Math.max(0, (r.quantity ?? r.count ?? 1) - ignored);
+    return { ...r, quantity: qty, types };
+  });
+  const reqEquip = parseArrayField(mission.equipment_required);
+  const reqTrain = parseArrayField(mission.required_training);
+
+  const unitsMet = reqUnits.every(r => {
+    const count = r.types.reduce((s, t) => s + (unitOnScene.get(t) || 0), 0);
+    return count >= (r.quantity ?? r.count ?? 1);
+  });
+  const equipMet = reqEquip.every(r => {
+    const name = r.name || r.type || r;
+    const need = r.qty ?? r.quantity ?? r.count ?? 1;
+    return (equipOnScene.get(name) || 0) >= need;
+  });
+  const trainMet = reqTrain.every(r => {
+    const name = r.training || r.name || r;
+    const need = r.qty ?? r.quantity ?? r.count ?? 1;
+    return (trainOnScene.get(name) || 0) >= need;
+  });
+
+  return unitsMet && equipMet && trainMet;
+}
+
 function findUnitCostByType(t) {
   try {
     if (!Array.isArray(unitTypes)) return 0;
@@ -1999,6 +2052,30 @@ app.get('/api/unit-types', (req, res) => res.json({ unitTypes }));
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
+
+// Periodically check mission requirements and start/stop timers
+setInterval(() => {
+  db.all(
+    `SELECT id, required_units, equipment_required, required_training, penalties, resolve_at
+     FROM missions WHERE status != 'resolved'`,
+    (err, missions) => {
+      if (err || !missions) return;
+      missions.forEach(m => {
+        db.all(
+          `SELECT u.* FROM mission_units mu JOIN units u ON u.id = mu.unit_id WHERE mu.mission_id=?`,
+          [m.id],
+          (e2, units) => {
+            if (e2 || !units) return;
+            const allMet = missionRequirementsMet(m, units);
+            const hasTimer = missionClocks.has(m.id) || m.resolve_at != null;
+            if (allMet && !hasTimer) beginMissionClock(m.id);
+            else if (!allMet && hasTimer) clearMissionClock(m.id);
+          }
+        );
+      });
+    }
+  );
+}, 2000);
 
 setInterval(() => {
   const now = Date.now();
