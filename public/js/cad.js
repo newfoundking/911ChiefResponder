@@ -2,6 +2,15 @@ import { fetchNoCache, formatTime } from './common.js';
 import { getMissions, renderMissionRow } from './missions.js';
 import { getStations, renderStationList } from './stations.js';
 
+function haversine(aLat, aLon, bLat, bLon) {
+  const R = 6371;
+  const dLat = (bLat - aLat) * Math.PI / 180;
+  const dLon = (bLon - aLon) * Math.PI / 180;
+  const la1 = aLat * Math.PI / 180, la2 = bLat * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 let cachedMissions = [];
 let cachedStations = [];
 
@@ -74,9 +83,17 @@ async function openMission(id) {
     const sec = Math.max(0,(mission.resolve_at - Date.now())/1000);
     time = `<div>Time Remaining: ${formatTime(sec)}</div>`;
   }
+  const assignedCounts = {};
+  assigned.forEach(u => {
+    assignedCounts[u.type] = (assignedCounts[u.type] || 0) + 1;
+  });
   let reqHtml = '';
   if (Array.isArray(mission.required_units) && mission.required_units.length) {
-    reqHtml = '<div><strong>Required Units:</strong><ul>' + mission.required_units.map(r=>`<li>${r.quantity ?? r.count ?? r.qty ?? 1} ${r.type}</li>`).join('') + '</ul></div>';
+    reqHtml = '<div><strong>Required Units:</strong><ul>' + mission.required_units.map(r=>{
+      const need = r.quantity ?? r.count ?? r.qty ?? 1;
+      const have = assignedCounts[r.type] || 0;
+      return `<li>${need} ${r.type} (${have}/${need})</li>`;
+    }).join('') + '</ul></div>';
   }
   let assignedHtml = '';
   if (assigned.length) {
@@ -124,6 +141,7 @@ async function autoDispatch(mission) {
   });
   await dispatchUnits(mission.id, selected.map(u=>u.id));
   await loadMissions();
+  await openMission(mission.id);
 }
 
 async function runCardDispatch(mission) {
@@ -138,6 +156,7 @@ async function runCardDispatch(mission) {
     });
     await dispatchUnits(mission.id, selected.map(u=>u.id));
     await loadMissions();
+    await openMission(mission.id);
   } catch(e) {
     console.error(e);
   }
@@ -160,19 +179,21 @@ async function openManualDispatch(mission) {
     fetchNoCache('/api/units').then(r=>r.json())
   ]);
   const stMap = new Map(stations.map(s=>[s.id,s]));
-  const available = units.filter(u=>u.status==='available');
+  const available = units.filter(u=>u.status==='available').map(u=>{
+    const st = stMap.get(u.station_id);
+    const dist = st ? haversine(mission.lat, mission.lon, st.lat, st.lon) : Infinity;
+    return { ...u, department: st?.department || 'Unknown', distance: dist };
+  });
   const groups = {};
   available.forEach(u=>{
-    const st = stMap.get(u.station_id);
-    const dept = st?.department || 'Unknown';
-    if (!groups[dept]) groups[dept] = [];
-    groups[dept].push(u);
+    if (!groups[u.department]) groups[u.department] = [];
+    groups[u.department].push(u);
   });
   let html = '<div class="cad-unit-header"><button id="dispatchUnits">Dispatch</button><button id="closeUnits">Close</button></div>';
   for (const dept of Object.keys(groups).sort()) {
     html += `<h4>${dept}</h4><ul>`;
-    for (const u of groups[dept].sort((a,b)=>a.name.localeCompare(b.name))) {
-      html += `<li><label><input type="checkbox" value="${u.id}"> ${u.name}</label></li>`;
+    for (const u of groups[dept].sort((a,b)=>a.distance - b.distance)) {
+      html += `<li><label><input type="checkbox" value="${u.id}"> ${u.name} (${u.distance.toFixed(1)} km)</label></li>`;
     }
     html += '</ul>';
   }
@@ -184,6 +205,7 @@ async function openManualDispatch(mission) {
     await dispatchUnits(mission.id, ids);
     unitsPane.classList.add('hidden');
     await loadMissions();
+    await openMission(mission.id);
   };
 }
 
