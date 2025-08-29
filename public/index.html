@@ -349,7 +349,9 @@ function startMissionListTimer(id, endTime){
 function cacheStations(stations){
   _stationById = new Map(stations.map(s => [s.id, { ...s, department: s.department ?? null }]));
 }
-function cacheUnits(units){ _unitById = new Map(units.map(u => [u.id, u])); }
+function cacheUnits(units){
+  _unitById = new Map(units.map(u => [u.id, { ...u, priority: Number(u.priority) || 1 }]));
+}
 
 function ensureUnitMarker(unit) {
   const st = _stationById.get(unit.station_id);
@@ -891,7 +893,7 @@ async function refreshAssignedUnitsUI(missionId) {
       const travels = travelRes ? await travelRes.json() : [];
       travelMap = new Map(travels.map(t => [t.unit_id, t]));
     } catch {}
-    (assigned||[]).forEach(u => _unitById.set(u.id, u));
+    (assigned||[]).forEach(u => _unitById.set(u.id, { ...u, priority: Number(u.priority) || 1 }));
     if (!Array.isArray(assigned) || !assigned.length) {
       div.innerHTML = '<em>No units assigned yet.</em>';
       return [];
@@ -1158,7 +1160,7 @@ async function showStationDetails(station) {
     return;
   }
   const res = await fetchNoCache(`/api/units?station_id=${station.id}`);
-  const units = await res.json();
+  const units = (await res.json()).map(u=>({ ...u, priority: Number(u.priority) || 1 }));
   units.forEach(u => _unitById.set(u.id, u));
   const unitOptions = unitTypes.filter(u=>u.class===station.type).map(u=>`<option value="${u.type}">${u.type}</option>`).join('');
   const usedBays = units.length;
@@ -1183,6 +1185,7 @@ async function showStationDetails(station) {
     <h3>Create Unit</h3>
     <select id="unit-type">${unitOptions}</select>
     <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
+    <input id="unit-priority" type="number" min="1" max="5" value="1" style="width:60px;" />
     <button id="create-unit">Create Unit</button>
     <h3>Add Personnel</h3>
     <input id="personnel-name" placeholder="Name (e.g., John Doe)" />
@@ -1222,7 +1225,7 @@ async function showStationDetails(station) {
     <ul id="unit-list">
       ${units.map(u=>`
         <li>
-          <strong style="cursor:pointer; color:blue;" onclick="showUnitDetails(${u.id})">${u.name}</strong> (${u.type}) - ${u.status}
+          <strong style="cursor:pointer; color:blue;" onclick="showUnitDetails(${u.id})">${u.name}</strong> (${u.type}) [P${u.priority}] - ${u.status}
           <button onclick="openAssignModal(${u.id}, ${station.id})">Assign</button>
           ${u.status !== 'available' ? `<button onclick="cancelUnit(${u.id}, ${station.id})">Cancel</button>` : ''}
           <button class="edit-unit-btn" data-unitid="${u.id}">Edit</button>
@@ -1476,8 +1479,9 @@ async function showStationDetails(station) {
   document.getElementById('create-unit').addEventListener('click', async ()=>{
     const type = document.getElementById('unit-type').value;
     const name = document.getElementById('unit-name').value;
+    const priority = Number(document.getElementById('unit-priority').value) || 1;
     if (!type || !name) return alert("Missing name or type");
-    await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:station.type,type,name})});
+    await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:station.type,type,name,priority})});
     showStationDetails(station);
   });
   document.getElementById('create-personnel').addEventListener('click', async ()=>{
@@ -1511,12 +1515,17 @@ function openUnitModal(unit) {
   const modal = document.getElementById('editUnitModal');
   const content = document.getElementById('editUnitContent');
   const currentName = unit?.name || '';
+  const currentPrio = Number(unit?.priority) || 1;
 
   content.innerHTML = `
     <div style="display:flex; flex-direction:column; gap:10px;">
       <label>
         <div>Name</div>
         <input id="edit-unit-name" type="text" style="width:100%;" value="${currentName.replace(/"/g,'&quot;')}" />
+      </label>
+      <label>
+        <div>Priority (1-5)</div>
+        <input id="edit-unit-priority" type="number" min="1" max="5" value="${currentPrio}" />
       </label>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
         <button id="edit-unit-cancel" type="button">Cancel</button>
@@ -1529,7 +1538,11 @@ function openUnitModal(unit) {
   content.querySelector('#edit-unit-save').onclick = async () => {
     const nameEl = content.querySelector('#edit-unit-name');
     const name = (nameEl?.value || '').trim();
-    const payload = { name };
+    const prEl = content.querySelector('#edit-unit-priority');
+    let priority = Number(prEl?.value);
+    if (!Number.isFinite(priority)) priority = 1;
+    priority = Math.min(5, Math.max(1, priority));
+    const payload = { name, priority };
     const urlBase = `/api/units/${unit.id}`;
     const attempts = [
       { method:'PATCH', url:urlBase, body:payload },
@@ -1886,6 +1899,7 @@ async function showUnitDetails(unitId) {
 
   content.innerHTML = `
     <p><strong>Name:</strong> ${unit?.name || 'Unknown'} <button id="edit-unit-btn">Edit</button></p>
+    <p><strong>Priority:</strong> ${unit?.priority ?? 1}</p>
     <p><strong>Station:</strong> ${station?.name || 'Unknown'}</p>
     <p><strong>Vehicle Class:</strong> ${unit?.class || 'Unknown'} (${unit?.type || ''})</p>
     ${missionHtml}
@@ -2302,8 +2316,14 @@ async function autoDispatch(mission) {
       .map(u=>{
         const st = stMap.get(u.station_id);
         const dist = st ? haversineKm(st.lat, st.lon, mission.lat, mission.lon) : Infinity;
-        return { ...u, _dist: dist };
+        const priority = Number(u.priority) || 1;
+        return { ...u, priority, _dist: dist };
       });
+
+    const sortUnits = (a,b)=>{
+      if (a.station_id === b.station_id) return a.priority - b.priority;
+      return a._dist - b._dist;
+    };
 
     function trainingCount(u, name) {
       let c = 0;
@@ -2356,7 +2376,7 @@ async function autoDispatch(mission) {
       const need = r.quantity ?? r.count ?? r.qty ?? 1;
       for (let i=0; i<need; i++) {
         let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && u.type === r.type)
-                                 .sort((a,b)=>a._dist - b._dist);
+                                 .sort(sortUnits);
         if (!candidates.length) { area.innerHTML = '<em>No available units meet the requirements.</em>'; return; }
         const chosen = candidates.find(unitMatchesAllNeeds) ||
                        candidates.find(unitMatchesNeed) ||
@@ -2368,7 +2388,7 @@ async function autoDispatch(mission) {
     for (const n of trainingNeeds) {
       while (n.qty > 0) {
         const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && trainingCount(u,n.name)>0)
-                                   .sort((a,b)=>a._dist - b._dist);
+                                   .sort(sortUnits);
         if (!candidates.length) { area.innerHTML = '<em>Insufficient training to meet requirements.</em>'; return; }
         selectUnit(candidates[0]);
       }
@@ -2377,7 +2397,7 @@ async function autoDispatch(mission) {
     for (const n of equipmentNeeds) {
       while (n.qty > 0) {
         const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && equipmentCount(u,n.name)>0)
-                                   .sort((a,b)=>a._dist - b._dist);
+                                   .sort(sortUnits);
         if (!candidates.length) { area.innerHTML = '<em>Insufficient equipment to meet requirements.</em>'; return; }
         selectUnit(candidates[0]);
       }
