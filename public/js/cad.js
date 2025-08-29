@@ -98,13 +98,37 @@ async function updateWallet() {
 }
 
 async function loadMissions() {
-  cachedMissions = await getMissions();
+  const missions = await getMissions();
   await updateWallet();
   const container = document.getElementById('cadMissions');
-  container.innerHTML = cachedMissions.map(renderMissionRow).join('');
-  container.querySelectorAll('.cad-mission').forEach(div=>{
-    div.addEventListener('click', ()=>openMission(div.dataset.id));
+  const scrollPos = container.scrollTop;
+
+  const existing = new Map();
+  container.querySelectorAll('.cad-mission').forEach(el => existing.set(el.dataset.id, el));
+
+  missions.forEach(m => {
+    const id = String(m.id);
+    const html = renderMissionRow(m);
+    let el = existing.get(id);
+    if (el) {
+      const temp = document.createElement('div');
+      temp.innerHTML = html;
+      const newEl = temp.firstElementChild;
+      el.innerHTML = newEl.innerHTML;
+      existing.delete(id);
+    } else {
+      const temp = document.createElement('div');
+      temp.innerHTML = html;
+      el = temp.firstElementChild;
+      el.addEventListener('click', () => openMission(el.dataset.id));
+    }
+    container.appendChild(el);
   });
+
+  existing.forEach(el => el.remove());
+
+  container.scrollTop = scrollPos;
+  cachedMissions = missions;
 }
 
 async function loadStations() {
