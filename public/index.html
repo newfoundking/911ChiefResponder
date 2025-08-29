@@ -1265,6 +1265,7 @@ async function showStationDetails(station) {
     <h3>Create Unit</h3>
     <select id="unit-type">${unitOptions}</select>
     <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
+    <input id="unit-tag" placeholder="Tag" />
     <input id="unit-priority" type="number" min="1" max="5" value="1" style="width:60px;" />
     <button id="create-unit">Create Unit</button>
     <h3>Add Personnel</h3>
@@ -1436,9 +1437,10 @@ async function showStationDetails(station) {
   document.getElementById('create-unit').addEventListener('click', async ()=>{
     const type = document.getElementById('unit-type').value;
     const name = document.getElementById('unit-name').value;
+    const tag = document.getElementById('unit-tag').value;
     const priority = Number(document.getElementById('unit-priority').value) || 1;
     if (!type || !name) return alert("Missing name or type");
-    await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:station.type,type,name,priority})});
+    await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:station.type,type,name,tag,priority})});
     showStationDetails(station);
   });
   document.getElementById('create-personnel').addEventListener('click', async ()=>{
@@ -1928,12 +1930,13 @@ function openUnitCreationForm(station) {
   const allowedTypes = unitTypes.filter(u => u.class === station.type);
   const unitName = prompt("Enter unit name (e.g., Engine 1):");
   if (!unitName) return;
+  const unitTag = prompt("Enter unit tag (optional):") || '';
   const typeOptions = allowedTypes.map(u => u.type).join(', ');
   const selectedType = prompt(`Choose unit type (${typeOptions}):`);
   if (!allowedTypes.find(u => u.type === selectedType)) { alert("Invalid type for this station."); return; }
   fetch("/api/units", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ station_id: station.id, class: station.type, type: selectedType, name: unitName })
+    body: JSON.stringify({ station_id: station.id, class: station.type, type: selectedType, name: unitName, tag: unitTag })
   }).then(res => res.json()).then(() => showStationDetails(station))
     .catch(err => { console.error("Failed to add unit:", err); alert("Error adding unit."); });
 }

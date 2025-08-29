@@ -90,12 +90,17 @@ export function openUnitModal(unit) {
   const modal = document.getElementById('editUnitModal');
   const content = document.getElementById('editUnitContent');
   const currentName = unit?.name || '';
+  const currentTag = unit?.tag || '';
   const currentPrio = Number(unit?.priority) || 1;
   content.innerHTML = `
     <div style="display:flex; flex-direction:column; gap:10px;">
       <label>
         <div>Name</div>
         <input id="edit-unit-name" type="text" style="width:100%;" value="${currentName.replace(/"/g,'&quot;')}" />
+      </label>
+      <label>
+        <div>Tag</div>
+        <input id="edit-unit-tag" type="text" style="width:100%;" value="${currentTag.replace(/"/g,'&quot;')}" />
       </label>
       <label>
         <div>Priority (1-5)</div>
@@ -110,10 +115,11 @@ export function openUnitModal(unit) {
   content.querySelector('#edit-unit-save').onclick = async () => {
     const nameEl = content.querySelector('#edit-unit-name');
     const name = (nameEl?.value || '').trim();
+    const tag = (content.querySelector('#edit-unit-tag')?.value || '').trim();
     let priority = Number(content.querySelector('#edit-unit-priority')?.value);
     if (!Number.isFinite(priority)) priority = 1;
     priority = Math.min(5, Math.max(1, priority));
-    const payload = { name, priority };
+    const payload = { name, tag, priority };
     const urlBase = `/api/units/${unit.id}`;
     const attempts = [
       { method:'PATCH', url:urlBase, body:payload },

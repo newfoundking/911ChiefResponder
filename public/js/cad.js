@@ -307,6 +307,7 @@ function openNewUnit(st) {
   html += `<h3>New Unit - ${st.name}</h3>`;
   html += `<label>Type: <select id="unitType">${options}</select></label><br>`;
   html += `<label>Name: <input id="unitName"/></label><br>`;
+  html += `<label>Tag: <input id="unitTag"/></label><br>`;
   html += `<label>Priority: <input id="unitPriority" type="number" min="1" max="5" value="1" style="width:60px;"></label><br>`;
   html += `<button id="createUnitBtn">Create</button>`;
   pane.innerHTML = html;
@@ -314,9 +315,10 @@ function openNewUnit(st) {
   document.getElementById('createUnitBtn').onclick = async ()=>{
     const type = document.getElementById('unitType').value;
     const name = document.getElementById('unitName').value.trim();
+    const tag = document.getElementById('unitTag').value.trim();
     const priority = Number(document.getElementById('unitPriority').value)||1;
     if (!type || !name) return alert('Missing name or type');
-    const res = await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id: st.id,class: st.type,type,name,priority})});
+    const res = await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id: st.id,class: st.type,type,name,tag,priority})});
     if(!res.ok){ const data = await res.json().catch(()=>({})); alert(`Failed: ${data.error || res.statusText}`); return; }
     showStation(st.id);
   };
