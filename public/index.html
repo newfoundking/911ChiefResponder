@@ -1756,6 +1756,8 @@ async function cancelUnit(unitId, stationId) {
     const unit = _unitById.get(unitId);
     const st = unit ? _stationById.get(unit.station_id) : null;
     if (unit && st) {
+      unit.responding = false;
+      _unitById.set(unitId, unit);
       ensureUnitMarker(unit);
       const entry = unitMarkers.get(unit.id);
       const current = entry?.marker.getLatLng() || L.latLng(st.lat, st.lon);
@@ -2168,6 +2170,9 @@ async function sendUnitsToMission(mission, ids, area) {
     if (!u) continue;
     const st = _stationById.get(u.station_id);
     if (!st) continue;
+    u.responding = true;
+    u.status = 'enroute';
+    _unitById.set(uid, u);
     const marker = ensureUnitMarker(u);
     if (!marker) continue;
 
@@ -2524,6 +2529,9 @@ function setupTimerForMission(mission, endTime) {
     for (const u of assignedBefore) {
       const st = _stationById.get(u.station_id);
       if (!st) continue;
+      u.responding = false;
+      u.status = 'available';
+      _unitById.set(u.id, u);
       ensureUnitMarker(u);
       const entry = unitMarkers.get(u.id);
       const current = entry?.marker.getLatLng() || L.latLng(mission.lat, mission.lon);
