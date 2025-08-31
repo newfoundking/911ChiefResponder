@@ -16,7 +16,7 @@ const unitTypes = [
 
   { class: "police", type: "Patrol Car",      capacity: 2, equipmentSlots: 1, attributes: ["prisonerTransport"], cost: 9000  },
   { class: "police", type: "Unmarked Car",    capacity: 2, equipmentSlots: 1, attributes: [], cost: 9500  },
-  { class: "police", type: "Special Operations", capacity: 4, equipmentSlots: 4, attributes: [], cost: 20000 },
+  { class: "police", type: "Special Services", capacity: 4, equipmentSlots: 4, attributes: [], cost: 20000 },
   { class: "police", type: "SWAT Van",        capacity: 6, equipmentSlots: 4, attributes: ["armor","SWAT"], cost: 30000 }
 ];
 unitTypes.sort((a,b) => a.class.localeCompare(b.class) || a.type.localeCompare(b.type));
