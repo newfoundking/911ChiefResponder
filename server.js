@@ -799,17 +799,16 @@ app.post('/api/missions', async (req, res) => {
   db.all('SELECT * FROM response_zones', (err, zones) => {
     if (err) return res.status(500).json({ error: err.message });
 
-    let departments = [];
-    zones.some(z => {
+    const departmentSet = new Set();
+    zones.forEach(z => {
       try {
         const poly = JSON.parse(z.polygon || '{}');
         if (pointInPolygon(lat, lon, poly)) {
-          departments = parseArrayField(z.departments);
-          return true;
+          parseArrayField(z.departments).forEach(d => departmentSet.add(d));
         }
       } catch {}
-      return false;
     });
+    const departments = Array.from(departmentSet);
 
     db.run(`
       INSERT INTO missions
