@@ -2067,7 +2067,8 @@ setInterval(() => {
           (e2, units) => {
             if (e2 || !units) return;
             const allMet = missionRequirementsMet(m, units);
-            const hasTimer = missionClocks.has(m.id) || m.resolve_at != null;
+            const dbEnd = m.resolve_at != null ? Number(m.resolve_at) : null;
+            const hasTimer = missionClocks.has(m.id) || (dbEnd && dbEnd > Date.now());
             if (allMet && !hasTimer) beginMissionClock(m.id);
             else if (!allMet && hasTimer) clearMissionClock(m.id);
           }
