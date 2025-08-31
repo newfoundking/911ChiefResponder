@@ -2056,7 +2056,12 @@ setInterval(() => {
       if (err || !missions) return;
       missions.forEach(m => {
         db.all(
-          `SELECT u.* FROM mission_units mu JOIN units u ON u.id = mu.unit_id WHERE mu.mission_id=?`,
+          `SELECT u.*, COALESCE(json_group_array(json_object('id', p.id, 'name', p.name, 'training', p.training)), '[]') AS personnel
+           FROM mission_units mu
+           JOIN units u ON u.id = mu.unit_id
+           LEFT JOIN personnel p ON p.unit_id = u.id
+           WHERE mu.mission_id=?
+           GROUP BY u.id`,
           [m.id],
           (e2, units) => {
             if (e2 || !units) return;
