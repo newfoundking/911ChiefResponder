@@ -1865,84 +1865,61 @@ app.post('/api/unit-travel', (req, res) => {
   });
 });
 
+function processUnitTravels(rows) {
+  const now = Date.now();
+  const active = [];
+  const afterOps = [];
+
+  for (const r of rows || []) {
+    const elapsed = (now - new Date(r.started_at).getTime()) / 1000;
+    const done = elapsed >= Number(r.total_duration || 0);
+
+    if (done) {
+      if (r.phase === 'to_scene') {
+        afterOps.push(new Promise(resolve => {
+          db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['on_scene', r.unit_id], () => {
+            db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => {
+              if (r.mission_id) {
+                db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', r.mission_id], () => resolve());
+              } else resolve();
+            });
+          });
+        }));
+      } else if (r.phase === 'return') {
+        afterOps.push(new Promise(resolve => {
+          db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', r.unit_id], () => {
+            db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => resolve());
+          });
+        }));
+      }
+      continue;
+    }
+
+    active.push({
+      unit_id: r.unit_id,
+      mission_id: r.mission_id,
+      phase: r.phase,
+      started_at: new Date(r.started_at).getTime(),
+      from: [r.from_lat, r.from_lon],
+      to: [r.to_lat, r.to_lon],
+      coords: JSON.parse(r.coords || '[]'),
+      seg_durations: JSON.parse(r.seg_durations || '[]'),
+      total_duration: r.total_duration
+    });
+  }
+
+  return { active, afterOps };
+}
 
 // Return only travels still in progress (elapsed < total_duration)
 app.get('/api/unit-travel/active', (req, res) => {
   db.all('SELECT * FROM unit_travel', (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    const now = Date.now();
-
-    // Apply side effects (arrivals/returns) before returning list
-    const toReturn = [];
-    const afterOps = [];
-
-    for (const r of (rows || [])) {
-      const elapsed = (now - new Date(r.started_at).getTime()) / 1000;
-      const done = elapsed >= (r.total_duration || 0);
-
-      if (done) {
-        if (r.phase === 'to_scene') {
-          // Arrived at scene
-          afterOps.push(new Promise(resolve => {
-            db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['on_scene', r.unit_id], () => {
-              db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => {
-                if (r.mission_id) {
-                  db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', r.mission_id], () => {
-                    resolve();
-                  });
-                } else resolve();
-              });
-            });
-          }));
-        } else if (r.phase === 'return') {
-          afterOps.push(new Promise(resolve => {
-            db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', r.unit_id], () => {
-              db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => resolve());
-            });
-          }));
-        }
-        continue; // do not include completed legs in the response
-      }
-
-      // Still in progress -> include in output
-      toReturn.push({
-        unit_id: r.unit_id,
-        mission_id: r.mission_id,
-        phase: r.phase,
-        started_at: r.started_at,
-        from: [r.from_lat, r.from_lon],
-        to: [r.to_lat, r.to_lon],
-        coords: JSON.parse(r.coords || '[]'),
-        seg_durations: JSON.parse(r.seg_durations || '[]'),
-        total_duration: r.total_duration
-      });
-    }
-
-Promise.all(afterOps).then(() => {
-  // After arrivals/returns have been applied, check any mission clocks
-  const now = Date.now();
-  const toResolve = [];
-  for (const [missionId, clk] of missionClocks.entries()) {
-    if (clk && now >= clk.endAt) {
-      toResolve.push(missionId);
-    }
-  }
-
-  if (!toResolve.length) {
-    return res.json(toReturn);
-  }
-
-  // Resolve any that are due, then respond
-  let pending = toResolve.length;
-  toResolve.forEach(id => {
-    resolveMissionById(id, () => {
-      // Always clear the clock (resolver also clears, but safe to ensure)
-      clearMissionClock(id);
-      if (--pending === 0) res.json(toReturn);
-    });
+    const { active, afterOps } = processUnitTravels(rows);
+    Promise.all(afterOps)
+      .then(() => res.json(active))
+      .catch(e => res.status(500).json({ error: e.message }));
   });
-}).catch(e => res.status(500).json({ error: e.message }));
-	});
 });
 
 
@@ -2052,6 +2029,15 @@ app.get('/api/unit-types', (req, res) => res.json({ unitTypes }));
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
+
+// Periodically process unit travel arrivals/returns so missions can progress
+setInterval(() => {
+  db.all('SELECT * FROM unit_travel', (err, rows) => {
+    if (err || !rows) return;
+    const { afterOps } = processUnitTravels(rows);
+    if (afterOps.length) Promise.all(afterOps).catch(() => {});
+  });
+}, 1000);
 
 // Periodically check mission requirements and start/stop timers
 setInterval(() => {
