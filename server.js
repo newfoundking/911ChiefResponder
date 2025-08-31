@@ -643,7 +643,7 @@ app.get('/api/pois', async (req, res) => {
   try {
     const response = await axios.get(`https://overpass-api.de/api/interpreter`, {
       params: {
-        data: `[out:json];node(around:${radius},${lat},${lon})["amenity"];out;`
+        data: `[out:json];(node(around:${radius},${lat},${lon})["amenity"];node(around:${radius},${lat},${lon})["building"];node(around:${radius},${lat},${lon})["leisure"];node(around:${radius},${lat},${lon})["tourism"];node(around:${radius},${lat},${lon})["shop"];node(around:${radius},${lat},${lon})["aeroway"];node(around:${radius},${lat},${lon})["landuse"];node(around:${radius},${lat},${lon})["office"];node(around:${radius},${lat},${lon})["man_made"];);out;`
       }
     });
     res.json(response.data.elements);

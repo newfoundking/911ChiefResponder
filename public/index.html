@@ -810,7 +810,8 @@ async function generateMissionAtPOI(poi) {
   const mission = await res.json();
   const { name, required_units } = mission;
   document.getElementById("cadTitle").textContent = name;
-  document.getElementById("cadType").textContent = `POI: ${poi.tags.amenity || poi.tags.name}`;
+  const tagVal = poi.tags.amenity || poi.tags.building || poi.tags.leisure || poi.tags.tourism || poi.tags.shop || poi.tags.aeroway || poi.tags.landuse || poi.tags.office || poi.tags.man_made || poi.tags.name;
+  document.getElementById("cadType").textContent = `POI: ${tagVal}`;
   const formatReq = r => {
     const types = Array.isArray(r.types) ? r.types : [r.type];
     const typeStr = types.join(' or ');
@@ -1570,7 +1571,14 @@ async function generateMission(retry = false, excludeIndex = null) {
     try {
       const pois = await fetch(`/api/pois?lat=${st.lat}&lon=${st.lon}&radius=${radius}`)
         .then(r => r.json()).catch(() => []);
-      const matches = pois.filter(p => p.tags && p.tags.amenity === template.trigger_filter);
+      const matches = pois.filter(p => {
+        if (!p.tags) return false;
+        if ((template.trigger_filter || "").includes("=")) {
+          const [key, val] = template.trigger_filter.split("=");
+          return p.tags[key] === val;
+        }
+        return p.tags.amenity === template.trigger_filter;
+      });
       if (matches.length) {
         const poi = matches[Math.floor(Math.random() * matches.length)];
         lat = poi.lat; lon = poi.lon;
