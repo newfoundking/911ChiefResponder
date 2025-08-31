@@ -867,7 +867,14 @@ export async function generateMission(retry = false, excludeIndex = null) {
     try {
       const pois = await fetch(`/api/pois?lat=${st.lat}&lon=${st.lon}&radius=${radius}`)
         .then(r => r.json()).catch(() => []);
-      const matches = pois.filter(p => p.tags && p.tags.amenity === template.trigger_filter);
+      const matches = pois.filter(p => {
+        if (!p.tags) return false;
+        if ((template.trigger_filter || "").includes("=")) {
+          const [key, val] = template.trigger_filter.split("=");
+          return p.tags[key] === val;
+        }
+        return p.tags.amenity === template.trigger_filter;
+      });
       if (matches.length) {
         const poi = matches[Math.floor(Math.random() * matches.length)];
         lat = poi.lat; lon = poi.lon;

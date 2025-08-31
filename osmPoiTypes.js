@@ -28,5 +28,18 @@ const OSM_POI_TYPES = [
   "supermarket",
   "taxi",
   "theatre",
-  "train_station"
+  "train_station",
+  "building=house",
+  "building=apartments",
+  "tourism=hotel",
+  "leisure=swimming_pool",
+  "amenity=nursing_home",
+  "amenity=clinic",
+  "aeroway=hangar",
+  "landuse=landfill",
+  "shop=mall",
+  "building=warehouse",
+  "man_made=works",
+  "building=office",
+  "office=government"
 ];
