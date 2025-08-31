@@ -688,12 +688,12 @@ async function runCardDispatch(mission) {
   }
 }
 
-async function dispatchUnits(mission, units) {
+async function dispatchUnits(mission, units, force=false) {
   for (const u of units) {
     await fetch('/api/mission-units', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mission_id: mission.id, unit_id: u.id })
+      body: JSON.stringify({ mission_id: mission.id, unit_id: u.id, ...(force ? { force: true } : {}) })
     });
 
     try {
@@ -778,7 +778,7 @@ async function openManualDispatch(mission) {
   document.getElementById('dispatchUnits').onclick = async ()=>{
     const ids = Array.from(unitsPane.querySelectorAll('input[type=checkbox]:checked')).map(c=>Number(c.value));
     const selectedUnits = ids.map(id => available.find(u => u.id === id)).filter(Boolean);
-    await dispatchUnits(mission, selectedUnits);
+    await dispatchUnits(mission, selectedUnits, true);
     unitsPane.classList.add('hidden');
     await loadMissions();
     await openMission(mission.id);
@@ -817,7 +817,7 @@ async function openUnitTypeDispatch(mission) {
       const list = groups.get(type) || [];
       if (!list.length) { alert('No available units'); return; }
       const unit = list.shift();
-      await dispatchUnits(mission, [unit]);
+      await dispatchUnits(mission, [unit], true);
       await loadMissions();
       await openMission(mission.id);
       openUnitTypeDispatch(mission);

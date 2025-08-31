@@ -2150,8 +2150,8 @@ async function openManualDispatch(mission) {
   }
 }
 
-async function sendUnitsToMission(mission, ids, area) {
-  await Promise.all(ids.map(id => fetch('/api/mission-units',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mission_id: mission.id, unit_id: id }) })));
+  async function sendUnitsToMission(mission, ids, area, force=false) {
+    await Promise.all(ids.map(id => fetch('/api/mission-units',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mission_id: mission.id, unit_id: id, ...(force ? { force: true } : {}) }) })));
   if (ids.length) playSound('/audio/dispatch.mp3');
   if (area) area.innerHTML = `<strong>Dispatched ${ids.length} unit(s) to mission #${mission.id}.</strong>`;
   const assigned = await refreshAssignedUnitsUI(mission.id);
@@ -2223,7 +2223,7 @@ async function dispatchSelectedUnits(missionId) {
     const missions = await (await fetch('/api/missions')).json();
     const mission = missions.find(m=>m.id===missionId);
     if (!mission) { alert('Mission not found.'); return; }
-    await sendUnitsToMission(mission, ids, area);
+    await sendUnitsToMission(mission, ids, area, true);
     openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon });
   } catch (e) {
     console.error(e);
@@ -2261,7 +2261,7 @@ async function openUnitTypeDispatch(mission) {
         const list = groups.get(type) || [];
         if (!list.length) { alert('No available units'); return; }
         const unit = list.shift();
-        await sendUnitsToMission(mission, [unit.id]);
+        await sendUnitsToMission(mission, [unit.id], undefined, true);
         openUnitTypeDispatch(mission);
       });
     });

@@ -1769,7 +1769,7 @@ app.put('/api/run-cards/:name', express.json(), (req, res) => {
    (with global busy guard)
    ========================= */
 app.post('/api/mission-units', (req, res) => {
-  const { mission_id, unit_id } = req.body || {};
+  const { mission_id, unit_id, force } = req.body || {};
   if (!mission_id || !unit_id) return res.status(400).json({ error: 'mission_id and unit_id are required' });
 
   // Guard: prevent double-dispatch across all missions and fetch department
@@ -1791,7 +1791,7 @@ app.post('/api/mission-units', (req, res) => {
           if (!m) return res.status(404).json({ error: 'mission not found' });
 
           const allowed = parseArrayField(m.departments);
-          if (allowed.length && !allowed.includes(unitRow.department)) {
+          if (!force && allowed.length && !allowed.includes(unitRow.department)) {
             return res.status(403).json({ error: 'department not allowed' });
           }
 
