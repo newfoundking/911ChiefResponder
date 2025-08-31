@@ -16,7 +16,7 @@ try { equipment = require('./equipment'); } catch { /* falls back to {} */ }
 // Older clients used "onscene" while the server expects "on_scene".
 // This ensures any existing records are standardized on startup.
 db.serialize(() => {
-db.run("UPDATE units SET status='on_scene', responding=0 WHERE status='onscene'");
+  db.run("UPDATE units SET status='on_scene' WHERE status='onscene'");
   db.run("UPDATE missions SET status='on_scene' WHERE status='onscene'");
 });
 
@@ -197,8 +197,9 @@ db.serialize(() => {
     )
   `);
 
-  // Fix any legacy rows where status was "[]"
-  db.run(`UPDATE units SET status='available', responding=0 WHERE status IS NULL OR status='[]'`);
+  // Fix any legacy rows where status was "[]". Avoid referencing the
+  // responding column here since older databases may not have it yet.
+  db.run(`UPDATE units SET status='available' WHERE status IS NULL OR status='[]'`);
   // Add patrol column for legacy DBs
   db.run(`ALTER TABLE units ADD COLUMN patrol INTEGER DEFAULT 0`, () => {});
   // Add priority column for legacy DBs
@@ -512,7 +513,14 @@ function missionRequirementsMet(mission, assigned) {
   const trainOnScene = new Map();
 
   for (const u of assigned) {
-    if (u.status !== 'on_scene') continue;
+    // Normalize status so minor formatting differences (case, spaces, missing
+    // underscores) don't cause us to overlook units that have actually
+    // arrived at the scene. Legacy clients may send "onscene" or other
+    // variants; treat them all as "on_scene".
+    const normStatus = String(u.status || '')
+      .toLowerCase()
+      .replace(/\s+/g, '_');
+    if (normStatus !== 'on_scene' && normStatus !== 'onscene') continue;
     unitOnScene.set(u.type, (unitOnScene.get(u.type) || 0) + 1);
 
     const eqArr = parseArrayField(u.equipment);
