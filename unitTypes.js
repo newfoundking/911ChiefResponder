@@ -19,6 +19,7 @@ const unitTypes = [
   { class: "police", type: "Special Operations", capacity: 4, equipmentSlots: 4, attributes: [], cost: 20000 },
   { class: "police", type: "SWAT Van",        capacity: 6, equipmentSlots: 4, attributes: ["armor","SWAT"], cost: 30000 }
 ];
+unitTypes.sort((a,b) => a.class.localeCompare(b.class) || a.type.localeCompare(b.type));
 if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
   module.exports = unitTypes;
 }
