@@ -233,7 +233,7 @@ async function showStation(id) {
   unassigned.forEach(p => personnel.push({ ...p, unit: 'Unassigned' }));
   let html = `<div class="cad-station-detail"><div class="cad-station-header"><button id="closeStationDetail">Close</button><button id="newPersonnel">New Personnel</button> <button id="newUnit">New Unit</button> <button id="newEquipment">New Equipment</button></div><h3>${st.name}</h3><p>Type: ${st.type}</p><p>Department: ${st.department||''}</p>`;
   html += `<div style="display:flex; gap:20px;"><div><h4>Units</h4><ul>`;
-  html += units.map(u => `<li class="cad-unit" data-id="${u.id}">${u.name}</li>`).join('');
+  html += units.map(u => `<li class="cad-unit" data-id="${u.id}">${u.name}${u.status !== 'available' ? ` <button class="cancel-unit" data-id="${u.id}">Cancel</button>` : ''}</li>`).join('');
   html += `</ul></div><div><h4>Personnel</h4><ul>`;
   html += personnel.map(p => `<li class="cad-personnel" data-id="${p.id}">${p.name} - ${p.unit}</li>`).join('');
   html += `</ul></div></div></div>`;
@@ -244,6 +244,15 @@ async function showStation(id) {
   document.getElementById('newEquipment').onclick = () => openNewEquipment(st);
   pane.querySelectorAll('.cad-unit').forEach(li => li.addEventListener('click', () => showUnitDetail(Number(li.dataset.id))));
   pane.querySelectorAll('.cad-personnel').forEach(li => li.addEventListener('click', () => editPersonnel(Number(li.dataset.id), st)));
+  pane.querySelectorAll('.cancel-unit').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const uid = Number(btn.dataset.id);
+      await cancelUnit(uid);
+      await loadMissions();
+      showStation(st.id);
+    });
+  });
 }
 
 window.refreshStationPanelNoCache = showStation;
@@ -453,8 +462,18 @@ async function openMission(id) {
     time = `<div>Time Remaining: ${formatTime(sec)}</div>`;
   }
   const assignedCounts = {};
+  const equipCounts = {};
+  const trainCounts = {};
   assigned.forEach(u => {
     assignedCounts[u.type] = (assignedCounts[u.type] || 0) + 1;
+    (Array.isArray(u.equipment) ? u.equipment : []).forEach(e => {
+      equipCounts[e] = (equipCounts[e] || 0) + 1;
+    });
+    (Array.isArray(u.personnel) ? u.personnel : []).forEach(p => {
+      (Array.isArray(p.training) ? p.training : []).forEach(t => {
+        trainCounts[t] = (trainCounts[t] || 0) + 1;
+      });
+    });
   });
   let reqHtml = '';
   if (Array.isArray(mission.required_units) && mission.required_units.length) {
@@ -465,6 +484,24 @@ async function openMission(id) {
       return `<li>${need} ${types.join(' or ')} (${have}/${need})</li>`;
     }).join('') + '</ul></div>';
   }
+  let reqEquipHtml = '';
+  if (Array.isArray(mission.equipment_required) && mission.equipment_required.length) {
+    reqEquipHtml = '<div><strong>Required Equipment:</strong><ul>' + mission.equipment_required.map(r=>{
+      const name = r.name || r.type || r;
+      const need = r.qty ?? r.quantity ?? r.count ?? 1;
+      const have = equipCounts[name] || 0;
+      return `<li>${need} ${name} (${have}/${need})</li>`;
+    }).join('') + '</ul></div>';
+  }
+  let reqTrainHtml = '';
+  if (Array.isArray(mission.required_training) && mission.required_training.length) {
+    reqTrainHtml = '<div><strong>Required Training:</strong><ul>' + mission.required_training.map(r=>{
+      const name = r.training || r.name || r;
+      const need = r.qty ?? r.quantity ?? r.count ?? 1;
+      const have = trainCounts[name] || 0;
+      return `<li>${need} ${name} (${have}/${need})</li>`;
+    }).join('') + '</ul></div>';
+  }
   let assignedHtml = '';
   if (assigned.length) {
     assignedHtml = '<div style="margin-top:8px;"><strong>Assigned Units:</strong><ul>' + assigned.map(u=>{
@@ -473,7 +510,7 @@ async function openMission(id) {
         const sec = Math.max(0, (u.eta - Date.now()) / 1000);
         etaText = ` (${formatTime(sec)})`;
       }
-      return `<li>${u.name} - ${u.status}${etaText}</li>`;
+      return `<li>${u.name} - ${u.status}${etaText} <button class="cancel-unit" data-unit="${u.id}">Cancel</button></li>`;
     }).join('') + '</ul></div>';
   }
   pane.innerHTML = `<div class="cad-detail-header">
@@ -487,6 +524,8 @@ async function openMission(id) {
     ${time}
     <div>${mission.address||''}</div>
     ${reqHtml}
+    ${reqEquipHtml}
+    ${reqTrainHtml}
     ${assignedHtml}`;
   pane.classList.remove('hidden');
   document.getElementById('closeDetail').onclick = ()=>{
@@ -497,6 +536,14 @@ async function openMission(id) {
   document.getElementById('autoDispatch').onclick = ()=>autoDispatch(mission);
   document.getElementById('runCardDispatch').onclick = ()=>runCardDispatch(mission);
   document.getElementById('unitTypeDispatchBtn').onclick = ()=>openUnitTypeDispatch(mission);
+  pane.querySelectorAll('.cancel-unit').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const uid = Number(btn.dataset.unit);
+      await cancelUnit(uid);
+      await loadMissions();
+      await openMission(mission.id);
+    });
+  });
 }
 
 async function autoDispatch(mission) {
@@ -776,6 +823,13 @@ async function openUnitTypeDispatch(mission) {
       openUnitTypeDispatch(mission);
     });
   });
+}
+
+async function cancelUnit(unitId) {
+  if (!unitId) return;
+  try {
+    await fetch(`/api/units/${unitId}/cancel`, { method: 'POST' });
+  } catch {}
 }
 
 export async function generateMission(retry = false, excludeIndex = null) {
