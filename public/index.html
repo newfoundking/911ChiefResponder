@@ -2330,6 +2330,15 @@ async function autoDispatch(mission) {
       }
     }
 
+    // subtract already assigned units (enroute/on_scene)
+    const assigned = await fetchNoCache(`/api/missions/${mission.id}/units`).then(r=>r.json()).catch(()=>[]);
+    const assignedCounts = {};
+    for (const a of assigned) {
+      if (!['enroute','on_scene'].includes(a.status)) continue;
+      assignedCounts[a.type] = (assignedCounts[a.type] || 0) + 1;
+      applyNeeds(a);
+    }
+
     function unitMatchesNeed(u) {
       return trainingNeeds.some(n=>n.qty>0 && trainingCount(u,n.name)>0) ||
              equipmentNeeds.some(n=>n.qty>0 && equipmentCount(u,n.name)>0);
@@ -2348,12 +2357,12 @@ async function autoDispatch(mission) {
 
     const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
     for (const r of reqUnits) {
-      const need = r.quantity ?? r.count ?? r.qty ?? 1;
+      const types = Array.isArray(r.types) ? r.types : [r.type];
+      let need = (r.quantity ?? r.count ?? r.qty ?? 1) - types.reduce((s,t)=>s+(assignedCounts[t]||0),0);
       for (let i=0; i<need; i++) {
-        const types = Array.isArray(r.types) ? r.types : [r.type];
         let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && types.includes(u.type))
                                  .sort(sortUnits);
-        if (!candidates.length) { area.innerHTML = '<em>No available units meet the requirements.</em>'; return; }
+        if (!candidates.length) break;
         const chosen = candidates.find(unitMatchesAllNeeds) ||
                        candidates.find(unitMatchesNeed) ||
                        candidates[0];
@@ -2365,7 +2374,7 @@ async function autoDispatch(mission) {
       while (n.qty > 0) {
         const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && trainingCount(u,n.name)>0)
                                    .sort(sortUnits);
-        if (!candidates.length) { area.innerHTML = '<em>Insufficient training to meet requirements.</em>'; return; }
+        if (!candidates.length) break;
         selectUnit(candidates[0]);
       }
     }
@@ -2374,12 +2383,12 @@ async function autoDispatch(mission) {
       while (n.qty > 0) {
         const candidates = allUnits.filter(u=>!selectedIds.has(u.id) && equipmentCount(u,n.name)>0)
                                    .sort(sortUnits);
-        if (!candidates.length) { area.innerHTML = '<em>Insufficient equipment to meet requirements.</em>'; return; }
+        if (!candidates.length) break;
         selectUnit(candidates[0]);
       }
     }
 
-    if (!selected.length) { area.innerHTML = '<em>No available units meet the requirements.</em>'; return; }
+    if (!selected.length) { area.innerHTML = '<em>No additional units available.</em>'; return; }
     const ids = selected.map(u=>u.id);
     await sendUnitsToMission(mission, ids, area);
   } catch (e) {
