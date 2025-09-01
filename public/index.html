@@ -378,7 +378,9 @@ function setUnitEta(unitId, elem, startedAt, totalDuration){
   function update(){
     const elapsed = (Date.now() - new Date(startedAt).getTime())/1000;
     const remaining = Math.max(0, (totalDuration||0) - elapsed);
-    elem.textContent = `enroute (${formatEta(remaining)})`;
+    const unit = _unitById.get(unitId);
+    const statusText = formatStatus('enroute', unit?.responding);
+    elem.textContent = `${statusText} (${formatEta(remaining)})`;
     if (remaining <= 0) clearUnitEta(unitId);
   }
   update();
@@ -1007,7 +1009,7 @@ async function refreshAssignedUnitsUI(missionId) {
       <ul style="list-style:none; padding-left:0;">
         ${assigned.map(u => `
           <li style="display:flex; align-items:center; gap:6px; margin:4px 0;">
-            <span class="unit-link" data-unitid="${u.id}" style="cursor:pointer; color:blue;">${u.name}</span> (${u.type}) — <span id="unit-status-${u.id}">${u.status || 'enroute'}</span>
+            <span class="unit-link" data-unitid="${u.id}" style="cursor:pointer; color:blue;">${u.name}</span> (${u.type}) — <span id="unit-status-${u.id}">${formatStatus(u.status || 'enroute', u.responding)}</span>
             <button data-unitid="${u.id}" data-missionid="${missionId}" class="clear-unit-btn">Clear</button>
           </li>
         `).join('')}
@@ -1337,7 +1339,7 @@ async function showStationDetails(station) {
     <ul id="unit-list">
       ${units.map(u=>`
         <li>
-          <strong style="cursor:pointer; color:blue;" onclick="showUnitDetails(${u.id})">${u.name}</strong> (${u.type}) [P${u.priority}] - ${u.status}
+          <strong style="cursor:pointer; color:blue;" onclick="showUnitDetails(${u.id})">${u.name}</strong> (${u.type}) [P${u.priority}] - ${formatStatus(u.status, u.responding)}
           <button onclick="openAssignModal(${u.id}, ${station.id})">Assign</button>
           ${u.status !== 'available' ? `<button onclick="cancelUnit(${u.id}, ${station.id})">Cancel</button>` : ''}
           <button class="edit-unit-btn" data-unitid="${u.id}">Edit</button>

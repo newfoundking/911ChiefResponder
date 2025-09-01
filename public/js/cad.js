@@ -1,4 +1,4 @@
-import { fetchNoCache, formatTime, playSound } from './common.js';
+import { fetchNoCache, formatTime, playSound, formatStatus } from './common.js';
 import { getMissions, renderMissionRow } from './missions.js';
 import { getStations, renderStationList } from './stations.js';
 import { editUnit, editPersonnel } from './edit-dialogs.js';
@@ -510,7 +510,8 @@ async function openMission(id) {
         const sec = Math.max(0, (u.eta - Date.now()) / 1000);
         etaText = ` (${formatTime(sec)})`;
       }
-      return `<li>${u.name} - ${u.status}${etaText} <button class="cancel-unit" data-unit="${u.id}">Cancel</button></li>`;
+      const statusText = formatStatus(u.status, u.responding);
+      return `<li>${u.name} - ${statusText}${etaText} <button class="cancel-unit" data-unit="${u.id}">Cancel</button></li>`;
     }).join('') + '</ul></div>';
   }
   pane.innerHTML = `<div class="cad-detail-header">
