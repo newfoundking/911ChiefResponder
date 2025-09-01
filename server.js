@@ -427,8 +427,14 @@ function resolveMissionById(missionId, cb) {
               db.run(`UPDATE units SET status='available', responding=0 WHERE id IN (${placeholders})`, ids, (e) => e ? reject(e) : resolve()))
           : Promise.resolve();
 
+        const clearTravels = ids.length
+          ? new Promise((resolve, reject) =>
+              db.run(`DELETE FROM unit_travel WHERE unit_id IN (${placeholders})`, ids, (e) => e ? reject(e) : resolve()))
+          : Promise.resolve();
+
         try {
           await freeUnits;
+          await clearTravels;
           db.run('DELETE FROM mission_units WHERE mission_id=?', [missionId], (e2) => {
             if (e2) return cb && cb(e2);
 
@@ -1814,8 +1820,14 @@ app.delete('/api/mission-units', (req, res) => {
 
   db.run('DELETE FROM mission_units WHERE mission_id = ? AND unit_id = ?', [mission_id, unit_id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
-    // Optional: set available immediately (or let arrival back at station do it)
-    db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', unit_id], () => res.json({ ok: true, removed: this.changes }));
+    const removed = this.changes;
+    db.run('DELETE FROM unit_travel WHERE unit_id=?', [unit_id], err2 => {
+      if (err2) return res.status(500).json({ error: err2.message });
+      // Optional: set available immediately (or let arrival back at station do it)
+      db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', unit_id], () =>
+        res.json({ ok: true, removed })
+      );
+    });
   });
 });
 
@@ -1884,13 +1896,25 @@ function processUnitTravels(rows) {
     if (done) {
       if (r.phase === 'to_scene') {
         afterOps.push(new Promise(resolve => {
-          db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['on_scene', r.unit_id], () => {
-            db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => {
-              if (r.mission_id) {
-                db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', r.mission_id], () => resolve());
-              } else resolve();
+          const finalize = resolved => {
+            const unitStatus = resolved ? 'available' : 'on_scene';
+            db.run('UPDATE units SET status=?, responding=0 WHERE id=?', [unitStatus, r.unit_id], () => {
+              db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => {
+                if (!resolved && r.mission_id) {
+                  db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', r.mission_id], () => resolve());
+                } else resolve();
+              });
             });
-          });
+          };
+
+          if (r.mission_id) {
+            db.get('SELECT status FROM missions WHERE id=?', [r.mission_id], (e, row) => {
+              const resolved = e || !row || row.status === 'resolved';
+              finalize(resolved);
+            });
+          } else {
+            finalize(true);
+          }
         }));
       } else if (r.phase === 'return') {
         afterOps.push(new Promise(resolve => {
