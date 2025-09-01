@@ -26,6 +26,20 @@ export function formatTime(seconds) {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
+// Map internal unit statuses to human readable status codes
+export function formatStatus(status, responding = false) {
+  switch (status) {
+    case 'available':
+      return 'Status 8';
+    case 'enroute':
+      return responding ? 'Status 11' : 'Status 10';
+    case 'on_scene':
+      return 'Status 12';
+    default:
+      return status;
+  }
+}
+
 // Play an audio file from the given path. Errors are ignored so a
 // missing file or blocked autoplay does not break the UI.
 export function playSound(path) {
@@ -41,4 +55,5 @@ export function playSound(path) {
 window.fetchNoCache = fetchNoCache;
 window.haversineKm = haversineKm;
 window.formatTime = formatTime;
+window.formatStatus = formatStatus;
 window.playSound = playSound;
