@@ -1180,7 +1180,10 @@ function showMissionDetails(mission) {
   const hasTraining = Array.isArray(mission.required_training) && mission.required_training.length;
   const hasEquipment = Array.isArray(mission.equipment_required) && mission.equipment_required.length;
   container.innerHTML = `
-    <h3>${mission.type}</h3>
+    <h3><span class="focus-mission"
+             data-lat="${mission.lat}"
+             data-lon="${mission.lon}"
+             style="cursor:pointer;">${mission.type}</span></h3>
     <p><strong>Status:</strong> ${mission.status}</p>
     <p><strong>Unit Requirements:</strong></p>
     <div id="reqDynamic">Loading…</div>
