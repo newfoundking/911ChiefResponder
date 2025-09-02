@@ -74,24 +74,76 @@ async function fetchRouteOSRM(from, to) {
 let cachedMissions = [];
 let cachedStations = [];
 let map;
-let mapMarker;
+let selectedMissionId = null;
+const stationMarkers = new Map();
+const missionMarkers = new Map();
+
+function makeIcon(url, size) {
+  return L.icon({ iconUrl: url, iconSize: [size, size], iconAnchor: [size / 2, size] });
+}
+
+const stationIcons = {
+  fire: makeIcon('/fire.png', 24),
+  police: makeIcon('/police.png', 24),
+  ambulance: makeIcon('/star.png', 24),
+  hospital: makeIcon('/star.png', 24),
+  jail: makeIcon('/police.png', 24)
+};
+
+const missionIcons = {
+  1: makeIcon('/warning1.png', 30),
+  2: makeIcon('/warning2.png', 30),
+  3: makeIcon('/warning3.png', 30)
+};
 
 function initMap() {
-  map = L.map('cadMap').setView([37.8, -96], 4);
+  map = L.map('cadMap').setView([47.5646, -52.7002], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: '© OpenStreetMap'
   }).addTo(map);
 }
 
+function fitMapToMarkers() {
+  if (!map) return;
+  const all = [...stationMarkers.values(), ...missionMarkers.values()];
+  if (!all.length) return;
+  const group = L.featureGroup(all);
+  map.fitBounds(group.getBounds().pad(0.1));
+  map.closePopup();
+}
+
+function updateStationMarkers(stations) {
+  stationMarkers.forEach(m => map.removeLayer(m));
+  stationMarkers.clear();
+  stations.forEach(st => {
+    if (Number.isFinite(st.lat) && Number.isFinite(st.lon)) {
+      const icon = stationIcons[st.type] || stationIcons.fire;
+      const marker = L.marker([st.lat, st.lon], { icon }).addTo(map).bindPopup(st.name);
+      stationMarkers.set(st.id, marker);
+    }
+  });
+}
+
+function updateMissionMarkers(missions) {
+  missionMarkers.forEach(m => map.removeLayer(m));
+  missionMarkers.clear();
+  missions.forEach(m => {
+    if (Number.isFinite(m.lat) && Number.isFinite(m.lon)) {
+      const icon = missionIcons[m.level] || missionIcons[1];
+      const marker = L.marker([m.lat, m.lon], { icon }).addTo(map).bindPopup(m.type || 'Mission');
+      missionMarkers.set(m.id, marker);
+    }
+  });
+}
+
 function showMissionOnMap(mission) {
   if (!map) return;
-  if (mapMarker) {
-    map.removeLayer(mapMarker);
-  }
+  selectedMissionId = mission.id;
   if (Number.isFinite(mission.lat) && Number.isFinite(mission.lon)) {
     map.setView([mission.lat, mission.lon], 13);
-    mapMarker = L.marker([mission.lat, mission.lon]).addTo(map);
+    const marker = missionMarkers.get(mission.id);
+    if (marker) marker.openPopup();
   }
 }
 
@@ -163,6 +215,9 @@ async function loadMissions() {
   });
 
   existing.forEach(el => el.remove());
+
+  updateMissionMarkers(missions);
+  if (!selectedMissionId) fitMapToMarkers();
 
   container.scrollTop = scrollPos;
   missions.forEach((m, idx) => {
@@ -240,6 +295,8 @@ async function loadStations() {
   pane.querySelectorAll('.cad-station').forEach(li=>{
     li.addEventListener('click', ()=>showStation(li.dataset.id));
   });
+  updateStationMarkers(cachedStations);
+  if (!selectedMissionId) fitMapToMarkers();
 }
 
 async function showStation(id) {
@@ -556,6 +613,8 @@ async function openMission(id) {
   document.getElementById('closeDetail').onclick = ()=>{
     pane.classList.add('hidden');
     document.getElementById('cadUnits').classList.add('hidden');
+    selectedMissionId = null;
+    fitMapToMarkers();
   };
   document.getElementById('manualDispatch').onclick = ()=>openManualDispatch(mission);
   document.getElementById('autoDispatch').onclick = ()=>autoDispatch(mission);
