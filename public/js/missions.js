@@ -29,7 +29,8 @@ export function renderMissionRow(mission) {
     const sec = Math.max(0, (mission.resolve_at - Date.now())/1000);
     time = ` - ${formatTime(sec)}`;
   }
-  return `<div class="cad-mission" data-id="${mission.id}"><img src="${icon}" class="cad-icon"/> ${mission.type || 'Mission'}${time}<div class="cad-address">${mission.address || ''}</div></div>`;
+  const cls = `cad-mission warning${lvl}`;
+  return `<div class="${cls}" data-id="${mission.id}"><img src="${icon}" class="cad-icon"/> ${mission.type || 'Mission'}${time}<div class="cad-address">${mission.address || ''}</div></div>`;
 }
 
 // Expose globally
