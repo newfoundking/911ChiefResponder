@@ -20,44 +20,7 @@ db.serialize(() => {
   db.run("UPDATE missions SET status='on_scene' WHERE status='onscene'");
 });
 
-// Safely parse JSON fields that should be arrays. Some legacy rows may have
-// stored objects instead of arrays. This helper normalizes the output so the
-// rest of the code can rely on getting an array every time.
-function parseArrayField(str) {
-  try {
-    const val = JSON.parse(str || '[]');
-    if (Array.isArray(val)) return val;
-    if (val && typeof val === 'object') return [val];
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-async function reverseGeocode(lat, lon) {
-  try {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`;
-    const res = await axios.get(url, { headers: { 'User-Agent': '911ChiefResponder' } });
-    return res.data?.display_name || null;
-  } catch (e) {
-    console.error('Reverse geocode failed:', e.message);
-    return null;
-  }
-}
-
-// Simple point in polygon check for [lat, lon] coordinate arrays
-function pointInPolygon(lat, lon, poly) {
-  const pts = Array.isArray(poly?.coordinates) ? poly.coordinates : [];
-  let inside = false;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    const xi = pts[i][1], yi = pts[i][0];
-    const xj = pts[j][1], yj = pts[j][0];
-    const intersect = ((yi > lat) !== (yj > lat)) &&
-      (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
+const { parseArrayField, reverseGeocode, pointInPolygon } = require('./utils');
 
 const TRAVEL_SPEED = { fire: 63, police: 94, ambulance: 75 }; // km/h (25% faster)
 function haversine(aLat, aLon, bLat, bLon) {
@@ -79,6 +42,15 @@ app.get('/config/unitTypes.js', (req,res)=>res.sendFile(path.join(__dirname,'uni
 app.get('/config/trainings.js', (req,res)=>res.sendFile(path.join(__dirname,'trainings.js')));
 app.get('/config/equipment.js', (req,res)=>res.sendFile(path.join(__dirname,'equipment.js')));
 app.get('/config/osmPoiTypes.js', (req,res)=>res.sendFile(path.join(__dirname,'osmPoiTypes.js')));
+
+// Modular routes
+const missionsRoutes = require('./routes/missions');
+const stationsRoutes = require('./routes/stations');
+const unitsRoutes = require('./routes/units');
+
+app.use('/api/missions', missionsRoutes);
+app.use('/api/stations', stationsRoutes);
+app.use('/api/units', unitsRoutes);
 
 db.serialize(() => {
   // Stations
@@ -468,47 +440,8 @@ function resolveMissionById(missionId, cb) {
   });
 }
 
-const missionClocks = new Map(); // mission_id -> { endAt, startedAt, baseDuration }
-
-function beginMissionClock(missionId, cb) {
-  db.get('SELECT timing, resolve_at FROM missions WHERE id=?', [missionId], (e, row) => {
-    if (e || !row) return cb && cb(null);
-
-    const baseDuration = Math.max(0, Number(row.timing || 0)) * 60 * 1000;
-    const existingDb = row.resolve_at != null ? Number(row.resolve_at) : null;
-    const now = Date.now();
-    if (existingDb && existingDb > now) {
-      const startedAt = existingDb - baseDuration;
-      missionClocks.set(missionId, { endAt: existingDb, startedAt, baseDuration });
-      return cb && cb(existingDb);
-    }
-
-    const endAt = now + baseDuration;
-    const startedAt = now;
-    db.run('UPDATE missions SET resolve_at=? WHERE id=?', [endAt, missionId], err => {
-      if (!err) missionClocks.set(missionId, { endAt, startedAt, baseDuration });
-      cb && cb(err ? null : endAt);
-    });
-  });
-}
-
-function clearMissionClock(missionId) {
-  missionClocks.delete(missionId);
-  db.run('UPDATE missions SET resolve_at=NULL WHERE id=?', [missionId], ()=>{});
-}
-
-// Rehydrate mission clocks from DB on startup
-db.all('SELECT id, resolve_at, timing FROM missions WHERE resolve_at IS NOT NULL', (err, rows) => {
-  if (err) return;
-  const now = Date.now();
-  rows.forEach(r => {
-    const end = Number(r.resolve_at);
-    const baseDuration = Math.max(0, Number(r.timing || 0)) * 60 * 1000;
-    const startedAt = end - baseDuration;
-    if (end > now) missionClocks.set(r.id, { endAt: end, startedAt, baseDuration });
-    else resolveMissionById(r.id, () => {});
-  });
-});
+const { missionClocks, beginMissionClock, clearMissionClock, rehydrateMissionClocks } = require('./services/missionTimers');
+rehydrateMissionClocks();
 
 function missionRequirementsMet(mission, assigned) {
   const unitOnScene = new Map();
@@ -754,6 +687,7 @@ app.patch('/api/stations/:id/holding-cells', (req, res) => {
 /* =========================
    Missions
    ========================= */
+/*
 app.get('/api/missions', (req, res) => {
   const sql = `
     SELECT m.*, 
@@ -1031,17 +965,13 @@ app.patch('/api/missions/:id/timer', (req, res) => {
   });
 });
 
-app.delete('/api/missions/:id/timer', (req, res) => {
-  const missionId = parseInt(req.params.id, 10);
-  if (!missionId) return res.status(400).json({ error: 'invalid id' });
-  clearMissionClock(missionId);
-  res.json({ ok: true });
-});
-
+*/
+/* Missions routes moved to routes/missions.js */
 
 /* =========================
    Stations
    ========================= */
+/*
 app.get('/api/stations', async (req, res) => {
   try {
     const rows = await new Promise((resolve, reject) => {
@@ -1235,10 +1165,12 @@ app.delete('/api/stations', (req, res) => {
     res.send('All stations deleted.');
   });
 });
+*/
 
 /* =========================
    Units
    ========================= */
+/*
 app.get('/api/units', (req, res) => {
   const { station_id, status } = req.query;
   const params = [];
@@ -1518,6 +1450,7 @@ app.post('/api/units/:id/cancel', (req, res) => {
     });
   });
 });
+*/
 
 /* =========================
    Personnel
