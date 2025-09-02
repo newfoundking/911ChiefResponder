@@ -73,11 +73,33 @@ async function fetchRouteOSRM(from, to) {
 
 let cachedMissions = [];
 let cachedStations = [];
+let map;
+let mapMarker;
+
+function initMap() {
+  map = L.map('cadMap').setView([37.8, -96], 4);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
+}
+
+function showMissionOnMap(mission) {
+  if (!map) return;
+  if (mapMarker) {
+    map.removeLayer(mapMarker);
+  }
+  if (Number.isFinite(mission.lat) && Number.isFinite(mission.lon)) {
+    map.setView([mission.lat, mission.lon], 13);
+    mapMarker = L.marker([mission.lat, mission.lon]).addTo(map);
+  }
+}
 
 async function init() {
   document.getElementById('returnMain').addEventListener('click', ()=>location.href='index.html');
   document.getElementById('generateMission')
           .addEventListener('click', () => generateMission());
+  initMap();
   await updateWallet();
   await loadStations();
   await loadMissions();
@@ -454,6 +476,8 @@ async function showUnitDetail(unitId) {
 
 async function openMission(id) {
   const mission = cachedMissions.find(m=>String(m.id)===String(id));
+  if (!mission) return;
+  showMissionOnMap(mission);
   const pane = document.getElementById('cadDetail');
   const assigned = await fetchNoCache(`/api/missions/${id}/units`).then(r=>r.json()).catch(()=>[]);
   let time = '';
