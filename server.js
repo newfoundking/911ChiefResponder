@@ -278,9 +278,6 @@ db.run(`
   ALTER TABLE stations ADD COLUMN bed_capacity INTEGER DEFAULT 0
 `, () => { /* ignore if exists */ });
 db.run(`
-  ALTER TABLE stations ADD COLUMN department TEXT
-`, () => { /* ignore if exists */ });
-db.run(`
   ALTER TABLE stations ADD COLUMN icon TEXT
 `, () => { /* ignore if exists */ });
 db.run(`
