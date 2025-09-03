@@ -11,6 +11,7 @@
         <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
         <script src="js/notifications.js"></script>
         <script type="module" src="js/common.js"></script>
+        <script type="module" src="js/forms.js"></script>
         <script type="module" src="js/edit-dialogs.js"></script>
         <style>
                 html, body { height: 100%; margin: 0; overflow: hidden; }
@@ -1005,9 +1006,16 @@ document.getElementById('saveZoneEditBtn').addEventListener('click', async () =>
   layer.editing.disable();
   const latlngs = layer.getLatLngs()[0].map(p => [p.lat, p.lng]);
   const z = responseZones.find(r => r.id == id);
-  const name = prompt('Zone name:', z?.name || '') || (z?.name || '');
-  const deptInput = prompt('Departments (comma-separated):', (z?.departments||[]).join(', ')) || '';
-  const departments = deptInput.split(',').map(s=>s.trim()).filter(Boolean);
+  const result = await openFormModal({
+    title: 'Edit Zone',
+    fields: [
+      { name: 'name', label: 'Zone name', type: 'text', value: z?.name || '', required: true },
+      { name: 'departments', label: 'Departments (comma-separated)', type: 'text', value: (z?.departments||[]).join(', ') }
+    ]
+  });
+  if (!result) { editingZoneId = null; document.getElementById('saveZoneEditBtn').style.display = 'none'; fetchZones(); return; }
+  const name = result.name.trim() || (z?.name || '');
+  const departments = (result.departments || '').split(',').map(s=>s.trim()).filter(Boolean);
   await fetch(`/api/response-zones/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -1031,9 +1039,16 @@ map.on('draw:created', async e => {
   }
   const stations = await fetch('/api/stations').then(r => r.json());
   const depts = [...new Set(stations.map(s => s.department).filter(Boolean))];
-  const name = prompt('Zone name?') || 'Zone';
-  const deptInput = prompt(`Departments (comma-separated) (${depts.join(', ')})?`) || '';
-  const departments = deptInput.split(',').map(s=>s.trim()).filter(Boolean);
+  const result = await openFormModal({
+    title: 'Create Zone',
+    fields: [
+      { name: 'name', label: 'Zone name', type: 'text', value: 'Zone', required: true },
+      { name: 'departments', label: `Departments (comma-separated) (${depts.join(', ')})`, type: 'text' }
+    ]
+  });
+  if (!result) { map.removeLayer(e.layer); return; }
+  const name = result.name.trim() || 'Zone';
+  const departments = (result.departments || '').split(',').map(s=>s.trim()).filter(Boolean);
   const newPoly = turf.polygon([ring.map(([lat, lng]) => [lng, lat])]);
   for (const z of [...responseZones]) {
     const existingRing = z.polygon.coordinates.slice();
@@ -1584,20 +1599,28 @@ async function showStationDetails(station) {
 }
 
 // Build station
-document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; notifySuccess("Click the map to place your new station"); });
+document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; alert("Click the map to place your new station"); });
 map.on("click", async (e) => {
   if (!buildStationMode) return;
-  const name = prompt("Station Name?");
-  const type = prompt("Type (fire, police, ambulance, hospital, jail)?", "fire")?.toLowerCase();
-  const department = prompt("Department?") || null;
-  if (!name || !["fire","police","ambulance","hospital","jail"].includes(type)) { notifyError("Cancelled or invalid type."); buildStationMode=false; return; }
-  let holding_cells = 0, beds = 0;
-  if (type === "police" || type === "jail") {
-    holding_cells = Number(prompt("Holding cells?", "0")) || 0;
-  }
-  if (type === "hospital") {
-    beds = Number(prompt("Beds?", "0")) || 0;
-  }
+  const result = await openFormModal({
+    title: 'Create Station',
+    fields: [
+      { name: 'name', label: 'Station Name', type: 'text', required: true },
+      { name: 'type', label: 'Type', type: 'select', value: 'fire', options: ['fire','police','ambulance','hospital','jail'], required: true },
+      { name: 'department', label: 'Department', type: 'text' },
+      { name: 'holding_cells', label: 'Holding cells', type: 'number', value: 0, min: 0, showIf: v => ['police','jail'].includes((v.type||'').toLowerCase()) },
+      { name: 'beds', label: 'Beds', type: 'number', value: 0, min: 0, showIf: v => (v.type||'').toLowerCase() === 'hospital' }
+    ]
+  });
+  if (!result) { buildStationMode = false; pendingStationCoords = null; return; }
+  const name = result.name.trim();
+  const type = (result.type || '').toLowerCase();
+  const department = result.department ? result.department.trim() : null;
+  if (!name || !["fire","police","ambulance","hospital","jail"].includes(type)) { alert("Cancelled or invalid type."); buildStationMode=false; return; }
+  let holding_cells = Number(result.holding_cells) || 0;
+  let beds = Number(result.beds) || 0;
+  if (!['police','jail'].includes(type)) holding_cells = 0;
+  if (type !== 'hospital') beds = 0;
   await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, department, lat:e.latlng.lat, lon:e.latlng.lng, holding_cells, beds }) });
   buildStationMode = false;
   pendingStationCoords = null;
