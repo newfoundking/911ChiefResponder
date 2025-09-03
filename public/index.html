@@ -1690,7 +1690,11 @@ async function generateMission(retry = false, excludeIndex = null) {
       });
       if (matches.length) {
         const poi = matches[Math.floor(Math.random() * matches.length)];
-        lat = poi.lat; lon = poi.lon;
+        // `poi` may be an area (way/relation) from Overpass which stores its
+        // coordinates under `center`.  Use those center coordinates if direct
+        // lat/lon are not provided so the mission spawns at the POI itself.
+        lat = poi.lat ?? poi.center?.lat;
+        lon = poi.lon ?? poi.center?.lon;
       } else {
         console.warn(`No matching POI found for mission template "${template?.name || template?.id}" (ID: ${template?.id})`, template);
         if (!retry) return generateMission(true, templateIndex);

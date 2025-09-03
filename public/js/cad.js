@@ -971,7 +971,11 @@ export async function generateMission(retry = false, excludeIndex = null) {
       });
       if (matches.length) {
         const poi = matches[Math.floor(Math.random() * matches.length)];
-        lat = poi.lat; lon = poi.lon;
+        // Overpass area POIs provide coordinates in a `center` object.
+        // Use those when direct lat/lon are missing so missions spawn
+        // at the correct POI location.
+        lat = poi.lat ?? poi.center?.lat;
+        lon = poi.lon ?? poi.center?.lon;
       } else {
         console.warn(`No matching POI found for mission template "${template?.name || template?.id}" (ID: ${template?.id})`, template);
         if (!retry) return generateMission(true, templateIndex);

@@ -561,7 +561,21 @@ app.get('/api/pois', async (req, res) => {
         );out center;`
       }
     });
-    res.json(response.data.elements);
+    // Overpass returns lat/lon for nodes but uses a `center` object for
+    // ways/relations.  Normalize the response so each element has `lat` and
+    // `lon` coordinates, falling back to `center` when necessary.  This
+    // allows mission generation to place POI-triggered calls at the actual
+    // POI rather than defaulting to random nearby road points.
+    const elements = Array.isArray(response.data?.elements)
+      ? response.data.elements.map(el => {
+          if ((el.lat === undefined || el.lon === undefined) && el.center) {
+            el.lat = el.center.lat;
+            el.lon = el.center.lon;
+          }
+          return el;
+        })
+      : [];
+    res.json(elements);
   } catch (error) {
     console.error('Error fetching POIs:', error);
     res.status(500).send('Error fetching POIs');
