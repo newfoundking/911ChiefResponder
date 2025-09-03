@@ -1,5 +1,5 @@
 const OSM_POI_TYPES = [
-  "airport",
+  "aeroway=aerodrome",
   "large_airport",
   "atm",
   "bank",
