@@ -1668,7 +1668,7 @@ async function generateMission(retry = false, excludeIndex = null) {
         const poi = matches[Math.floor(Math.random() * matches.length)];
         lat = poi.lat; lon = poi.lon;
       } else {
-        console.warn('No matching POI found.');
+        console.warn(`No matching POI found for mission template "${template?.name || template?.id}" (ID: ${template?.id})`, template);
         if (!retry) return generateMission(true, templateIndex);
         return;
       }
