@@ -63,6 +63,8 @@ function appendMissionRow(mission) {
 async function openMissionForm(existing = null) {
   const c = document.getElementById("mission-form-container");
   c.style.display = "block";
+  c.scrollTop = 0;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 
   // ensure standalone run card editor is hidden when opening mission form
   const rcForm = document.getElementById('runcard-form-container');
@@ -72,6 +74,9 @@ async function openMissionForm(existing = null) {
   }
 
   c.innerHTML = `
+    <div class="sticky-save">
+      <button onclick="submitMission()">Save</button>
+    </div>
     <h3>${existing ? "Edit" : "New"} Mission</h3>
     <input type="hidden" id="mission-id" value="${existing?.id || ""}">
     <label>Name: <input id="mission-name" value="${existing?.name || ""}"></label><br>
@@ -133,8 +138,6 @@ async function openMissionForm(existing = null) {
     <div><strong>Equipment</strong></div>
     <div id="rc-equipment-container"></div>
     <button type="button" onclick="addRCEquipmentRow()">Add Equipment</button><br>
-
-    <button onclick="submitMission()">Save</button>
   `;
 
   buildTriggerFilterUI(existing?.trigger_type || '', existing?.trigger_filter || '');
