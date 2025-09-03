@@ -968,6 +968,104 @@ app.patch('/api/missions/:id/timer', (req, res) => {
 */
 /* Missions routes moved to routes/missions.js */
 
+// Additional mission endpoints not yet migrated to modular routes
+app.get('/api/missions/:id/units', (req, res) => {
+  db.all(
+    `SELECT
+       u.id, u.station_id, u.class, u.type, u.name, u.status, u.responding, u.icon, u.responding_icon, u.equipment,
+       MIN(ut.started_at) AS travel_started_at,
+       MIN(ut.total_duration) AS travel_total_duration,
+       COALESCE(json_group_array(
+         json_object('id', p.id, 'name', p.name, 'training', p.training)
+       ), '[]') AS personnel
+     FROM mission_units mu
+     JOIN units u ON u.id = mu.unit_id
+     LEFT JOIN unit_travel ut ON ut.unit_id = mu.unit_id
+       AND ut.phase = 'to_scene'
+       AND ut.mission_id = mu.mission_id
+       AND (strftime('%s','now') - strftime('%s', ut.started_at)) < ut.total_duration
+     LEFT JOIN personnel p ON p.unit_id = u.id
+     WHERE mu.mission_id = ?
+     GROUP BY u.id`,
+    [req.params.id],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      const parsed = rows.map(r => {
+        const { travel_started_at, travel_total_duration, ...rest } = r;
+        const base = {
+          ...rest,
+          responding: r.responding === 1 || r.responding === true,
+          equipment: (()=>{ try { return JSON.parse(r.equipment||'[]'); } catch { return []; } })(),
+          personnel: (()=>{
+            try {
+              return JSON.parse(r.personnel||'[]').map(p => ({
+                ...p,
+                training: (()=>{ try { return JSON.parse(p.training||'[]'); } catch { return []; } })()
+              }));
+            } catch {
+              return [];
+            }
+          })()
+        };
+        if (travel_started_at && travel_total_duration) {
+          const eta = new Date(travel_started_at).getTime() + Number(travel_total_duration) * 1000;
+          if (eta > Date.now()) base.eta = eta;
+        }
+        return base;
+      });
+      res.json(parsed);
+    }
+  );
+});
+
+// Fetch a single mission by id
+app.get('/api/missions/:id', (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid mission id' });
+  db.get('SELECT * FROM missions WHERE id=?', [id], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    const mission = {
+      ...row,
+      departments: parseArrayField(row.departments),
+      required_units: parseArrayField(row.required_units),
+      required_training: parseArrayField(row.required_training),
+      equipment_required: parseArrayField(row.equipment_required),
+      patients: parseArrayField(row.patients),
+      prisoners: parseArrayField(row.prisoners),
+      modifiers: parseArrayField(row.modifiers),
+      penalty_options: parseArrayField(row.penalty_options),
+      penalties: parseArrayField(row.penalties),
+      timing: typeof row.timing === 'number' ? row.timing : 10,
+      resolve_at: row.resolve_at != null ? Number(row.resolve_at) : null,
+      non_emergency: row.non_emergency === 1 || row.non_emergency === true,
+    };
+    res.json(mission);
+  });
+});
+
+// Update penalties for a mission
+app.patch('/api/missions/:id/penalties', express.json(), (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid mission id' });
+  const penalties = JSON.stringify(req.body?.penalties || []);
+  db.run('UPDATE missions SET penalties=? WHERE id=?', [penalties, id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ id, penalties: JSON.parse(penalties) });
+  });
+});
+
+// Resolve mission & free units + credit rewards from template(name==type)
+app.post('/api/missions/:id/resolve', (req, res) => {
+  const missionId = parseInt(req.params.id, 10);
+  if (!missionId) return res.status(400).json({ error: 'invalid id' });
+
+  resolveMissionById(missionId, (err, result) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ ok: true, ...(result || {}) });
+  });
+});
+
 /* =========================
    Stations
    ========================= */
