@@ -1760,7 +1760,7 @@ async function cancelUnit(unitId, stationId) {
 
   let mission = null;
   try {
-    mission = await fetch(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
+    mission = await fetchNoCache(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
   } catch {}
 
   if (mission && mission.id) {
@@ -1806,7 +1806,7 @@ async function showUnitDetails(unitId) {
   const station = unit ? _stationById.get(unit.station_id) : null;
   let mission = null;
   try {
-    mission = await fetch(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
+    mission = await fetchNoCache(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
   } catch {}
 
   const res = await fetch(`/api/personnel?station_id=${unit?.station_id ?? ''}`);
@@ -2460,7 +2460,10 @@ async function clearAssignedUnit(missionId, unitId) {
   const res = await fetch('/api/mission-units',{ method:'DELETE', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mission_id: missionId, unit_id: unitId }) });
   if (!res.ok) { const t = await res.text().catch(()=> ''); console.error('Unassign failed:', res.status, t); alert('Failed to clear unit from mission.'); return; }
 
-  const [units, missions] = await Promise.all([ fetch('/api/units').then(r=>r.json()), fetch('/api/missions').then(r=>r.json()) ]);
+  const [units, missions] = await Promise.all([
+    fetchNoCache('/api/units').then(r=>r.json()),
+    fetchNoCache('/api/missions').then(r=>r.json())
+  ]);
   cacheUnits(units);
   const u = _unitById.get(unitId);
   const mission = missions.find(m=>m.id===missionId);
