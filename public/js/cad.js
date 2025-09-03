@@ -250,14 +250,35 @@ async function checkMissionCompletion(mission) {
     const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
     const reqEquip = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
     const reqTrain = Array.isArray(mission.required_training) ? mission.required_training : [];
+    const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
     const unitsMet = reqUnits.every(r => {
       const types = Array.isArray(r.types) ? r.types : [r.type];
-      const qty = r.quantity ?? r.count ?? r.qty ?? 1;
+      const baseNeed = r.quantity ?? r.count ?? r.qty ?? 1;
+      const ignored = penalties
+        .filter(p => (!p.category || p.category === 'unit') && types.includes(p.type))
+        .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+      const need = Math.max(0, baseNeed - ignored);
       const count = types.reduce((s, t) => s + (unitOnScene.get(t) || 0), 0);
-      return count >= qty;
+      return count >= need;
     });
-    const equipMet = reqEquip.every(r => (equipOnScene.get(r.name || r.type || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
-    const trainMet = reqTrain.every(r => (trainOnScene.get(r.training || r.name || r) || 0) >= (r.qty ?? r.quantity ?? r.count ?? 1));
+    const equipMet = reqEquip.every(r => {
+      const name = r.name || r.type || r;
+      const baseNeed = r.qty ?? r.quantity ?? r.count ?? 1;
+      const ignored = penalties
+        .filter(p => p.category === 'equipment' && (p.type === name || p.name === name))
+        .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+      const need = Math.max(0, baseNeed - ignored);
+      return (equipOnScene.get(name) || 0) >= need;
+    });
+    const trainMet = reqTrain.every(r => {
+      const name = r.training || r.name || r;
+      const baseNeed = r.qty ?? r.quantity ?? r.count ?? 1;
+      const ignored = penalties
+        .filter(p => p.category === 'training' && (p.type === name || p.name === name))
+        .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+      const need = Math.max(0, baseNeed - ignored);
+      return (trainOnScene.get(name) || 0) >= need;
+    });
     if (!unitsMet || !equipMet || !trainMet) return;
 
     let reduction = 0;
@@ -265,12 +286,21 @@ async function checkMissionCompletion(mission) {
       if (!mod || typeof mod !== 'object') continue;
       const per = Number(mod.timeReduction) || 0;
       if (!per) continue;
-      const have = unitOnScene.get(mod.type) || 0;
+      let have = 0;
+      switch (mod.category) {
+        case 'equipment':
+          have = equipOnScene.get(mod.type) || 0;
+          break;
+        case 'training':
+          have = trainOnScene.get(mod.type) || 0;
+          break;
+        default:
+          have = unitOnScene.get(mod.type) || 0;
+      }
       const maxCount = Number(mod.maxCount) || 1;
       reduction += Math.min(have, maxCount) * per;
     }
-    const penaltyTime = (Array.isArray(mission.penalties) ? mission.penalties : [])
-      .reduce((s, p) => s + (Number(p.timePenalty) || 0), 0);
+    const penaltyTime = penalties.reduce((s, p) => s + (Number(p.timePenalty) || 0), 0);
     reduction = Math.max(-100, Math.min(100, reduction - penaltyTime));
 
     if (!mission.resolve_at) {
