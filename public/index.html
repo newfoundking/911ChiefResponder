@@ -26,10 +26,12 @@
                 .tab-content { display: none; }
                 .tab-content.active { display: block; }
                 #stationDetails { max-width: 30%; overflow-y: auto; }
-		.popup { position: fixed; top: 10%; left: 30%; width: 40%; background: white; border: 2px solid black; padding: 20px; z-index: 9999; max-height: 80%; overflow-y: auto; }
-		.hidden { display: none; }
-		.modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; overflow: auto; }
-		.modal-content { background: white; padding: 2rem; max-width: 90%; max-height: 90%; overflow-y: auto; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.3); }
+                .popup { position: fixed; top: 10%; left: 30%; width: 40%; background: white; border: 2px solid black; padding: 20px; z-index: 9999; max-height: 80%; overflow-y: auto; }
+                .hidden { display: none; }
+                .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 20000; overflow: auto; }
+                .modal-content { background: white; padding: 2rem; max-width: 90%; max-height: 90%; overflow-y: auto; border-radius: 8px; box-shadow: 0 0 15px rgba(0,0,0,0.3); }
+                .close-btn { position: absolute; top: 8px; right: 8px; }
+                .next-btn { position: absolute; top: 8px; right: 60px; }
                 .mission-icon { width: 30px; height: 30px; object-fit: contain; vertical-align: middle; }
                 .unit-tag-icon {
                         width: var(--tag-width, 36px);
@@ -148,9 +150,8 @@
   box-shadow: 0 0 10px rgba(0,0,0,0.3); z-index: 9999;
   width: 420px; max-height: 80vh; overflow-y: auto; border-radius: 8px;
   display: none;">
-        <div style="text-align:right;">
-                <button onclick="closeMissionDetails()">Close</button>
-        </div>
+        <button id="nextMissionBtn" class="next-btn">Next</button>
+        <button id="closeMissionBtn" class="close-btn" onclick="closeMissionDetails()">Close</button>
         <h3>Details</h3>
         <div id="missionDetailsContent">Loading...</div>
 </div>
@@ -188,7 +189,7 @@
 	display: none; z-index: 10001;">
 	<h3>Assign Personnel to Unit</h3>
 	<div id="assignModalContent">Loading...</div>
-	<button onclick="document.getElementById('assignPersonnelModal').style.display = 'none';">Close</button>
+        <button class="close-btn" onclick="document.getElementById('assignPersonnelModal').style.display = 'none';">Close</button>
 </div>
 
 <!-- Edit Personnel Modal -->
@@ -199,7 +200,7 @@
         display: none; z-index: 10001;">
         <h3>Edit Personnel</h3>
         <div id="editPersonnelContent">Loading...</div>
-        <button onclick="document.getElementById('editPersonnelModal').style.display = 'none';">Close</button>
+        <button class="close-btn" onclick="document.getElementById('editPersonnelModal').style.display = 'none';">Close</button>
 </div>
 
 <!-- Edit Unit Modal -->
@@ -210,7 +211,7 @@
         display: none; z-index: 10001;">
         <h3>Edit Unit</h3>
         <div id="editUnitContent">Loading...</div>
-        <button onclick="document.getElementById('editUnitModal').style.display = 'none';">Close</button>
+        <button class="close-btn" onclick="document.getElementById('editUnitModal').style.display = 'none';">Close</button>
 </div>
 
 <!-- Unit Detail Modal -->
@@ -221,7 +222,7 @@
         display: none; z-index: 10001; max-height: 80vh; overflow-y: auto;">
         <h3>Unit Details</h3>
         <div id="unitDetailContent">Loading...</div>
-        <button onclick="document.getElementById('unitDetailModal').style.display = 'none';">Close</button>
+        <button class="close-btn" onclick="document.getElementById('unitDetailModal').style.display = 'none';">Close</button>
 </div>
 
 <div id="cadPopup" class="popup hidden">
@@ -230,10 +231,10 @@
   <p id="cadRequired"></p>
   <button onclick="dispatchAuto()">Dispatch (Auto)</button>
   <button onclick="dispatchRecommended()">Dispatch (Recommended)</button>
-  <button onclick="dispatchRunCard()">Dispatch (Run Card)</button>
-  <button onclick="manualDispatch()">Manual Dispatch</button>
-  <button onclick="closeCad()">Close</button>
-</div>
+    <button onclick="dispatchRunCard()">Dispatch (Run Card)</button>
+    <button onclick="manualDispatch()">Manual Dispatch</button>
+    <button class="close-btn" onclick="closeCad()">Close</button>
+  </div>
 
 <div id="stationDetails"></div>
 <script src="/config/unitTypes.js"></script>
@@ -293,8 +294,23 @@ const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/st
 let missionMarkers = [];
 let stationMarkers = [];
 let buildStationMode = false;
-let pendingStationCoords = null;
-let openMissionId = null;
+  let pendingStationCoords = null;
+  let openMissionId = null;
+  let missionsCache = [];
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      if (document.querySelector('.modal-overlay')) return;
+      const open = Array.from(document.querySelectorAll('.popup:not(.hidden), [id$="Modal"], #missionDetails, #stationForm'))
+        .filter(el => el.style.display !== 'none');
+      const el = open.pop();
+      if (el) {
+        if (el.id === 'missionDetails') closeMissionDetails();
+        else if (el.classList.contains('popup')) el.classList.add('hidden');
+        else el.style.display = 'none';
+      }
+    }
+  });
 
 const map = L.map("map").setView([47.5646, -52.7002], 13);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
@@ -721,10 +737,11 @@ function sortMissions(missions) {
 async function fetchMissions() {
   try {
     const res = await fetch("/api/missions");
-    let missions = await res.json();
-    missions = sortMissions(missions);
+      let missions = await res.json();
+      missions = sortMissions(missions);
+      missionsCache = missions;
 
-    const missionById = new Map(missions.map(m => [m.id, m]));
+      const missionById = new Map(missions.map(m => [m.id, m]));
     const missionIds = new Set(missionById.keys());
     for (const [id, iid] of Array.from(missionListTimers.entries())) {
       const m = missionById.get(id);
@@ -905,6 +922,10 @@ async function generateMissionAtPOI(poi) {
   document.getElementById("cadRequired").textContent = required_units.map(formatReq).join(', ');
   document.getElementById("cadPopup").classList.remove('hidden');
   window.currentMission = mission;
+}
+
+function closeCad() {
+  document.getElementById('cadPopup').classList.add('hidden');
 }
 
 // ===== Station list / details =====
@@ -1269,6 +1290,13 @@ function renderPrisonerInfo(mission) {
   return `<ul>${items.join('')}</ul>`;
 }
 
+function showNextMission() {
+  if (!missionsCache.length || openMissionId === null) return;
+  const idx = missionsCache.findIndex(m => m.id === openMissionId);
+  const next = missionsCache[(idx + 1) % missionsCache.length];
+  if (next) showMissionDetails(next);
+}
+
 // ===== Mission details =====
 function showMissionDetails(mission) {
   openMissionId = mission.id;
@@ -1295,6 +1323,7 @@ function showMissionDetails(mission) {
     <div id="unitTypeDispatchArea" style="margin-top:8px;"></div>
     <div id="missionTimerArea" style="margin-top:8px;"></div>
   `;
+  document.getElementById('nextMissionBtn').onclick = showNextMission;
   document.getElementById('manualDispatchBtn').onclick = () => openManualDispatch(mission);
   document.getElementById('autoDispatchBtn').onclick = () => autoDispatch(mission);
   document.getElementById('runCardDispatchBtn').onclick = () => runCardDispatch(mission);
