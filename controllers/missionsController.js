@@ -5,7 +5,7 @@ const { beginMissionClock, clearMissionClock, missionClocks } = require('../serv
 // GET /api/missions
 async function getMissions(req, res) {
   const sql = `
-    SELECT m.,
+    SELECT m.*, 
            SUM(CASE WHEN u.status = 'enroute' THEN 1 ELSE 0 END) AS responding_count,
            SUM(CASE WHEN u.status IN ('enroute','on_scene') THEN 1 ELSE 0 END) AS assigned_count
     FROM missions m
