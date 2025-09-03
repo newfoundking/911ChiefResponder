@@ -5,11 +5,15 @@ const { parseArrayField } = require('../utils');
 function getUnits(req, res) {
   const { station_id, status } = req.query;
   const params = [];
-  let sql = 'SELECT * FROM units';
+  let sql =
+    `SELECT u.*, COALESCE(json_group_array(json_object('id', p.id, 'name', p.name, 'training', p.training)), '[]') AS personnel
+     FROM units u
+     LEFT JOIN personnel p ON p.unit_id = u.id`;
   const where = [];
-  if (station_id) { where.push('station_id = ?'); params.push(station_id); }
-  if (status) { where.push('status = ?'); params.push(status); }
+  if (station_id) { where.push('u.station_id = ?'); params.push(station_id); }
+  if (status) { where.push('u.status = ?'); params.push(status); }
   if (where.length) sql += ' WHERE ' + where.join(' AND ');
+  sql += ' GROUP BY u.id';
 
   db.all(sql, params, (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
@@ -19,6 +23,16 @@ function getUnits(req, res) {
       patrol: u.patrol === 1 || u.patrol === true,
       responding: u.responding === 1 || u.responding === true,
       equipment: parseArrayField(u.equipment),
+      personnel: (() => {
+        try {
+          return JSON.parse(u.personnel || '[]').map(p => ({
+            ...p,
+            training: parseArrayField(p.training)
+          }));
+        } catch {
+          return [];
+        }
+      })()
     }));
     res.json(parsed);
   });
