@@ -9,6 +9,7 @@
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
         <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+        <script src="js/notifications.js"></script>
         <script type="module" src="js/common.js"></script>
         <script type="module" src="js/edit-dialogs.js"></script>
         <style>
@@ -311,7 +312,7 @@ document.getElementById("deleteAllStations").addEventListener("click", async () 
   if (!await showConfirmModal("Are you sure you want to delete ALL stations? This will also orphan units!")) return;
   await fetch("/api/stations", { method: "DELETE" });
   fetchStations();
-  alert("All stations deleted.");
+  notifySuccess("All stations deleted.");
 });
 
 function getTrainingsForClass(cls) {
@@ -1332,7 +1333,7 @@ async function showStationDetails(station) {
       if (!url) return;
       const res = await fetch(`/api/stations/${station.id}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ icon: url }) });
       const data = await res.json();
-      if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+      if (!res.ok || !data.success) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
       station.icon = url;
       _stationById.set(station.id, station);
       fetchStations();
@@ -1344,7 +1345,7 @@ async function showStationDetails(station) {
       if (dept === null) return;
       const res = await fetch(`/api/stations/${station.id}/department`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ department: dept }) });
       const data = await res.json();
-      if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+      if (!res.ok || !data.success) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
       station.department = dept;
       _stationById.set(station.id, station);
       fetchStations();
@@ -1439,7 +1440,7 @@ async function showStationDetails(station) {
                 if (!url) return;
                 const res = await fetch(`/api/stations/${station.id}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ icon: url }) });
                 const data = await res.json();
-                if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+                if (!res.ok || !data.success) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
                 station.icon = url;
                 _stationById.set(station.id, station);
                 fetchStations();
@@ -1451,7 +1452,7 @@ async function showStationDetails(station) {
                 if (dept === null) return;
                 const res = await fetch(`/api/stations/${station.id}/department`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ department: dept }) });
                 const data = await res.json();
-                if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+                if (!res.ok || !data.success) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
                 station.department = dept;
                 _stationById.set(station.id, station);
                 fetchStations();
@@ -1492,10 +1493,10 @@ async function showStationDetails(station) {
           });
           const data = await res.json();
           if (!res.ok || !data.success) {
-                alert(`Failed: ${data.error || res.statusText}`);
+                notifyError(`Failed: ${data.error || res.statusText}`);
                 return;
           }
-          alert(`Added ${data.added} bay(s). Cost: $${data.cost}`);
+          notifySuccess(`Added ${data.added} bay(s). Cost: ${data.cost}`);
           refreshBayInfo(stationId);
           refreshWallet();
         });
@@ -1509,10 +1510,10 @@ async function showStationDetails(station) {
           });
           const data = await res.json();
           if (!res.ok || !data.success) {
-            alert(`Failed: ${data.error || res.statusText}`);
+            notifyError(`Failed: ${data.error || res.statusText}`);
             return;
           }
-          alert(`Purchased ${name} for $${data.cost}`);
+          notifySuccess(`Purchased ${name} for ${data.cost}`);
           refreshWallet();
           refreshStationPanelNoCache(station.id);
         });
@@ -1552,18 +1553,18 @@ async function showStationDetails(station) {
     const name = document.getElementById('unit-name').value;
     const tag = document.getElementById('unit-tag').value;
     const priority = Number(document.getElementById('unit-priority').value) || 1;
-    if (!type || !name) return alert("Missing name or type");
+    if (!type || !name) return notifyError("Missing name or type");
     await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:station.type,type,name,tag,priority})});
     showStationDetails(station);
   });
   document.getElementById('create-personnel').addEventListener('click', async ()=>{
     const name = document.getElementById('personnel-name').value;
     const training = Array.from(document.querySelectorAll('#personnel-training input[type=checkbox]:checked')).map(cb=>cb.value);
-    if (!name) return alert("Missing name");
+    if (!name) return notifyError("Missing name");
     const res = await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, station_id: station.id, training })});
     const data = await res.json();
-    if (!res.ok) { alert(`Failed: ${data.error || res.statusText}`); return; }
-    alert(`Personnel added. Cost: $${data.charged}`);
+    if (!res.ok) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
+    notifySuccess(`Personnel added. Cost: ${data.charged}`);
     refreshWallet();
     showStationDetails(station);
   });
@@ -1583,13 +1584,13 @@ async function showStationDetails(station) {
 }
 
 // Build station
-document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; alert("Click the map to place your new station"); });
+document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; notifySuccess("Click the map to place your new station"); });
 map.on("click", async (e) => {
   if (!buildStationMode) return;
   const name = prompt("Station Name?");
   const type = prompt("Type (fire, police, ambulance, hospital, jail)?", "fire")?.toLowerCase();
   const department = prompt("Department?") || null;
-  if (!name || !["fire","police","ambulance","hospital","jail"].includes(type)) { alert("Cancelled or invalid type."); buildStationMode=false; return; }
+  if (!name || !["fire","police","ambulance","hospital","jail"].includes(type)) { notifyError("Cancelled or invalid type."); buildStationMode=false; return; }
   let holding_cells = 0, beds = 0;
   if (type === "police" || type === "jail") {
     holding_cells = Number(prompt("Holding cells?", "0")) || 0;
@@ -1631,9 +1632,9 @@ function instantiatePrisoners(arr) {
 
 // Generate Mission
 async function generateMission(retry = false, excludeIndex = null) {
-  if (missionTemplates.length === 0) { alert("No mission templates loaded."); return; }
+  if (missionTemplates.length === 0) { notifyError("No mission templates loaded."); return; }
   const stations = await fetch('/api/stations').then(r => r.json()).catch(() => []);
-  if (!stations.length) { alert("No stations available."); return; }
+  if (!stations.length) { notifyError("No stations available."); return; }
   const st = stations[Math.floor(Math.random() * stations.length)];
   const radius = 5000; // meters
 
@@ -1674,7 +1675,7 @@ async function generateMission(retry = false, excludeIndex = null) {
       }
     } catch (e) {
       console.error('POI lookup failed', e);
-      alert('POI lookup failed.');
+      notifyError('POI lookup failed.');
       return;
     }
   } else if (template.trigger_type === 'intersection' && template.trigger_filter) {
@@ -1729,7 +1730,7 @@ async function generateMission(retry = false, excludeIndex = null) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     playSound('/audio/newalert.mp3');
     await fetchMissions();
-  } catch (err) { console.error("Failed to create mission:", err); alert("Failed to create mission."); }
+  } catch (err) { console.error("Failed to create mission:", err); notifyError("Failed to create mission."); }
 }
 
 document.getElementById('generateMission').addEventListener('click', () => generateMission());
@@ -1990,7 +1991,7 @@ async function showUnitDetails(unitId) {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        alert(`Failed: ${data.error || res.statusText}`);
+        notifyError(`Failed: ${data.error || res.statusText}`);
         return;
       }
       _unitById.set(unitId, { ...unit, equipment: data.equipment });
@@ -2006,7 +2007,7 @@ async function showUnitDetails(unitId) {
     if (resp !== null) body.responding_icon = resp;
     const res = await fetch(`/api/units/${unitId}/icon`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await res.json();
-    if (!res.ok || !data.success) { alert(`Failed: ${data.error || res.statusText}`); return; }
+    if (!res.ok || !data.success) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
     _unitById.set(unitId, { ...unit, icon: url, responding_icon: resp });
     const entry = unitMarkers.get(unitId);
     if (entry) entry.marker.setIcon(unitIconFor({ ...unit, icon: url, responding_icon: resp }));
@@ -2023,7 +2024,7 @@ async function showUnitDetails(unitId) {
     });
     const data = await res.json();
     if (!res.ok || !data.success) {
-      alert(`Failed: ${data.error || res.statusText}`);
+      notifyError(`Failed: ${data.error || res.statusText}`);
       return;
     }
     _unitById.set(unitId, { ...unit, equipment: data.equipment });
@@ -2068,12 +2069,12 @@ function openUnitCreationForm(station) {
   const unitTag = prompt("Enter unit tag (optional):") || '';
   const typeOptions = allowedTypes.map(u => u.type).join(', ');
   const selectedType = prompt(`Choose unit type (${typeOptions}):`);
-  if (!allowedTypes.find(u => u.type === selectedType)) { alert("Invalid type for this station."); return; }
+  if (!allowedTypes.find(u => u.type === selectedType)) { notifyError("Invalid type for this station."); return; }
   fetch("/api/units", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ station_id: station.id, class: station.type, type: selectedType, name: unitName, tag: unitTag })
   }).then(res => res.json()).then(() => showStationDetails(station))
-    .catch(err => { console.error("Failed to add unit:", err); alert("Error adding unit."); });
+    .catch(err => { console.error("Failed to add unit:", err); notifyError("Error adding unit."); });
 }
 
 async function assignPersonnelToUnit(unitId, stationId) {
@@ -2325,16 +2326,16 @@ async function openManualDispatch(mission) {
 async function dispatchSelectedUnits(missionId) {
   const area = document.getElementById('manualDispatchArea');
   const ids = Array.from(area.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>parseInt(cb.value,10));
-  if (!ids.length){ alert('Select at least one unit to dispatch.'); return; }
+  if (!ids.length){ notifyError('Select at least one unit to dispatch.'); return; }
   try {
     const missions = await (await fetch('/api/missions')).json();
     const mission = missions.find(m=>m.id===missionId);
-    if (!mission) { alert('Mission not found.'); return; }
+    if (!mission) { notifyError('Mission not found.'); return; }
     await sendUnitsToMission(mission, ids, area, true);
     openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon });
   } catch (e) {
     console.error(e);
-    alert('Failed to dispatch one or more units.');
+    notifyError('Failed to dispatch one or more units.');
   }
 }
 
@@ -2366,7 +2367,7 @@ async function openUnitTypeDispatch(mission) {
       btn.addEventListener('click', async ()=>{
         const type = btn.dataset.type;
         const list = groups.get(type) || [];
-        if (!list.length) { alert('No available units'); return; }
+        if (!list.length) { notifyError('No available units'); return; }
         const unit = list.shift();
         await sendUnitsToMission(mission, [unit.id], undefined, true);
         openUnitTypeDispatch(mission);
@@ -2515,7 +2516,7 @@ async function runCardDispatch(mission) {
   }
   try {
     const res = await fetch(`/api/run-cards/${encodeURIComponent(mission.type)}`);
-    if (!res.ok) { alert('No run card for this mission.'); return; }
+    if (!res.ok) { notifyError('No run card for this mission.'); return; }
     const rc = await res.json();
     const rcMission = {
       ...mission,
@@ -2527,7 +2528,7 @@ async function runCardDispatch(mission) {
     await autoDispatch(rcMission);
   } catch (e) {
     console.error(e);
-    alert('Run card dispatch failed.');
+    notifyError('Run card dispatch failed.');
   } finally {
     if (tempArea) area.remove();
   }
@@ -2541,7 +2542,7 @@ async function dispatchRunCard() {
 
 async function clearAssignedUnit(missionId, unitId) {
   const res = await fetch('/api/mission-units',{ method:'DELETE', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mission_id: missionId, unit_id: unitId }) });
-  if (!res.ok) { const t = await res.text().catch(()=> ''); console.error('Unassign failed:', res.status, t); alert('Failed to clear unit from mission.'); return; }
+  if (!res.ok) { const t = await res.text().catch(()=> ''); console.error('Unassign failed:', res.status, t); notifyError('Failed to clear unit from mission.'); return; }
 
   const [units, missions] = await Promise.all([
     fetchNoCache('/api/units').then(r=>r.json()),
