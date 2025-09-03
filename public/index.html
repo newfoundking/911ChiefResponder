@@ -90,6 +90,7 @@
                 <button class="tab-button active" data-tab="missions">Missions</button>
                 <button class="tab-button" data-tab="stations">Stations</button>
                 <button class="tab-button" data-tab="zones">Zones</button>
+                <button class="tab-button" data-tab="units">Units</button>
 	</div>
 	<div id="walletDisplay">Balance: $0</div>
 	<script>
@@ -122,6 +123,17 @@
           <button id="addZoneBtn">Add Zone</button>
           <button id="saveZoneEditBtn" style="display:none;">Save Zone</button>
           <div id="zoneList"></div>
+        </div>
+        <div id="tab-units" class="tab-content">
+          <div style="margin-bottom:0.5em; display:flex; gap:0.5em; flex-wrap:wrap;">
+            <input type="text" id="unitFilter" placeholder="Filter units..." style="flex:1; min-width:120px;" />
+            <select id="unitSort">
+              <option value="status">Status</option>
+              <option value="name">Name</option>
+              <option value="priority">Priority</option>
+            </select>
+          </div>
+          <div id="unitList"></div>
         </div>
 </div>
 
@@ -322,8 +334,14 @@ document.querySelectorAll(".tab-button").forEach(button => {
     } else {
       map.removeLayer(zoneLayerGroup);
     }
+    if (button.dataset.tab === 'units') {
+      loadUnitsTab();
+    }
   });
 });
+
+document.getElementById('unitFilter')?.addEventListener('input', renderUnitList);
+document.getElementById('unitSort')?.addEventListener('change', renderUnitList);
 
 function unitIconFor(unit) {
   if (!unit.icon && !unit.responding_icon) {
@@ -418,6 +436,68 @@ function cacheStations(stations){
 }
 function cacheUnits(units){
   _unitById = new Map(units.map(u => [u.id, { ...u, priority: Number(u.priority) || 1 }]));
+  if (document.getElementById('tab-units')?.classList.contains('active')) {
+    renderUnitList();
+  }
+}
+
+function centerOnUnit(unitId) {
+  const unit = _unitById.get(unitId);
+  if (!unit) return;
+  ensureUnitMarker(unit);
+  const entry = unitMarkers.get(unitId);
+  if (entry) {
+    map.setView(entry.marker.getLatLng(), Math.max(map.getZoom(), 13));
+  }
+}
+
+function renderUnitList() {
+  const list = document.getElementById('unitList');
+  if (!list) return;
+  const filter = document.getElementById('unitFilter')?.value.trim().toLowerCase() || '';
+  const sort = document.getElementById('unitSort')?.value || 'status';
+  let units = Array.from(_unitById.values());
+  if (filter) {
+    units = units.filter(u => (u.name || '').toLowerCase().includes(filter) ||
+      (u.type || '').toLowerCase().includes(filter) ||
+      (u.tag || '').toLowerCase().includes(filter));
+  }
+  if (sort === 'name') {
+    units.sort((a,b) => (a.name || '').localeCompare(b.name || ''));
+  } else if (sort === 'priority') {
+    units.sort((a,b) => (b.priority || 0) - (a.priority || 0));
+  } else {
+    const order = { on_scene: 0, enroute: 1, available: 2 };
+    units.sort((a,b) => (order[a.status] ?? 3) - (order[b.status] ?? 3) ||
+      (a.name || '').localeCompare(b.name || ''));
+  }
+  list.innerHTML = units.map(u => `
+    <div class="unit-entry">
+      <span class="unit-link" data-unitid="${u.id}" style="cursor:pointer;color:blue;">${u.name}</span>
+      (${u.type}) - <span>${formatStatus(u.status, u.responding)}</span>
+      <button class="center-unit" data-unitid="${u.id}">Center</button>
+      ${u.status !== 'available' ? `<button class="cancel-unit" data-unitid="${u.id}" data-stationid="${u.station_id}">Cancel</button>` : ''}
+    </div>`).join('');
+  list.querySelectorAll('.unit-link').forEach(el => {
+    el.addEventListener('click', () => showUnitDetails(parseInt(el.dataset.unitid, 10)));
+  });
+  list.querySelectorAll('.center-unit').forEach(el => {
+    el.addEventListener('click', () => centerOnUnit(parseInt(el.dataset.unitid, 10)));
+  });
+  list.querySelectorAll('.cancel-unit').forEach(el => {
+    el.addEventListener('click', async () => {
+      await cancelUnit(parseInt(el.dataset.unitid, 10), parseInt(el.dataset.stationid, 10));
+      renderUnitList();
+    });
+  });
+}
+
+async function loadUnitsTab() {
+  try {
+    const units = await fetch('/api/units').then(r => r.json());
+    cacheUnits(units);
+  } catch {}
+  renderUnitList();
 }
 
 function ensureUnitMarker(unit) {
@@ -1796,6 +1876,9 @@ async function cancelUnit(unitId, stationId) {
   }
 
   refreshStationPanelNoCache(stationId);
+  if (document.getElementById('tab-units')?.classList.contains('active')) {
+    renderUnitList();
+  }
 }
 
 async function showUnitDetails(unitId) {
