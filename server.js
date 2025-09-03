@@ -4,6 +4,7 @@ const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
 const { getRandomName } = require('./names');
+const { getBalance, adjustBalance, requireFunds } = require('./wallet');
 
 const db = require('./db');             // your sqlite3 instance
 const unitTypes = require('./unitTypes');
@@ -521,38 +522,6 @@ function findTrainingCostByName(name) {
     }
     return 0;
   } catch { return 0; }
-}
-function findEquipmentCostByName(name) {
-  try {
-    const lists = Object.values(equipment || {});
-    for (const arr of lists || []) {
-      for (const item of arr || []) {
-        if (typeof item === 'string' && item === name) return 0;
-        if (item?.name === name) return Number(item.cost) || 0;
-      }
-    }
-    return 0;
-  } catch { return 0; }
-}
-
-function getBalance() {
-  return new Promise((resolve, reject) => {
-    db.get(`SELECT balance FROM wallet WHERE id=1`, (e, row) =>
-      e ? reject(e) : resolve(Number(row?.balance || 0))
-    );
-  });
-}
-function adjustBalance(delta) {
-  return new Promise((resolve, reject) => {
-    db.run(`UPDATE wallet SET balance = balance + ? WHERE id=1`, [Number(delta)||0],
-      function (e) { e ? reject(e) : resolve(true); });
-  });
-}
-async function requireFunds(amount) {
-  const need = Number(amount) || 0;
-  const bal = await getBalance();
-  if (bal < need) return { ok:false, balance: bal, need };
-  return { ok:true, balance: bal };
 }
 
 // Public endpoint to see wallet
@@ -1228,34 +1197,6 @@ app.patch('/api/stations/:id/department', (req, res) => {
     res.json({ success: true, id, department });
   });
 });
-
-// POST /api/stations/:id/equipment  { name: <string> }
-app.post('/api/stations/:id/equipment', (req, res) => {
-  const stationId = Number(req.params.id);
-  const name = String(req.body?.name || '').trim();
-  if (!stationId || !name) return res.status(400).json({ error: 'Invalid station id or name' });
-
-  db.get(`SELECT equipment, equipment_slots FROM stations WHERE id=?`, [stationId], async (err, st) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!st) return res.status(404).json({ error: 'Station not found' });
-    let list; try { list = JSON.parse(st.equipment || '[]'); } catch { list = []; }
-    const slots = Number(st.equipment_slots || 0);
-    if (slots && list.length >= slots) return res.status(409).json({ error: 'No free equipment slots' });
-
-    const cost = findEquipmentCostByName(name);
-    const ok = await requireFunds(cost);
-    if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: cost });
-
-    list.push(name);
-    db.run(`UPDATE stations SET equipment=? WHERE id=?`, [JSON.stringify(list), stationId], async (e2) => {
-      if (e2) return res.status(500).json({ error: e2.message });
-      await adjustBalance(-cost);
-      const balance = await getBalance();
-      res.json({ success: true, station_id: stationId, equipment: list, cost, balance });
-    });
-  });
-});
-
 
 app.delete('/api/stations', (req, res) => {
   db.run('DELETE FROM stations', err => {
