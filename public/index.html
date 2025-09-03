@@ -1760,7 +1760,7 @@ async function cancelUnit(unitId, stationId) {
 
   let mission = null;
   try {
-    mission = await fetch(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
+    mission = await fetchNoCache(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
   } catch {}
 
   if (mission && mission.id) {
@@ -1806,7 +1806,7 @@ async function showUnitDetails(unitId) {
   const station = unit ? _stationById.get(unit.station_id) : null;
   let mission = null;
   try {
-    mission = await fetch(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
+    mission = await fetchNoCache(`/api/units/${unitId}/mission`).then(r => r.ok ? r.json() : null);
   } catch {}
 
   const res = await fetch(`/api/personnel?station_id=${unit?.station_id ?? ''}`);
@@ -1839,6 +1839,9 @@ async function showUnitDetails(unitId) {
     ? `<p><strong>Current Mission:</strong> <span class="mission-link" data-missionid="${mission.id}" style="cursor:pointer; color:blue;">#${mission.id} ${mission.type}</span> <button id="cancel-mission-btn" data-missionid="${mission.id}">Cancel</button></p>`
     : '<p><strong>Current Mission:</strong> None</p>';
   const patrolHtml = `<p><label><input type="checkbox" id="patrol-toggle" ${unit?.patrol ? 'checked' : ''}/> Patrol</label></p>`;
+  const cancelUnitHtml = unit?.status !== 'available'
+    ? '<p><button id="cancel-unit-btn">Cancel Unit</button></p>'
+    : '';
 
   content.innerHTML = `
     <p><strong>Name:</strong> ${unit?.name || 'Unknown'} <button id="edit-unit-btn">Edit</button></p>
@@ -1847,6 +1850,7 @@ async function showUnitDetails(unitId) {
     <p><strong>Vehicle Class:</strong> ${unit?.class || 'Unknown'} (${unit?.type || ''})</p>
     ${missionHtml}
     ${patrolHtml}
+    ${cancelUnitHtml}
     <button id="change-unit-icon">Change Icon</button>
     <h4>Equipment Aboard</h4>
     ${equipmentHtml}
@@ -1871,6 +1875,12 @@ async function showUnitDetails(unitId) {
   cancelBtn?.addEventListener('click', async () => {
     const mid = parseInt(cancelBtn.dataset.missionid,10);
     await clearAssignedUnit(mid, unitId);
+    modal.style.display = 'none';
+  });
+
+  const cancelUnitBtn = content.querySelector('#cancel-unit-btn');
+  cancelUnitBtn?.addEventListener('click', async () => {
+    await cancelUnit(unitId, unit?.station_id);
     modal.style.display = 'none';
   });
 
@@ -2450,7 +2460,10 @@ async function clearAssignedUnit(missionId, unitId) {
   const res = await fetch('/api/mission-units',{ method:'DELETE', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ mission_id: missionId, unit_id: unitId }) });
   if (!res.ok) { const t = await res.text().catch(()=> ''); console.error('Unassign failed:', res.status, t); alert('Failed to clear unit from mission.'); return; }
 
-  const [units, missions] = await Promise.all([ fetch('/api/units').then(r=>r.json()), fetch('/api/missions').then(r=>r.json()) ]);
+  const [units, missions] = await Promise.all([
+    fetchNoCache('/api/units').then(r=>r.json()),
+    fetchNoCache('/api/missions').then(r=>r.json())
+  ]);
   cacheUnits(units);
   const u = _unitById.get(unitId);
   const mission = missions.find(m=>m.id===missionId);
