@@ -478,27 +478,41 @@ function missionRequirementsMet(mission, assigned) {
   const reqUnits = parseArrayField(mission.required_units).map(r => {
     const types = Array.isArray(r.types) ? r.types : (r.type ? [r.type] : []);
     const ignored = penalties
-      .filter(p => types.includes(p.type))
+      .filter(p => (p.category ? p.category === 'vehicle' : true) && types.includes(p.type))
       .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
     const qty = Math.max(0, (r.quantity ?? r.count ?? 1) - ignored);
     return { ...r, quantity: qty, types };
   });
-  const reqEquip = parseArrayField(mission.equipment_required);
-  const reqTrain = parseArrayField(mission.required_training);
+
+  const reqEquip = parseArrayField(mission.equipment_required).map(r => {
+    const name = r.name || r.type || r;
+    const ignored = penalties
+      .filter(p => p.category === 'equipment' && (p.type === name || p.name === name))
+      .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+    const qty = Math.max(0, (r.qty ?? r.quantity ?? r.count ?? 1) - ignored);
+    return { ...r, name, quantity: qty };
+  });
+
+  const reqTrain = parseArrayField(mission.required_training).map(r => {
+    const name = r.training || r.name || r;
+    const ignored = penalties
+      .filter(p => p.category === 'training' && (p.type === name || p.name === name))
+      .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+    const qty = Math.max(0, (r.qty ?? r.quantity ?? r.count ?? 1) - ignored);
+    return { ...r, name, quantity: qty };
+  });
 
   const unitsMet = reqUnits.every(r => {
     const count = r.types.reduce((s, t) => s + (unitOnScene.get(t) || 0), 0);
     return count >= (r.quantity ?? r.count ?? 1);
   });
   const equipMet = reqEquip.every(r => {
-    const name = r.name || r.type || r;
-    const need = r.qty ?? r.quantity ?? r.count ?? 1;
-    return (equipOnScene.get(name) || 0) >= need;
+    const need = r.quantity ?? r.qty ?? r.count ?? 1;
+    return (equipOnScene.get(r.name) || 0) >= need;
   });
   const trainMet = reqTrain.every(r => {
-    const name = r.training || r.name || r;
-    const need = r.qty ?? r.quantity ?? r.count ?? 1;
-    return (trainOnScene.get(name) || 0) >= need;
+    const need = r.quantity ?? r.qty ?? r.count ?? 1;
+    return (trainOnScene.get(r.name) || 0) >= need;
   });
 
   return unitsMet && equipMet && trainMet;
