@@ -58,6 +58,7 @@ export function showConfirmModal(message) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '20000';
 
     const content = document.createElement('div');
     content.className = 'modal-content';
