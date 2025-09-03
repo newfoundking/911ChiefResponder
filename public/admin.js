@@ -461,7 +461,7 @@ async function submitMission() {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     console.error("Save failed:", err);
-    alert(`Save failed: ${err.error || res.statusText}`);
+    notifyError(`Save failed: ${err.error || res.statusText}`);
     return;
   }
 

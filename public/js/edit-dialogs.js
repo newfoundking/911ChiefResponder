@@ -66,7 +66,7 @@ export function openPersonnelModal(person, station) {
       }
     }
     if (!ok) {
-      alert(`Failed to save personnel changes.\nLast response (${lastStatus}): ${lastText}`);
+      notifyError(`Failed to save personnel changes.\nLast response (${lastStatus}): ${lastText}`);
       return;
     }
     modal.style.display = 'none';
@@ -138,7 +138,7 @@ export function openUnitModal(unit) {
         if(res.ok||[200,201,202,204].includes(res.status)){ ok=true; break; }
       }catch(e){ lastText=e?.message||String(e); }
     }
-    if(!ok){ alert(`Failed to save unit changes.\nLast response (${lastStatus}): ${lastText}`); return; }
+    if(!ok){ notifyError(`Failed to save unit changes.\nLast response (${lastStatus}): ${lastText}`); return; }
     modal.style.display='none';
     const refresh = window.refreshStationPanelNoCache;
     if (typeof refresh === 'function') {

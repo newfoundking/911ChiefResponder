@@ -210,3 +210,28 @@ h3 {
     background:#333;
     color:#e0e0e0;
 }
+
+/* Toast notifications */
+#notification-container {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 10000;
+}
+
+.notification {
+  margin-bottom: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  color: #fff;
+  opacity: 1;
+  transition: opacity 0.5s ease-out;
+}
+
+.notification-success {
+  background: #28a745;
+}
+
+.notification-error {
+  background: #dc3545;
+}

@@ -378,11 +378,11 @@ function openNewPersonnel(st) {
   document.getElementById('createPers').onclick = async ()=>{
     const name = nameInput.value.trim();
     const training = Array.from(document.querySelectorAll('#persTrainings input:checked')).map(cb=>cb.value);
-    if (!name) return alert('Missing name');
+    if (!name) return notifyError('Missing name');
     const res = await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, station_id: st.id, training })});
     const data = await res.json();
-    if (!res.ok) { alert(`Failed: ${data.error || res.statusText}`); return; }
-    alert(`Personnel added. Cost: $${data.charged}`);
+    if (!res.ok) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
+    notifySuccess(`Personnel added. Cost: $${data.charged}`);
     showStation(st.id);
   };
 }
@@ -405,9 +405,9 @@ function openNewUnit(st) {
     const name = document.getElementById('unitName').value.trim();
     const tag = document.getElementById('unitTag').value.trim();
     const priority = Number(document.getElementById('unitPriority').value)||1;
-    if (!type || !name) return alert('Missing name or type');
+    if (!type || !name) return notifyError('Missing name or type');
     const res = await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id: st.id,class: st.type,type,name,tag,priority})});
-    if(!res.ok){ const data = await res.json().catch(()=>({})); alert(`Failed: ${data.error || res.statusText}`); return; }
+    if(!res.ok){ const data = await res.json().catch(()=>({})); notifyError(`Failed: ${data.error || res.statusText}`); return; }
     showStation(st.id);
   };
 }
@@ -425,11 +425,11 @@ function openNewEquipment(st) {
   document.getElementById('buyEquipBtn').onclick = async ()=>{
     const select = document.getElementById('equipSelect');
     const name = select.value;
-    if (!name) return alert('Select equipment');
+    if (!name) return notifyError('Select equipment');
     const res = await fetch(`/api/stations/${st.id}/equipment`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name })});
     const data = await res.json();
-    if (!res.ok) { alert(`Failed: ${data.error || res.statusText}`); return; }
-    alert(`Purchased ${name} for $${data.cost}`);
+    if (!res.ok) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
+    notifySuccess(`Purchased ${name} for $${data.cost}`);
     showStation(st.id);
   };
 }
@@ -510,7 +510,7 @@ async function showUnitDetail(unitId) {
           showStation(unit.station_id);
         } else {
           const data = await res.json().catch(()=>({}));
-          alert(`Failed: ${data.error || res.statusText}`);
+          notifyError(`Failed: ${data.error || res.statusText}`);
         }
       });
     });
@@ -524,7 +524,7 @@ async function showUnitDetail(unitId) {
       });
       const data = await res.json().catch(()=>({}));
       if(!res.ok || !data.success){
-        alert(`Failed: ${data.error || res.statusText}`);
+        notifyError(`Failed: ${data.error || res.statusText}`);
         return;
       }
       modal.style.display='none';
@@ -751,13 +751,13 @@ async function autoDispatch(mission) {
       }
     }
 
-    if (!selected.length) { alert('No additional units available for dispatch.'); return; }
+    if (!selected.length) { notifyError('No additional units available for dispatch.'); return; }
     await dispatchUnits(mission, selected);
     await loadMissions();
     await openMission(mission.id);
   } catch (e) {
     console.error(e);
-    alert('Auto dispatch failed.');
+    notifyError('Auto dispatch failed.');
   }
 }
 
@@ -773,7 +773,7 @@ async function runCardDispatch(mission) {
   }
   try {
     const res = await fetch(`/api/run-cards/${encodeURIComponent(mission.type)}`);
-    if (!res.ok) { alert('No run card for this mission.'); return; }
+    if (!res.ok) { notifyError('No run card for this mission.'); return; }
     const rc = await res.json();
     const rcMission = {
       ...mission,
@@ -785,7 +785,7 @@ async function runCardDispatch(mission) {
     await autoDispatch(rcMission);
   } catch (e) {
     console.error(e);
-    alert('Run card dispatch failed.');
+    notifyError('Run card dispatch failed.');
   } finally {
     if (tempArea) area.remove();
   }
@@ -918,7 +918,7 @@ async function openUnitTypeDispatch(mission) {
     btn.addEventListener('click', async ()=>{
       const type = btn.dataset.type;
       const list = groups.get(type) || [];
-      if (!list.length) { alert('No available units'); return; }
+      if (!list.length) { notifyError('No available units'); return; }
       const unit = list.shift();
       await dispatchUnits(mission, [unit], true);
       await loadMissions();
@@ -936,9 +936,9 @@ async function cancelUnit(unitId) {
 }
 
 export async function generateMission(retry = false, excludeIndex = null) {
-  if (missionTemplates.length === 0) { alert("No mission templates loaded."); return; }
+  if (missionTemplates.length === 0) { notifyError('No mission templates loaded.'); return; }
   const stations = await fetch('/api/stations').then(r => r.json()).catch(() => []);
-  if (!stations.length) { alert("No stations available."); return; }
+  if (!stations.length) { notifyError('No stations available.'); return; }
   const st = stations[Math.floor(Math.random() * stations.length)];
   const radius = 5000;
 
@@ -979,7 +979,7 @@ export async function generateMission(retry = false, excludeIndex = null) {
       }
     } catch (e) {
       console.error('POI lookup failed', e);
-      alert('POI lookup failed.');
+      notifyError('POI lookup failed.');
       return;
     }
   } else if (template.trigger_type === 'intersection' && template.trigger_filter) {
@@ -1034,7 +1034,7 @@ export async function generateMission(retry = false, excludeIndex = null) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     playSound('/audio/newalert.mp3');
     await loadMissions();
-  } catch (err) { console.error("Failed to create mission:", err); alert("Failed to create mission."); }
+  } catch (err) { console.error('Failed to create mission:', err); notifyError('Failed to create mission.'); }
 }
 
 let missionGenTimer = null;
