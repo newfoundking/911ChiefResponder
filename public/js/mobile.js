@@ -5,14 +5,14 @@ const tabButtons = document.querySelectorAll('.tab-bar button');
 const tabs = document.querySelectorAll('.tab');
 
 function activateTab(id) {
-  tabs.forEach(t => t.classList.remove('active'));
+  for (const t of tabs) t.classList.remove('active');
   const el = document.getElementById(id);
   if (el) el.classList.add('active');
 }
 
-tabButtons.forEach(btn => {
+for (const btn of tabButtons) {
   btn.addEventListener('click', () => activateTab(btn.dataset.tab));
-});
+}
 
 // Modal helper
 const modal = document.getElementById('modal');
