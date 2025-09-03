@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chief Responder Mobile</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+e2GV4lZF8X3Y+5Sz4o9FmkIoDxdky1KZY1Hq0LEQ=" crossorigin="" />
+  <style>
+    body,html { margin:0; padding:0; height:100%; font-family: Arial, sans-serif; }
+    .tab { display:none; height:calc(100vh - 50px); overflow-y:auto; }
+    .tab.active { display:block; }
+    #map { height:100%; width:100%; }
+    .tab-bar { position:fixed; bottom:0; left:0; right:0; height:50px; display:flex; background:#222; color:#fff; }
+    .tab-bar button { flex:1; border:none; background:none; color:inherit; font-size:16px; }
+    .list-item { padding:10px; border-bottom:1px solid #ccc; }
+    .modal { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; }
+    .modal-content { background:#fff; padding:20px; max-width:90%; }
+  </style>
+</head>
+<body>
+  <div id="mapTab" class="tab active"><div id="map"></div></div>
+  <div id="missionsTab" class="tab"></div>
+  <div id="stationsTab" class="tab"></div>
+  <div id="unitsTab" class="tab"></div>
+
+  <div class="tab-bar">
+    <button data-tab="mapTab">Map</button>
+    <button data-tab="missionsTab">Calls</button>
+    <button data-tab="stationsTab">Stations</button>
+    <button data-tab="unitsTab">Units</button>
+  </div>
+
+  <div id="modal" class="modal">
+    <div class="modal-content" id="modalContent"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-o9N1j8r6RgkP7X7C4CkVkFv7Yj5YzJ4q35p3l0w0a2I=" crossorigin=""></script>
+  <script src="js/mobile.js"></script>
+</body>
+</html>

@@ -2068,6 +2068,10 @@ app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
+app.get('/mobile', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'mobile.html'));
+});
+
 // Periodically process unit travel arrivals/returns so missions can progress
 setInterval(() => {
   db.all('SELECT * FROM unit_travel', (err, rows) => {
