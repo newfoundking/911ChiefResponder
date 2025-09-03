@@ -308,7 +308,7 @@ function colorForDept(d){
 }
 
 document.getElementById("deleteAllStations").addEventListener("click", async () => {
-  if (!confirm("Are you sure you want to delete ALL stations? This will also orphan units!")) return;
+  if (!await showConfirmModal("Are you sure you want to delete ALL stations? This will also orphan units!")) return;
   await fetch("/api/stations", { method: "DELETE" });
   fetchStations();
   alert("All stations deleted.");
@@ -1743,7 +1743,7 @@ document.getElementById('startPatrols').addEventListener('click', async () => {
 
 // Clear Missions
 document.getElementById("clearMissions").addEventListener("click", async ()=>{
-  if (!confirm("Clear ALL missions?")) return;
+  if (!await showConfirmModal("Clear ALL missions?")) return;
   await fetch("/api/missions", { method:"DELETE" });
   fetchMissions();
 });
@@ -1836,7 +1836,7 @@ async function openAssignModal(unitId, stationId) {
 }
 
 async function cancelUnit(unitId, stationId) {
-  if (!confirm('Cancel this unit?')) return;
+  if (!await showConfirmModal('Cancel this unit?')) return;
 
   let mission = null;
   try {
