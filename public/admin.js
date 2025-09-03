@@ -48,8 +48,8 @@ function appendMissionRow(mission) {
     }).join(", ")}</td>
     <td>${(mission.required_training || []).map(t => `${t.qty ?? t.quantity ?? t.count ?? 1}×${t.training ?? t.name ?? t}`).join(", ")}</td>
     <td>${(mission.equipment_required || []).map(e => `${e.qty ?? e.quantity ?? e.count ?? 1}×${e.name ?? e}`).join(", ")}</td>
-    <td>${(mission.modifiers || []).map(m => `${m.type}${m.timeReduction ? ` (${m.timeReduction}%)` : ''}${m.maxCount ? ` x${m.maxCount}` : ''}`).join(", ")}</td>
-    <td>${(mission.penalty_options || []).map(p => `${p.quantity ?? 1}×${p.type} (-${p.timePenalty || 0}%/${p.rewardPenalty || 0}%)`).join(", ")}</td>
+    <td>${(mission.modifiers || []).map(m => `${m.category ? m.category + ':' : ''}${m.type}${m.timeReduction ? ` (${m.timeReduction}%)` : ''}${m.maxCount ? ` x${m.maxCount}` : ''}`).join(", ")}</td>
+    <td>${(mission.penalty_options || []).map(p => `${p.quantity ?? 1}×${p.category ? p.category + ':' : ''}${p.type} (-${p.timePenalty || 0}%/${p.rewardPenalty || 0}%)`).join(", ")}</td>
     <td>${(mission.patients || []).map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
     <td>${(mission.prisoners || []).map(p => p.count ?? `${p.min ?? 0}-${p.max ?? 0}`).join(", ")}</td>
     <td>${Number.isFinite(mission.rewards) ? mission.rewards : 0}</td>
@@ -114,12 +114,12 @@ async function openMissionForm(existing = null) {
     <button type="button" onclick="addTrainingRow()">Add Training</button><br>
 
     <h4>Modifiers</h4>
-    <div><strong>Type</strong> | <strong>Time Reduction (%)</strong> | <strong>Max Count</strong></div>
+    <div><strong>Category</strong> | <strong>Type/Name</strong> | <strong>Time Reduction (%)</strong> | <strong>Max Count</strong></div>
     <div id="modifiers-container"></div>
     <button type="button" onclick="addModifierRow()">Add Modifier</button><br>
 
     <h4>Penalty Options</h4>
-    <div><strong>Type</strong> | <strong>Quantity</strong> | <strong>Time Penalty (%)</strong> | <strong>Reward Penalty (%)</strong></div>
+    <div><strong>Category</strong> | <strong>Type/Name</strong> | <strong>Quantity</strong> | <strong>Time Penalty (%)</strong> | <strong>Reward Penalty (%)</strong></div>
     <div id="penalty-container"></div>
     <button type="button" onclick="addPenaltyRow()">Add Penalty Option</button><br>
 
@@ -148,8 +148,8 @@ async function openMissionForm(existing = null) {
   (Array.isArray(existing?.patients) ? existing.patients : []).forEach(p => addPatientRow(p.min, p.max, p.chance, p.codes));
   (Array.isArray(existing?.prisoners) ? existing.prisoners : []).forEach(p => addPrisonerRow(p.min, p.max, p.chance, p.transportChance));
   (Array.isArray(existing?.required_training) ? existing.required_training : []).forEach(t => addTrainingRow(t.training ?? t.name ?? t, t.qty ?? 1));
-  (Array.isArray(existing?.modifiers) ? existing.modifiers : []).forEach(m => addModifierRow(m.type, m.timeReduction, m.maxCount));
-  (Array.isArray(existing?.penalty_options) ? existing.penalty_options : []).forEach(p => addPenaltyRow(p.type, p.quantity, p.timePenalty, p.rewardPenalty));
+  (Array.isArray(existing?.modifiers) ? existing.modifiers : []).forEach(m => addModifierRow(m.category || 'vehicle', m.type || m.name || m.training || '', m.timeReduction, m.maxCount));
+  (Array.isArray(existing?.penalty_options) ? existing.penalty_options : []).forEach(p => addPenaltyRow(p.category || 'vehicle', p.type || p.name || p.training || '', p.quantity, p.timePenalty, p.rewardPenalty));
   (Array.isArray(existing?.equipment_required) ? existing.equipment_required : []).forEach(e => addEquipmentRow(e.name ?? e, e.qty ?? 1));
 
   // Populate run card if editing existing mission
@@ -322,19 +322,43 @@ function addTrainingRow(selected = "", qty = 1) {
   container.appendChild(row);
 }
 
-function addModifierRow(selectedType = "", timeReduction = 0, maxCount = 1) {
+function populateCategoryOptions(select, category, selected = "") {
+  select.innerHTML = "";
+  let opts = [];
+  if (category === "equipment") {
+    opts = getEquipDisplayList().map(({ name, cost }) => ({ value: name, label: cost ? `${name} ($${cost})` : name }));
+  } else if (category === "training") {
+    opts = getTrainingDisplayList().map(({ name, cost }) => ({ value: name, label: cost ? `${name} ($${cost})` : name }));
+  } else {
+    opts = unitTypes.map(u => ({ value: u.type, label: `${u.class} - ${u.type}` }));
+  }
+  opts.forEach(o => {
+    const opt = document.createElement("option");
+    opt.value = o.value;
+    opt.textContent = o.label;
+    if (o.value === selected) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+function addModifierRow(category = "vehicle", selectedType = "", timeReduction = 0, maxCount = 1) {
   const container = document.getElementById("modifiers-container");
   const row = document.createElement("div");
 
-  const select = document.createElement("select");
-  unitTypes.forEach(u => {
-    const option = document.createElement("option");
-    option.value = u.type;
-    option.textContent = `${u.class} - ${u.type}`;
-    if (u.type === selectedType) option.selected = true;
-    select.appendChild(option);
+  const catSelect = document.createElement("select");
+  ["vehicle", "equipment", "training"].forEach(c => {
+    const opt = document.createElement("option");
+    opt.value = c;
+    opt.textContent = c;
+    if (c === category) opt.selected = true;
+    catSelect.appendChild(opt);
   });
-  select.name = "type";
+  catSelect.name = "category";
+
+  const typeSelect = document.createElement("select");
+  typeSelect.name = "type";
+  populateCategoryOptions(typeSelect, category, selectedType);
+  catSelect.addEventListener("change", () => populateCategoryOptions(typeSelect, catSelect.value));
 
   const reductionInput = document.createElement("input");
   reductionInput.type = "number"; reductionInput.name = "timeReduction"; reductionInput.min = 0; reductionInput.max = 100; reductionInput.value = timeReduction;
@@ -345,26 +369,32 @@ function addModifierRow(selectedType = "", timeReduction = 0, maxCount = 1) {
   const removeBtn = document.createElement("button");
   removeBtn.textContent = "Remove"; removeBtn.type = "button"; removeBtn.onclick = () => container.removeChild(row);
 
-  row.appendChild(select);
+  row.appendChild(catSelect);
+  row.appendChild(typeSelect);
   row.appendChild(reductionInput);
   row.appendChild(maxCountInput);
   row.appendChild(removeBtn);
   container.appendChild(row);
 }
 
-function addPenaltyRow(type = "", qty = 1, timePenalty = 0, rewardPenalty = 0) {
+function addPenaltyRow(category = "vehicle", type = "", qty = 1, timePenalty = 0, rewardPenalty = 0) {
   const container = document.getElementById("penalty-container");
   const row = document.createElement("div");
 
-  const typeSelect = document.createElement("select");
-  unitTypes.forEach(u => {
+  const catSelect = document.createElement("select");
+  ["vehicle", "equipment", "training"].forEach(c => {
     const opt = document.createElement("option");
-    opt.value = u.type;
-    opt.textContent = `${u.class} - ${u.type}`;
-    if (u.type === type) opt.selected = true;
-    typeSelect.appendChild(opt);
+    opt.value = c;
+    opt.textContent = c;
+    if (c === category) opt.selected = true;
+    catSelect.appendChild(opt);
   });
+  catSelect.name = "category";
+
+  const typeSelect = document.createElement("select");
   typeSelect.name = "type";
+  populateCategoryOptions(typeSelect, category, type);
+  catSelect.addEventListener("change", () => populateCategoryOptions(typeSelect, catSelect.value));
 
   const qtyInput = document.createElement("input");
   qtyInput.type = "number"; qtyInput.name = "quantity"; qtyInput.min = 1; qtyInput.value = qty;
@@ -378,6 +408,7 @@ function addPenaltyRow(type = "", qty = 1, timePenalty = 0, rewardPenalty = 0) {
   const removeBtn = document.createElement("button");
   removeBtn.textContent = "Remove"; removeBtn.type = "button"; removeBtn.onclick = () => container.removeChild(row);
 
+  row.appendChild(catSelect);
   row.appendChild(typeSelect);
   row.appendChild(qtyInput);
   row.appendChild(timeInput);
