@@ -56,6 +56,32 @@ function getUnit(req, res) {
   });
 }
 
+// GET /api/units/:id/mission
+function getUnitMission(req, res) {
+  const unitId = Number(req.params.id);
+  if (!unitId) return res.status(400).json({ error: 'Invalid unit id' });
+  db.get(
+    `SELECT m.* FROM mission_units mu JOIN missions m ON m.id = mu.mission_id WHERE mu.unit_id = ?`,
+    [unitId],
+    (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!row) return res.json(null);
+      const mission = {
+        ...row,
+        required_units: parseArrayField(row.required_units),
+        required_training: parseArrayField(row.required_training),
+        equipment_required: parseArrayField(row.equipment_required),
+        patients: parseArrayField(row.patients),
+        prisoners: parseArrayField(row.prisoners),
+        modifiers: parseArrayField(row.modifiers),
+        timing: typeof row.timing === 'number' ? row.timing : 10,
+        non_emergency: row.non_emergency === 1 || row.non_emergency === true,
+      };
+      res.json(mission);
+    }
+  );
+}
+
 // PATCH /api/units/:id
 function updateUnit(req, res) {
   const id = Number(req.params.id);
@@ -146,6 +172,7 @@ function cancelUnit(req, res) {
 module.exports = {
   getUnits,
   getUnit,
+  getUnitMission,
   updateUnit,
   patchStatus,
   patchPatrol,

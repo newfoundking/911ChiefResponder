@@ -4,6 +4,7 @@ const units = require('../controllers/unitsController');
 
 router.get('/', units.getUnits);
 router.get('/:id', units.getUnit);
+router.get('/:id/mission', units.getUnitMission);
 router.patch('/:id', units.updateUnit);
 router.patch('/:id/status', units.patchStatus);
 router.patch('/:id/patrol', units.patchPatrol);
