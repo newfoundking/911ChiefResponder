@@ -1160,94 +1160,124 @@ async function refreshAssignedUnitsUI(missionId) {
 
 // ===== Dynamic requirements =====
 function renderRequirementsDynamic(mission, assigned) {
-  const req = Array.isArray(mission.required_units) ? mission.required_units : [];
-  if (!req.length) return '<em>No specific unit requirements.</em>';
+  const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
+  const reqTraining = Array.isArray(mission.required_training) ? mission.required_training : [];
+  const reqEquipment = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
   const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
-  const counts = { enroute: new Map(), on_scene: new Map() };
+
+  // Count assigned units by status
+  const unitCounts = { enroute: new Map(), on_scene: new Map() };
   for (const u of assigned || []) {
-    if (u.status === 'on_scene') counts.on_scene.set(u.type, (counts.on_scene.get(u.type)||0)+1);
-    else if (u.status === 'enroute') counts.enroute.set(u.type, (counts.enroute.get(u.type)||0)+1);
+    if (u.status === 'on_scene') unitCounts.on_scene.set(u.type, (unitCounts.on_scene.get(u.type) || 0) + 1);
+    else if (u.status === 'enroute') unitCounts.enroute.set(u.type, (unitCounts.enroute.get(u.type) || 0) + 1);
   }
-  const items = req.map(r => {
+
+  // Count training and equipment on assigned units
+  const trainingCounts = { enroute: new Map(), on_scene: new Map() };
+  const equipmentCounts = { enroute: new Map(), on_scene: new Map() };
+  for (const u of assigned || []) {
+    const tTarget = u.status === 'on_scene' ? trainingCounts.on_scene : (u.status === 'enroute' ? trainingCounts.enroute : null);
+    const eTarget = u.status === 'on_scene' ? equipmentCounts.on_scene : (u.status === 'enroute' ? equipmentCounts.enroute : null);
+    if (tTarget) {
+      for (const p of Array.isArray(u.personnel) ? u.personnel : []) {
+        for (const t of Array.isArray(p.training) ? p.training : []) {
+          tTarget.set(t, (tTarget.get(t) || 0) + 1);
+        }
+      }
+    }
+    if (eTarget) {
+      for (const eq of Array.isArray(u.equipment) ? u.equipment : []) {
+        eTarget.set(eq, (eTarget.get(eq) || 0) + 1);
+      }
+    }
+  }
+
+  // Build unit requirement list
+  const unitItems = reqUnits.map(r => {
     const types = Array.isArray(r.types) ? r.types : [r.type];
     const typeStr = types.join(' or ');
     const baseNeed = r.quantity ?? r.count ?? 1;
-    const ignored = penalties.filter(p => types.includes(p.type)).reduce((s,p)=>s+(p.quantity||0),0);
+    const ignored = penalties
+      .filter(p => (p.category || 'vehicle') === 'vehicle' && types.includes(p.type))
+      .reduce((s, p) => s + (p.quantity || 0), 0);
     const need = Math.max(0, baseNeed - ignored);
-    const onScene = types.reduce((s,t)=>s+(counts.on_scene.get(t)||0),0);
-    const enroute = types.reduce((s,t)=>s+(counts.enroute.get(t)||0),0);
+    const onScene = types.reduce((s, t) => s + (unitCounts.on_scene.get(t) || 0), 0);
+    const enroute = types.reduce((s, t) => s + (unitCounts.enroute.get(t) || 0), 0);
     const outstanding = Math.max(0, need - enroute - onScene);
     return `<li>${need} × ${typeStr} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
   });
+
+  // Build training requirement list
+  const trainingItems = reqTraining.map(r => {
+    const baseNeed = r.qty ?? r.quantity ?? r.count ?? 1;
+    const name = r.training || r.name || r;
+    const ignored = penalties
+      .filter(p => p.category === 'training' && p.type === name)
+      .reduce((s, p) => s + (p.quantity || 0), 0);
+    const need = Math.max(0, baseNeed - ignored);
+    const onScene = trainingCounts.on_scene.get(name) || 0;
+    const enroute = trainingCounts.enroute.get(name) || 0;
+    const outstanding = Math.max(0, need - enroute - onScene);
+    return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
+  });
+
+  // Build equipment requirement list
+  const equipmentItems = reqEquipment.map(r => {
+    const baseNeed = r.qty ?? r.quantity ?? r.count ?? 1;
+    const name = r.name || r.type || r;
+    const ignored = penalties
+      .filter(p => p.category === 'equipment' && p.type === name)
+      .reduce((s, p) => s + (p.quantity || 0), 0);
+    const need = Math.max(0, baseNeed - ignored);
+    const onScene = equipmentCounts.on_scene.get(name) || 0;
+    const enroute = equipmentCounts.enroute.get(name) || 0;
+    const outstanding = Math.max(0, need - enroute - onScene);
+    return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
+  });
+
+  let html = '';
+  if (unitItems.length) html += `<p><strong>Unit Requirements:</strong></p><ul>${unitItems.join('')}</ul>`;
+  if (trainingItems.length) html += `<p><strong>Personnel Requirements:</strong></p><ul>${trainingItems.join('')}</ul>`;
+  if (equipmentItems.length) html += `<p><strong>Equipment Required:</strong></p><ul>${equipmentItems.join('')}</ul>`;
+  if (!html) html = '<em>No specific unit requirements.</em>';
+
   const options = Array.isArray(mission.penalty_options) ? mission.penalty_options : [];
-  let optHtml = '';
   if (options.length) {
     const rows = options.map((p, idx) => {
-      const checked = penalties.some(sel => sel.type===p.type && sel.quantity===p.quantity && sel.timePenalty===p.timePenalty && sel.rewardPenalty===p.rewardPenalty);
-      return `<div><label><input type="checkbox" class="penalty-opt" data-idx="${idx}" ${checked?"checked":""}> Ignore ${p.quantity}×${p.type} (-${p.timePenalty||0}% speed, -${p.rewardPenalty||0}% reward)</label></div>`;
+      const checked = penalties.some(sel =>
+        (sel.category || 'vehicle') === (p.category || 'vehicle') &&
+        sel.type === p.type &&
+        sel.quantity === p.quantity &&
+        sel.timePenalty === p.timePenalty &&
+        sel.rewardPenalty === p.rewardPenalty
+      );
+      return `<div><label><input type="checkbox" class="penalty-opt" data-idx="${idx}" ${checked ? "checked" : ""}> Ignore ${p.quantity}×${p.category ? p.category + ':' : ''}${p.type} (-${p.timePenalty || 0}% speed, -${p.rewardPenalty || 0}% reward)</label></div>`;
     });
-    optHtml = `<div><strong>Penalties:</strong>${rows.join('')}</div>`;
+    html += `<div><strong>Penalties:</strong>${rows.join('')}</div>`;
   }
-  return `<ul>${items.join('')}</ul>${optHtml}`;
+  return html;
 }
 
 function attachPenaltyHandlers(mission) {
   document.querySelectorAll('.penalty-opt').forEach(cb => {
     cb.addEventListener('change', async () => {
       const options = Array.isArray(mission.penalty_options) ? mission.penalty_options : [];
-      const selected = Array.from(document.querySelectorAll('.penalty-opt:checked')).map(c => options[parseInt(c.dataset.idx,10)]);
+      const selected = Array.from(document.querySelectorAll('.penalty-opt:checked')).map(c => {
+        const opt = options[parseInt(c.dataset.idx,10)];
+        return { ...opt, category: opt.category || 'vehicle' };
+      });
       mission.penalties = selected;
-      await fetch(`/api/missions/${mission.id}/penalties`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ penalties: selected }) });
+      await fetch(`/api/missions/${mission.id}/penalties`, {
+        method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ penalties: selected })
+      });
+      await refreshAssignedUnitsUI(mission.id);
       checkMissionCompletion(mission);
     });
   });
 }
-
-function renderTrainingRequirementsDynamic(mission, assigned) {
-  const req = Array.isArray(mission.required_training) ? mission.required_training : [];
-  if (!req.length) return '';
-  const counts = { enroute: new Map(), on_scene: new Map() };
-  for (const u of assigned || []) {
-    const target = u.status === 'on_scene' ? counts.on_scene : (u.status === 'enroute' ? counts.enroute : null);
-    if (!target) continue;
-    for (const p of Array.isArray(u.personnel) ? u.personnel : []) {
-      for (const t of Array.isArray(p.training) ? p.training : []) {
-        target.set(t, (target.get(t) || 0) + 1);
-      }
-    }
-  }
-  const items = req.map(r => {
-    const need = r.qty ?? r.quantity ?? r.count ?? 1;
-    const name = r.training || r.name || r;
-    const onScene = counts.on_scene.get(name) || 0;
-    const enroute = counts.enroute.get(name) || 0;
-    const outstanding = Math.max(0, need - enroute - onScene);
-    return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
-  });
-  return `<ul>${items.join('')}</ul>`;
-}
-
-function renderEquipmentRequirementsDynamic(mission, assigned) {
-  const req = Array.isArray(mission.equipment_required) ? mission.equipment_required : [];
-  if (!req.length) return '';
-  const counts = { enroute: new Map(), on_scene: new Map() };
-  for (const u of assigned || []) {
-    const target = u.status === 'on_scene' ? counts.on_scene : (u.status === 'enroute' ? counts.enroute : null);
-    if (!target) continue;
-    for (const e of Array.isArray(u.equipment) ? u.equipment : []) {
-      target.set(e, (target.get(e) || 0) + 1);
-    }
-  }
-  const items = req.map(r => {
-    const need = r.qty ?? r.quantity ?? r.count ?? 1;
-    const name = r.name || r.type || r;
-    const onScene = counts.on_scene.get(name) || 0;
-    const enroute = counts.enroute.get(name) || 0;
-    const outstanding = Math.max(0, need - enroute - onScene);
-    return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
-  });
-  return `<ul>${items.join('')}</ul>`;
-}
+// renderTrainingRequirementsDynamic and renderEquipmentRequirementsDynamic merged into renderRequirementsDynamic
 
 function renderPatientInfo(mission) {
   const pts = Array.isArray(mission.patients) ? mission.patients : [];
@@ -1303,18 +1333,13 @@ function showMissionDetails(mission) {
   const container = document.getElementById("missionDetailsContent");
   const patientHtml = renderPatientInfo(mission);
   const prisonerHtml = renderPrisonerInfo(mission);
-  const hasTraining = Array.isArray(mission.required_training) && mission.required_training.length;
-  const hasEquipment = Array.isArray(mission.equipment_required) && mission.equipment_required.length;
   container.innerHTML = `
     <h3><span class="focus-mission"
              data-lat="${mission.lat}"
              data-lon="${mission.lon}"
              style="cursor:pointer;">${mission.type}</span></h3>
     <p><strong>Status:</strong> ${mission.status}</p>
-    <p><strong>Unit Requirements:</strong></p>
     <div id="reqDynamic">Loading…</div>
-    ${hasTraining ? '<p><strong>Personnel Requirements:</strong></p><div id="reqTrainingDynamic">Loading…</div>' : ''}
-    ${hasEquipment ? '<p><strong>Equipment Required:</strong></p><div id="reqEquipmentDynamic">Loading…</div>' : ''}
     ${patientHtml ? '<p><strong>Patients:</strong></p>' + patientHtml : ''}
     ${prisonerHtml ? '<p><strong>Prisoners:</strong></p>' + prisonerHtml : ''}
     <div id="assignedUnitsArea" style="margin-top:8px;"></div>
@@ -1331,10 +1356,6 @@ function showMissionDetails(mission) {
   refreshAssignedUnitsUI(mission.id).then(assigned => {
     const reqDiv = document.getElementById('reqDynamic');
     if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
-    const trainDiv = document.getElementById('reqTrainingDynamic');
-    if (trainDiv) trainDiv.innerHTML = renderTrainingRequirementsDynamic(mission, assigned);
-    const equipDiv = document.getElementById('reqEquipmentDynamic');
-    if (equipDiv) equipDiv.innerHTML = renderEquipmentRequirementsDynamic(mission, assigned);
   });
   document.getElementById("missionDetails").style.display = "block";
   const active = activeWorkTimers.get(mission.id);
@@ -2321,10 +2342,6 @@ async function openManualDispatch(mission) {
   const assigned = await refreshAssignedUnitsUI(mission.id);
   const reqDiv = document.getElementById('reqDynamic');
   if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
-  const trainDiv = document.getElementById('reqTrainingDynamic');
-  if (trainDiv) trainDiv.innerHTML = renderTrainingRequirementsDynamic(mission, assigned);
-  const equipDiv = document.getElementById('reqEquipmentDynamic');
-  if (equipDiv) equipDiv.innerHTML = renderEquipmentRequirementsDynamic(mission, assigned);
 
   const allUnits = await (await fetch('/api/units')).json();
   cacheUnits(allUnits);
@@ -2368,10 +2385,6 @@ async function openManualDispatch(mission) {
         const assignedAfter = await refreshAssignedUnitsUI(mission.id);
         const reqDiv2 = document.getElementById('reqDynamic');
         if (reqDiv2) { reqDiv2.innerHTML = renderRequirementsDynamic(mission, assignedAfter); attachPenaltyHandlers(mission); }
-        const trainDiv2 = document.getElementById('reqTrainingDynamic');
-        if (trainDiv2) trainDiv2.innerHTML = renderTrainingRequirementsDynamic(mission, assignedAfter);
-        const equipDiv2 = document.getElementById('reqEquipmentDynamic');
-        if (equipDiv2) equipDiv2.innerHTML = renderEquipmentRequirementsDynamic(mission, assignedAfter);
         checkMissionCompletion(mission);
       },
       { mission_id: mission.id, phase: 'to_scene' }
@@ -2626,10 +2639,6 @@ async function clearAssignedUnit(missionId, unitId) {
   if (missionSnap) {
     const reqDiv = document.getElementById('reqDynamic');
     if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(missionSnap, assigned); attachPenaltyHandlers(missionSnap); }
-    const trainDiv = document.getElementById('reqTrainingDynamic');
-    if (trainDiv) trainDiv.innerHTML = renderTrainingRequirementsDynamic(missionSnap, assigned);
-    const equipDiv = document.getElementById('reqEquipmentDynamic');
-    if (equipDiv) equipDiv.innerHTML = renderEquipmentRequirementsDynamic(missionSnap, assigned);
   }
 }
 
