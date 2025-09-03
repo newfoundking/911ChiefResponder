@@ -462,12 +462,16 @@ async function showUnitDetail(unitId) {
     const missionHtml = mission && mission.id
       ? `<p><strong>Current Mission:</strong> #${mission.id} ${mission.type}</p>`
       : '<p><strong>Current Mission:</strong> None</p>';
+    const cancelUnitHtml = unit.status !== 'available'
+      ? '<p><button id="cad-cancel-unit-btn">Cancel Unit</button></p>'
+      : '';
     content.innerHTML = `
       <p><strong>Name:</strong> ${unit.name || ''} <button id="edit-unit-btn">Edit</button></p>
       <p><strong>Priority:</strong> ${unit.priority ?? 1}</p>
       <p><strong>Station:</strong> ${station?.name || ''}</p>
       <p><strong>Vehicle Class:</strong> ${unit.class || ''} (${unit.type || ''})</p>
       ${missionHtml}
+      ${cancelUnitHtml}
       <h4>Equipment Aboard</h4>
       ${equipmentHtml}
       <h4>Assign Equipment from Station</h4>
@@ -475,6 +479,12 @@ async function showUnitDetail(unitId) {
       <h4>Assigned Personnel</h4>
       ${personnelHtml}
     `;
+    const cancelUnitBtn = content.querySelector('#cad-cancel-unit-btn');
+    cancelUnitBtn?.addEventListener('click', async()=>{
+      await cancelUnit(unitId);
+      modal.style.display = 'none';
+      showStation(unit.station_id);
+    });
     content.querySelectorAll('.unassign-btn').forEach(btn=>{
       btn.addEventListener('click', async()=>{
         const pid = Number(btn.dataset.personId);
