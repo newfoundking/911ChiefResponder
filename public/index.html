@@ -293,6 +293,7 @@ const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/st
 
 let missionMarkers = [];
 let stationMarkers = [];
+const stationMarkerById = new Map();
 let buildStationMode = false;
   let pendingStationCoords = null;
   let openMissionId = null;
@@ -935,6 +936,7 @@ async function fetchStations() {
   cacheStations(stations);
   stationMarkers.forEach(m => map.removeLayer(m));
   stationMarkers = [];
+  stationMarkerById.clear();
   const list = document.getElementById("stationList");
   list.innerHTML = "";
 
@@ -953,6 +955,7 @@ async function fetchStations() {
     const icon = makeIcon(iconUrl, 30);
     const marker = L.marker([st.lat, st.lon], { icon }).addTo(map).on("click", () => showStationDetails(st));
     stationMarkers.push(marker);
+    stationMarkerById.set(st.id, marker);
     const el = document.createElement("div");
     let info = '';
     if (st.type === 'hospital') {
@@ -1401,7 +1404,14 @@ async function showStationDetails(station) {
       if (!res.ok || !data.success) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
       station.icon = url;
       _stationById.set(station.id, station);
-      fetchStations();
+      try {
+        const marker = stationMarkerById.get(station.id);
+        if (!marker) throw new Error('Marker not found');
+        marker.setIcon(makeIcon(url, 30));
+      } catch (err) {
+        console.error(err);
+        fetchStations();
+      }
       showStationDetails(station);
     });
     const deptBtn = detail.querySelector('#change-station-dept');
@@ -1508,7 +1518,14 @@ async function showStationDetails(station) {
                 if (!res.ok || !data.success) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
                 station.icon = url;
                 _stationById.set(station.id, station);
-                fetchStations();
+                try {
+                  const marker = stationMarkerById.get(station.id);
+                  if (!marker) throw new Error('Marker not found');
+                  marker.setIcon(makeIcon(url, 30));
+                } catch (err) {
+                  console.error(err);
+                  fetchStations();
+                }
                 showStationDetails(station);
           });
           const deptBtn = detail.querySelector('#change-station-dept');
