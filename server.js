@@ -1718,7 +1718,7 @@ app.post('/api/mission-units', (req, res) => {
 
   // Guard: prevent double-dispatch across all missions and fetch department
   db.get(
-    'SELECT u.status, s.department FROM units u LEFT JOIN stations s ON u.station_id = s.id WHERE u.id=?',
+    'SELECT u.status, u.station_id, u.class, u.type, u.personnel, u.equipment, s.department FROM units u LEFT JOIN stations s ON u.station_id = s.id WHERE u.id=?',
     [unit_id],
     (e, unitRow) => {
       if (e) return res.status(500).json({ error: e.message });
@@ -1740,13 +1740,86 @@ app.post('/api/mission-units', (req, res) => {
           }
 
           const responding = m.non_emergency ? 0 : 1;
-          db.run('INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)', [mission_id, unit_id], function (err3) {
-            if (err3) return res.status(500).json({ error: err3.message });
-            // Flip unit to enroute immediately (front-end may PATCH too, that’s fine)
-            db.run('UPDATE units SET status=?, responding=? WHERE id=?', ['enroute', responding, unit_id], () =>
-              res.json({ ok: true, id: this?.lastID })
-            );
-          });
+
+          // Determine unit capacities from unitTypes
+          const uType = unitTypes.find(t => t.class === unitRow.class && t.type === unitRow.type) || {};
+          const maxPersonnel = Number(uType.capacity || 0);
+          const maxEquip = Number(uType.equipmentSlots || 0);
+          let currentPersonnel = parseArrayField(unitRow.personnel);
+          let currentEquipment = parseArrayField(unitRow.equipment);
+          const remainingPersonnel = Math.max(0, maxPersonnel - currentPersonnel.length);
+          const remainingEquipment = Math.max(0, maxEquip - currentEquipment.length);
+
+          // Helper to finalize dispatch after assignments
+          function finalizeDispatch() {
+            db.run('INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)', [mission_id, unit_id], function (err3) {
+              if (err3) return res.status(500).json({ error: err3.message });
+              const linkId = this?.lastID;
+              db.run(
+                'UPDATE units SET status=?, responding=?, personnel=?, equipment=? WHERE id=?',
+                ['enroute', responding, JSON.stringify(currentPersonnel), JSON.stringify(currentEquipment), unit_id],
+                err4 => {
+                  if (err4) return res.status(500).json({ error: err4.message });
+                  db.get(
+                    `SELECT u.*, COALESCE(json_group_array(json_object('id', p.id, 'name', p.name, 'training', p.training)), '[]') AS personnel
+                     FROM units u LEFT JOIN personnel p ON p.unit_id = u.id
+                     WHERE u.id=? GROUP BY u.id`,
+                    [unit_id],
+                    (err5, updated) => {
+                      if (err5) return res.status(500).json({ error: err5.message });
+                      try { updated.personnel = JSON.parse(updated.personnel || '[]'); } catch { updated.personnel = []; }
+                      try { updated.equipment = JSON.parse(updated.equipment || '[]'); } catch { updated.equipment = []; }
+                      res.json({ ok: true, id: linkId, unit: updated });
+                    }
+                  );
+                }
+              );
+            });
+          }
+
+          // Assign personnel up to remaining capacity
+          db.all(
+            'SELECT id, name, training FROM personnel WHERE station_id=? AND (unit_id IS NULL OR unit_id="") LIMIT ?',
+            [unitRow.station_id, remainingPersonnel],
+            (perr, pers) => {
+              if (perr) return res.status(500).json({ error: perr.message });
+              const ids = pers.map(p => p.id);
+              if (ids.length) {
+                db.run(
+                  `UPDATE personnel SET unit_id=? WHERE id IN (${ids.map(() => '?').join(',')})`,
+                  [unit_id, ...ids],
+                  err3 => {
+                    if (err3) return res.status(500).json({ error: err3.message });
+                    currentPersonnel = currentPersonnel.concat(
+                      pers.map(p => ({ id: p.id, name: p.name, training: p.training }))
+                    );
+                    assignEquipment();
+                  }
+                );
+              } else {
+                assignEquipment();
+              }
+            }
+          );
+
+          // Assign equipment from station storage
+          function assignEquipment() {
+            if (remainingEquipment <= 0) return finalizeDispatch();
+            db.get('SELECT equipment FROM stations WHERE id=?', [unitRow.station_id], (e2, st) => {
+              if (e2) return res.status(500).json({ error: e2.message });
+              let stEquip = parseArrayField(st?.equipment);
+              const moved = stEquip.splice(0, remainingEquipment);
+              if (moved.length) currentEquipment = currentEquipment.concat(moved);
+              db.run(
+                'UPDATE stations SET equipment=? WHERE id=?',
+                [JSON.stringify(stEquip), unitRow.station_id],
+                err5 => {
+                  if (err5) return res.status(500).json({ error: err5.message });
+                  finalizeDispatch();
+                }
+              );
+            });
+          }
         });
       });
     }
