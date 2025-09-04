@@ -49,6 +49,18 @@ function patchBays(req, res) {
   });
 }
 
+// PATCH /api/stations/:id/icon  { icon: <string> }
+function patchIcon(req, res) {
+  const id = Number(req.params.id);
+  const icon = String(req.body?.icon || '').trim();
+  if (!id) return res.status(400).json({ error: 'Invalid station id' });
+  if (icon.length > 2048) return res.status(400).json({ error: 'Icon URL too long' });
+  db.run('UPDATE stations SET icon=? WHERE id=?', [icon, id], function (err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true, id, icon });
+  });
+}
+
 // DELETE /api/stations
 function deleteStations(req, res) {
   db.run('DELETE FROM stations', err => {
@@ -98,6 +110,7 @@ module.exports = {
   getStation,
   createStation,
   patchBays,
+  patchIcon,
   deleteStations,
   buyEquipment,
 };
