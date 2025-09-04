@@ -1,5 +1,6 @@
 const db = require('../db');
 const { parseArrayField } = require('../utils');
+const unitTypes = require('../unitTypes');
 
 // GET /api/units
 function getUnits(req, res) {
@@ -167,18 +168,35 @@ function patchEquipment(req, res) {
     const idx = stList.indexOf(name);
     if (idx === -1) return res.status(409).json({ error: 'Equipment not available' });
 
-    db.get(`SELECT equipment FROM units WHERE id=?`, [unitId], (err2, u) => {
+    db.get(`SELECT equipment, class, type FROM units WHERE id=?`, [unitId], (err2, u) => {
       if (err2) return res.status(500).json({ error: err2.message });
       if (!u) return res.status(404).json({ error: 'Unit not found' });
       let uList = parseArrayField(u.equipment);
+
+      const uType = unitTypes.find(
+        (t) => t.class === u.class && t.type === u.type
+      );
+      const slots = Number(uType?.equipmentSlots || 0);
+      if (slots && uList.length >= slots)
+        return res.status(409).json({ error: 'No free equipment slots' });
+
       uList.push(name);
       stList.splice(idx, 1);
       db.serialize(() => {
         db.run(`UPDATE stations SET equipment=? WHERE id=?`, [JSON.stringify(stList), stationId]);
-        db.run(`UPDATE units SET equipment=? WHERE id=?`, [JSON.stringify(uList), unitId], function (e3) {
-          if (e3) return res.status(500).json({ error: e3.message });
-          res.json({ success: true, unit_id: unitId, equipment: uList, station_equipment: stList });
-        });
+        db.run(
+          `UPDATE units SET equipment=? WHERE id=?`,
+          [JSON.stringify(uList), unitId],
+          function (e3) {
+            if (e3) return res.status(500).json({ error: e3.message });
+            res.json({
+              success: true,
+              unit_id: unitId,
+              equipment: uList,
+              station_equipment: stList,
+            });
+          }
+        );
       });
     });
   });

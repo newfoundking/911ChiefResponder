@@ -909,9 +909,36 @@ app.get('/api/units/:id/personnel', (req, res) => {
 app.post('/api/units/:id/personnel', (req, res) => {
     const unitId = req.params.id;
     const { personnelId } = req.body;
-    db.run(`UPDATE personnel SET unit_id = ? WHERE id = ?`, [unitId, personnelId], function (err) {
+
+    // Fetch unit details to determine capacity
+    db.get(`SELECT class, type FROM units WHERE id = ?`, [unitId], (err, unit) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
+        if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+        const uType = unitTypes.find(
+            (t) => t.class === unit.class && t.type === unit.type
+        );
+        const capacity = Number(uType?.capacity || 0);
+
+        db.get(
+            `SELECT COUNT(*) AS cnt FROM personnel WHERE unit_id = ?`,
+            [unitId],
+            (err2, row) => {
+                if (err2) return res.status(500).json({ error: err2.message });
+                if (capacity && row.cnt >= capacity)
+                    return res.status(409).json({ error: 'Unit at capacity' });
+
+                db.run(
+                    `UPDATE personnel SET unit_id = ? WHERE id = ?`,
+                    [unitId, personnelId],
+                    function (err3) {
+                        if (err3)
+                            return res.status(500).json({ error: err3.message });
+                        res.json({ success: true });
+                    }
+                );
+            }
+        );
     });
 });
 
