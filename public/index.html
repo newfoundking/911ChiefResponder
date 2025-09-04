@@ -1410,7 +1410,7 @@ async function showStationDetails(station) {
         marker.setIcon(makeIcon(url, 30));
       } catch (err) {
         console.error(err);
-        fetchStations();
+        await fetchStations();
       }
       showStationDetails(station);
     });
@@ -1524,7 +1524,7 @@ async function showStationDetails(station) {
                   marker.setIcon(makeIcon(url, 30));
                 } catch (err) {
                   console.error(err);
-                  fetchStations();
+                  await fetchStations();
                 }
                 showStationDetails(station);
           });
