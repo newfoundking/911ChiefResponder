@@ -151,6 +151,75 @@ function patchIcon(req, res) {
   });
 }
 
+// PATCH /api/units/:id/equipment
+function patchEquipment(req, res) {
+  const unitId = Number(req.params.id);
+  const stationId = Number(req.body?.station_id);
+  const name = String(req.body?.name || '').trim();
+  if (!unitId || !stationId || !name) {
+    return res.status(400).json({ error: 'unit_id, station_id and name are required' });
+  }
+
+  db.get(`SELECT equipment FROM stations WHERE id=?`, [stationId], (err, st) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!st) return res.status(404).json({ error: 'Station not found' });
+    let stList = parseArrayField(st.equipment);
+    const idx = stList.indexOf(name);
+    if (idx === -1) return res.status(409).json({ error: 'Equipment not available' });
+
+    db.get(`SELECT equipment FROM units WHERE id=?`, [unitId], (err2, u) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+      if (!u) return res.status(404).json({ error: 'Unit not found' });
+      let uList = parseArrayField(u.equipment);
+      uList.push(name);
+      stList.splice(idx, 1);
+      db.serialize(() => {
+        db.run(`UPDATE stations SET equipment=? WHERE id=?`, [JSON.stringify(stList), stationId]);
+        db.run(`UPDATE units SET equipment=? WHERE id=?`, [JSON.stringify(uList), unitId], function (e3) {
+          if (e3) return res.status(500).json({ error: e3.message });
+          res.json({ success: true, unit_id: unitId, equipment: uList, station_equipment: stList });
+        });
+      });
+    });
+  });
+}
+
+// DELETE /api/units/:id/equipment
+function deleteEquipment(req, res) {
+  const unitId = Number(req.params.id);
+  const stationId = Number(req.body?.station_id);
+  const name = String(req.body?.name || '').trim();
+  if (!unitId || !stationId || !name) {
+    return res.status(400).json({ error: 'unit_id, station_id and name are required' });
+  }
+
+  db.get(`SELECT equipment, equipment_slots FROM stations WHERE id=?`, [stationId], (err, st) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!st) return res.status(404).json({ error: 'Station not found' });
+    let stList = parseArrayField(st.equipment);
+    const slots = Number(st.equipment_slots || 0);
+
+    db.get(`SELECT equipment FROM units WHERE id=?`, [unitId], (err2, u) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+      if (!u) return res.status(404).json({ error: 'Unit not found' });
+      let uList = parseArrayField(u.equipment);
+      const idx = uList.indexOf(name);
+      if (idx === -1) return res.status(404).json({ error: 'Equipment not found on unit' });
+      if (slots && stList.length >= slots) return res.status(409).json({ error: 'No free equipment slots' });
+
+      uList.splice(idx, 1);
+      stList.push(name);
+      db.serialize(() => {
+        db.run(`UPDATE units SET equipment=? WHERE id=?`, [JSON.stringify(uList), unitId]);
+        db.run(`UPDATE stations SET equipment=? WHERE id=?`, [JSON.stringify(stList), stationId], function (e3) {
+          if (e3) return res.status(500).json({ error: e3.message });
+          res.json({ success: true, unit_id: unitId, equipment: uList, station_equipment: stList });
+        });
+      });
+    });
+  });
+}
+
 // POST /api/units/:id/cancel
 function cancelUnit(req, res) {
   const id = parseInt(req.params.id, 10);
@@ -177,5 +246,7 @@ module.exports = {
   patchStatus,
   patchPatrol,
   patchIcon,
+  patchEquipment,
+  deleteEquipment,
   cancelUnit,
 };

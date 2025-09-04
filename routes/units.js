@@ -9,6 +9,8 @@ router.patch('/:id', units.updateUnit);
 router.patch('/:id/status', units.patchStatus);
 router.patch('/:id/patrol', units.patchPatrol);
 router.patch('/:id/icon', units.patchIcon);
+router.patch('/:id/equipment', units.patchEquipment);
+router.delete('/:id/equipment', units.deleteEquipment);
 router.post('/:id/cancel', units.cancelUnit);
 
 module.exports = router;
