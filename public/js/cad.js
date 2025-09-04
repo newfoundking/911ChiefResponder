@@ -1017,17 +1017,29 @@ export async function generateMission(retry = false, excludeIndex = null) {
       return;
     }
   } else if (template.trigger_type === 'intersection' && template.trigger_filter) {
-    const [road1, road2] = String(template.trigger_filter).split('|');
+    const [r1Raw, r2Raw] = String(template.trigger_filter).split('|');
+    const road1 = r1Raw?.trim();
+    const road2 = r2Raw?.trim();
     if (road1 && road2) {
       try {
-        const query = `[out:json];way["name"="${road1}"](around:${radius},${st.lat},${st.lon});way["name"="${road2}"](around:${radius},${st.lat},${st.lon});node(w["name"="${road1}"])(w["name"="${road2}"]);out;`;
+        const query = `[out:json];(
+          way["name"="${road1}"](around:${radius},${st.lat},${st.lon});
+        )->.r1;(
+          way["name"="${road2}"](around:${radius},${st.lat},${st.lon});
+        )->.r2;
+        node(w.r1)(w.r2);
+        out;`;
         const resp = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
         const data = await resp.json();
         if (Array.isArray(data.elements) && data.elements.length) {
           const inter = data.elements[0];
           lat = inter.lat; lon = inter.lon;
+        } else {
+          console.warn(`No intersection found for roads "${road1}" and "${road2}"`);
         }
-      } catch (e) { console.error('Intersection lookup failed', e); }
+      } catch (e) {
+        console.error('Intersection lookup failed', e);
+      }
     }
   }
   if (lat === undefined || lon === undefined) {
