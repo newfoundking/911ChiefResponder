@@ -1240,17 +1240,6 @@ app.patch('/api/stations/:id/equipment-slots', (req, res) => {
     });
   });
 });
-// PATCH /api/stations/:id/icon  { icon: <string> }
-app.patch('/api/stations/:id/icon', (req, res) => {
-  const id = Number(req.params.id);
-  const icon = String(req.body?.icon || '').trim();
-  if (!id) return res.status(400).json({ error: 'Invalid station id' });
-  if (icon.length > 2048) return res.status(400).json({ error: 'Icon URL too long' });
-  db.run(`UPDATE stations SET icon=? WHERE id=?`, [icon, id], function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true, id, icon });
-  });
-});
 
 // PATCH /api/stations/:id/department  { department: <string> }
 app.patch('/api/stations/:id/department', (req, res) => {

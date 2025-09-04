@@ -6,6 +6,7 @@ router.get('/', stations.getStations);
 router.get('/:id', stations.getStation);
 router.post('/', stations.createStation);
 router.patch('/:id/bays', stations.patchBays);
+router.patch('/:id/icon', stations.patchIcon);
 router.delete('/', stations.deleteStations);
 router.post('/:id/equipment', stations.buyEquipment);
 
