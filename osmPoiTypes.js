@@ -15,6 +15,7 @@ const OSM_POI_TYPES = [
   "amenity=fire_station",
   "amenity=fuel",
   "building=house",
+  "building=office",
   "amenity=hospital",
   "landuse=landfill",
   "amenity=library",
