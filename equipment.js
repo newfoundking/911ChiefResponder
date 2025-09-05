@@ -13,6 +13,9 @@ const equipment = {
     { name: "Med stuff", cost: 1000 },
     { name: "Defibrillator", cost: 1200 },
     { name: "Ventilator", cost: 3500 }
+  ],
+  sar: [
+    { name: "Drone", cost: 5000 }
   ]
 };
 if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {

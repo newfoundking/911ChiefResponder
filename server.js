@@ -23,7 +23,7 @@ db.serialize(() => {
 
 const { parseArrayField, reverseGeocode, pointInPolygon } = require('./utils');
 
-const TRAVEL_SPEED = { fire: 63, police: 94, ambulance: 75 }; // km/h (25% faster)
+const TRAVEL_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 }; // km/h (25% faster)
 function haversine(aLat, aLon, bLat, bLon) {
   const R = 6371;
   const dLat = (bLat - aLat) * Math.PI / 180;

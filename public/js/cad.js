@@ -86,6 +86,7 @@ const stationIcons = {
   fire: makeIcon('/fire.png', 24),
   police: makeIcon('/police.png', 24),
   ambulance: makeIcon('/star.png', 24),
+  sar: makeIcon('/sar.png', 24),  
   hospital: makeIcon('/star.png', 24),
   jail: makeIcon('/police.png', 24)
 };
@@ -845,7 +846,7 @@ async function dispatchUnits(mission, units, force=false) {
         seg_durations = (annotations?.duration?.length === coords.length - 1)
           ? annotations.duration
           : Array.from({ length: coords.length - 1 }, () => duration / Math.max(1, coords.length - 1));
-        const speedMultiplier = { fire: 1.2, police: 1.3, ambulance: 1.25 };
+        const speedMultiplier = { fire: 1.2, police: 1.3, ambulance: 1.25, sar: 1.2 };
         const mult = speedMultiplier[u.class] || 1;
         total_duration = Math.max(5, duration / mult);
       } catch (err) {
@@ -853,8 +854,8 @@ async function dispatchUnits(mission, units, force=false) {
         coords = [from, to];
         const distKm = haversine(from[0], from[1], to[0], to[1]);
         const baseSpeed = 56; // km/h
-        const mult = ({ fire: 1.2, police: 1.3, ambulance: 1.25 }[u.class] || 1);
-        total_duration = Math.max(5, (distKm / (baseSpeed * mult)) * 3600);
+       const mult = ({ fire: 1.2, police: 1.3, ambulance: 1.25, sar: 1.2 }[u.class] || 1);
+	   total_duration = Math.max(5, (distKm / (baseSpeed * mult)) * 3600);
         seg_durations = [total_duration];
       }
 

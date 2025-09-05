@@ -14,10 +14,15 @@ const unitTypes = [
   { class: "ambulance", type: "Mass Casualty",capacity: 4, equipmentSlots: 2, attributes: ["medicaltransport"],  cost: 25000 },
   { class: "ambulance", type: "Inter-facility Transport", capacity: 2, equipmentSlots: 1, attributes: ["medicaltransport"], cost: 13000 },
 
-  { class: "police", type: "Patrol Car",      capacity: 2, equipmentSlots: 1, attributes: ["prisonerTransport"], cost: 9000  },
-  { class: "police", type: "Unmarked Car",    capacity: 2, equipmentSlots: 1, attributes: [], cost: 9500  },
+  { class: "police", type: "Patrol Car",      capacity: 2, equipmentSlots: 2, attributes: ["prisonerTransport"], cost: 9000  },␊
+  { class: "police", type: "Unmarked Car",    capacity: 4, equipmentSlots: 2, attributes: [], cost: 9500  },
   { class: "police", type: "Special Services", capacity: 4, equipmentSlots: 4, attributes: [], cost: 20000 },
-  { class: "police", type: "SWAT Van",        capacity: 6, equipmentSlots: 4, attributes: ["armor","SWAT"], cost: 30000 }
+  { class: "police", type: "SWAT Van",        capacity: 6, equipmentSlots: 4, attributes: ["armor","SWAT"], cost: 30000 },
+
+  { class: "sar", type: "Rescue",     capacity: 4, equipmentSlots: 4, attributes: [], cost: 15000 },
+  { class: "sar", type: "Support",    capacity: 2, equipmentSlots: 4, attributes: [], cost: 5000 },
+  { class: "sar", type: "Command",    capacity: 2, equipmentSlots: 3, attributes: [], cost: 15000 },
+  { class: "sar", type: "Off Road",   capacity: 2, equipmentSlots: 2, attributes: [], cost: 12000 }
 ];
 unitTypes.sort((a,b) => a.class.localeCompare(b.class) || a.type.localeCompare(b.type));
 if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
