@@ -259,7 +259,7 @@
 
 <script>
 // ========= constants / helpers =========
-const CLASS_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 }; // km/h used across UI (25% faster)
+// CLASS_SPEED is provided by /config/unitTypes.js
 const TRAVEL_SPEED = unitTypes.reduce((acc, u) => {
   acc[u.type] = u.speed || CLASS_SPEED[u.class] || 63;
   return acc;
