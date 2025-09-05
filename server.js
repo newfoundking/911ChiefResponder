@@ -23,7 +23,7 @@ db.serialize(() => {
 
 const { parseArrayField, reverseGeocode, pointInPolygon } = require('./utils');
 
-const TRAVEL_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 }; // km/h (25% faster)
+const CLASS_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 }; // km/h (25% faster)
 function haversine(aLat, aLon, bLat, bLon) {
   const R = 6371;
   const dLat = (bLat - aLat) * Math.PI / 180;
@@ -321,7 +321,7 @@ async function allocateTransport(kind, lat, lon, unitClass) {
     f.distance = haversine(lat, lon, f.lat, f.lon);
   });
   facilities.sort((a, b) => a.distance - b.distance);
-  const speed = TRAVEL_SPEED[unitClass] || 63;
+  const speed = CLASS_SPEED[unitClass] || 63;
   const now = Date.now();
   for (let i = 0; i < facilities.length; i++) {
     const f = facilities[i];
