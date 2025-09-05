@@ -20,7 +20,7 @@ const trainingsByClass = {
     { name: "drone pilot", cost: 600 },
     { name: "negotiator", cost: 900 }
   ],
-   ambulance: [␊
+   ambulance: [
     { name: "EMR", cost: 400 },␊
     { name: "paramedic", cost: 800 },␊
     { name: "critical care", cost: 1200 },␊
