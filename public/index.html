@@ -259,7 +259,11 @@
 
 <script>
 // ========= constants / helpers =========
-const TRAVEL_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 }; // km/h used across UI (25% faster)
+const CLASS_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 }; // km/h used across UI (25% faster)
+const TRAVEL_SPEED = unitTypes.reduce((acc, u) => {
+  acc[u.type] = u.speed || CLASS_SPEED[u.class] || 63;
+  return acc;
+}, {});
 
 function haversineKm(aLat, aLon, bLat, bLon) {
   const R = 6371;
@@ -916,7 +920,7 @@ function startUnitPatrol(unit) {
   const st = _stationById.get(unit.station_id);
   if (!st) return;
   ensureUnitMarker(unit);
-  const speed = TRAVEL_SPEED[unit.class] || 63;
+  const speed = TRAVEL_SPEED[unit.type] || CLASS_SPEED[unit.class] || 63;
   const state = { start: Date.now() };
   patrolStates.set(unit.id, state);
   const maxMs = 60 * 60 * 1000;
@@ -2026,7 +2030,7 @@ async function cancelUnit(unitId, stationId) {
         unit.id,
         [current.lat, current.lng],
         [st.lat, st.lon],
-          TRAVEL_SPEED[unit.class] || 56,
+          TRAVEL_SPEED[unit.type] || CLASS_SPEED[unit.class] || 56,
         () => {
           const rp = unitRoutes.get(unit.id);
           if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(unit.id); }
@@ -2452,7 +2456,7 @@ async function openManualDispatch(mission) {
     const current = marker.getLatLng ? marker.getLatLng() : L.latLng(st.lat, st.lon);
     const from = [current.lat, current.lng];
     const to   = [mission.lat, mission.lon];
-      const spd  = TRAVEL_SPEED[u.class] || 56;
+      const spd  = TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56;
 
     routeAndAnimateUnit(
       uid, from, to, spd,
@@ -2718,7 +2722,7 @@ async function clearAssignedUnit(missionId, unitId) {
     const from = [current.lat, current.lng];
     const to   = [st.lat, st.lon];
     routeAndAnimateUnit(
-        u.id, from, to, TRAVEL_SPEED[u.class] || 56,
+        u.id, from, to, TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56,
       () => { const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); } fetch(`/api/unit-travel/${u.id}`,{method:'DELETE'}).catch(()=>{}); },
       { phase: 'return' }
     );
@@ -2814,7 +2818,7 @@ function setupTimerForMission(mission, endTime) {
         u.id,
         [current.lat, current.lng],
         [st.lat, st.lon],
-          TRAVEL_SPEED[u.class] || 56,
+          TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56,
         () => {
           const rp = unitRoutes.get(u.id);
           if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(u.id); }
@@ -2858,7 +2862,7 @@ async function rebuildEnrouteMarkers() {
       if (!u) continue;
       ensureUnitMarker(u);
       routeAndAnimateUnit(
-          t.unit_id, t.from, t.to, TRAVEL_SPEED[u.class] || 56,
+          t.unit_id, t.from, t.to, TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56,
         async () => {
           if (t.phase === 'to_scene') {
             await fetch(`/api/units/${t.unit_id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'on_scene' }) });
@@ -2893,7 +2897,7 @@ async function rebuildEnrouteMarkers() {
           const st = _stationById.get(u.station_id);
           if (!st) continue;
           ensureUnitMarker(u);
-            routeAndAnimateUnit(u.id, [st.lat, st.lon], [m.lat, m.lon], TRAVEL_SPEED[u.class] || 56, async ()=>{
+            routeAndAnimateUnit(u.id, [st.lat, st.lon], [m.lat, m.lon], TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56, async ()=>{
             await fetch(`/api/units/${u.id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'on_scene' }) });
             const entry = unitMarkers.get(u.id); if (entry){ try{ map.removeLayer(entry.marker); }catch{} unitMarkers.delete(u.id); }
             const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); }
