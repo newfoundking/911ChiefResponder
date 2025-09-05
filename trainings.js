@@ -21,9 +21,9 @@ const trainingsByClass = {
     { name: "negotiator", cost: 900 }
   ],
    ambulance: [
-    { name: "EMR", cost: 400 },␊
-    { name: "paramedic", cost: 800 },␊
-    { name: "critical care", cost: 1200 },␊
+    { name: "EMR", cost: 400 },
+    { name: "paramedic", cost: 800 },
+    { name: "critical care", cost: 1200 },
     { name: "team lead", cost: 900 },
     { name: "incident command", cost: 1000 }
   ],
