@@ -83,6 +83,18 @@
                                 box-shadow: 0 0 6px 2px red;
                         }
                 }
+
+                /* Station list grouping styles */
+                .dept-group { margin-bottom: 1em; }
+                .dept-heading { font-weight: bold; padding: 0.25em 0.5em; margin-bottom: 0.25em; }
+                .dept-heading.dept-fire { background: red; color: white; }
+                .dept-heading.dept-police { background: blue; color: white; }
+                .dept-heading.dept-ambulance { background: green; color: white; }
+                .dept-heading.dept-hospital { background: white; color: black; }
+                .dept-heading.dept-jail { background: gray; color: white; }
+                .station-entry { margin-bottom: 0.5em; }
+                .station-info { display: flex; justify-content: space-between; align-items: center; }
+                .station-info button { margin-left: 0.5em; }
         </style>
 </head>
 <body>
@@ -324,6 +336,17 @@ const colorPalette = ['red','blue','green','purple','orange','brown','pink','gra
 function colorForDept(d){
   if(!deptColors[d]) deptColors[d] = colorPalette[Object.keys(deptColors).length % colorPalette.length];
   return deptColors[d];
+}
+
+function deptClassFor(type){
+  switch(type){
+    case 'fire': return 'dept-fire';
+    case 'police': return 'dept-police';
+    case 'ambulance': return 'dept-ambulance';
+    case 'hospital': return 'dept-hospital';
+    case 'jail': return 'dept-jail';
+    default: return '';
+  }
 }
 
 document.getElementById("deleteAllStations").addEventListener("click", async () => {
@@ -948,7 +971,7 @@ async function fetchStations() {
     })
   );
 
-  stations.forEach((st, idx) => {
+  const stationData = stations.map((st, idx) => {
     const used = unitCounts[idx];
     const free = (st.bay_count || 0) - used;
     const iconUrl = st.icon || stationIcons[st.type] || stationIcons.fire;
@@ -956,7 +979,6 @@ async function fetchStations() {
     const marker = L.marker([st.lat, st.lon], { icon }).addTo(map).on("click", () => showStationDetails(st));
     stationMarkers.push(marker);
     stationMarkerById.set(st.id, marker);
-    const el = document.createElement("div");
     let info = '';
     if (st.type === 'hospital') {
       const occ = Number(st.occupied_beds || 0);
@@ -967,17 +989,50 @@ async function fetchStations() {
       const cap = Number(st.holding_cells || 0);
       info = `Cells: ${occ}/${cap} (Free: ${cap - occ})`;
       if (st.type === 'police') {
-        info += `<br>Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
+        info += ` | Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
       }
     } else {
       info = `Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
     }
-    el.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong><br>Type: ${st.type}<br>Department: ${st.department || ''}<br>${info}<br>`;
-    const btn = document.createElement('button');
-    btn.textContent = 'Details';
-    btn.addEventListener('click', () => showStationDetails(st));
-    el.appendChild(btn);
-    list.appendChild(el);
+    return { st, info };
+  });
+
+  const groups = {};
+  stationData.forEach(({ st, info }) => {
+    const dept = st.department || 'Unknown';
+    if (!groups[dept]) groups[dept] = [];
+    groups[dept].push({ st, info });
+  });
+
+  Object.keys(groups).sort().forEach(dept => {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'dept-group';
+    const deptType = groups[dept][0].st.type;
+    const header = document.createElement('div');
+    header.className = `dept-heading ${deptClassFor(deptType)}`;
+    header.textContent = dept;
+    groupEl.appendChild(header);
+
+    groups[dept].sort((a,b) => a.st.name.localeCompare(b.st.name));
+    groups[dept].forEach(({ st, info }) => {
+      const stationEl = document.createElement('div');
+      stationEl.className = 'station-entry';
+      const nameDiv = document.createElement('div');
+      nameDiv.innerHTML = `<strong class="focus-station" data-lat="${st.lat}" data-lon="${st.lon}" style="cursor:pointer;">${st.name}</strong>`;
+      stationEl.appendChild(nameDiv);
+      const infoDiv = document.createElement('div');
+      infoDiv.className = 'station-info';
+      const infoSpan = document.createElement('span');
+      infoSpan.innerHTML = info;
+      const btn = document.createElement('button');
+      btn.textContent = 'Details';
+      btn.addEventListener('click', () => showStationDetails(st));
+      infoDiv.appendChild(infoSpan);
+      infoDiv.appendChild(btn);
+      stationEl.appendChild(infoDiv);
+      groupEl.appendChild(stationEl);
+    });
+    list.appendChild(groupEl);
   });
 }
 
