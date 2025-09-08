@@ -52,16 +52,27 @@ async function createMission(req, res) {
   db.all('SELECT * FROM response_zones', (err, zones) => {
     if (err) return res.status(500).json({ error: err.message });
 
-    const departmentSet = new Set();
+    const matches = [];
     zones.forEach(z => {
       try {
         const poly = JSON.parse(z.polygon || '{}');
         if (pointInPolygon(lat, lon, poly)) {
-          parseArrayField(z.departments).forEach(d => departmentSet.add(d));
+          const prio = z.priority != null ? Number(z.priority) : Infinity;
+          matches.push({ priority: prio, departments: parseArrayField(z.departments) });
         }
       } catch {}
     });
-    const departments = Array.from(departmentSet);
+    matches.sort((a, b) => a.priority - b.priority);
+    const seen = new Set();
+    const departments = [];
+    matches.forEach(m => {
+      m.departments.forEach(d => {
+        if (!seen.has(d)) {
+          seen.add(d);
+          departments.push(d);
+        }
+      });
+    });
 
     db.run(`
       INSERT INTO missions
