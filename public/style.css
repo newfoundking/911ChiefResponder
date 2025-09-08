@@ -239,3 +239,32 @@ h3 {
 .notification-error {
   background: #dc3545;
 }
+
+@media (max-width: 768px) {
+  #cadContent {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 50vh 1fr;
+  }
+
+  #cadMissions {
+    grid-row: 1;
+    grid-column: 1;
+    width: 100%;
+  }
+
+  #cadMap,
+  #cadDetail {
+    grid-row: 2;
+    grid-column: 1;
+    width: 100%;
+    height: 100%;
+  }
+
+  #cadStations,
+  #cadUnits {
+    grid-row: 3;
+    grid-column: 1;
+    width: 100%;
+    height: 100%;
+  }
+}
