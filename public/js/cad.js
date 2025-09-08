@@ -671,6 +671,35 @@ async function openMission(id) {
   });
 }
 
+async function missionDepartmentsFor(mission) {
+  if (Array.isArray(mission.departments) && mission.departments.length) return mission.departments;
+  try {
+    const zones = await fetch('/api/response-zones').then(r=>r.json());
+    const set = new Set();
+    for (const z of zones) {
+      if (pointInPolygon(mission.lat, mission.lon, z.polygon)) {
+        const depts = Array.isArray(z.departments) ? z.departments : [];
+        depts.forEach(d=>set.add(d));
+      }
+    }
+    return Array.from(set);
+  } catch {
+    return [];
+  }
+}
+
+function pointInPolygon(lat, lon, poly) {
+  const pts = Array.isArray(poly?.coordinates) ? poly.coordinates : [];
+  let inside = false;
+  for (let i=0, j=pts.length-1; i<pts.length; j=i++) {
+    const xi = pts[i][1], yi = pts[i][0];
+    const xj = pts[j][1], yj = pts[j][0];
+    const intersect = ((yi>lat)!==(yj>lat)) && (lon < (xj - xi)*(lat - yi)/(yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 async function autoDispatch(mission) {
   try {
     const [stations, allUnitsRaw] = await Promise.all([
@@ -678,7 +707,7 @@ async function autoDispatch(mission) {
       fetchNoCache('/api/units?status=available').then(r=>r.json())
     ]);
     const stMap = new Map(stations.map(s=>[s.id,s]));
-    const missionDepts = Array.isArray(mission.departments) ? mission.departments : [];
+    const missionDepts = await missionDepartmentsFor(mission);
     const allUnits = allUnitsRaw
       .filter(u=>{
         const st = stMap.get(u.station_id);
