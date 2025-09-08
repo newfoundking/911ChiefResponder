@@ -183,7 +183,9 @@ h3 {
 }
 
 .cad-speed {
-    padding:0.5em 1em;
+    padding:0.75em 1.25em;
+    min-width:44px;
+    min-height:44px;
     border:none;
     background:#333;
     color:#fff;
@@ -197,7 +199,9 @@ h3 {
 }
 
 .cad-action {
-    padding:0.5em 1em;
+    padding:0.75em 1.25em;
+    min-width:44px;
+    min-height:44px;
     border:none;
     background:#333;
     color:#fff;
