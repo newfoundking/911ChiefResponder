@@ -2542,27 +2542,56 @@ async function openUnitTypeDispatch(mission) {
   }
 }
 
+async function missionDepartmentsFor(mission) {
+  if (Array.isArray(mission.departments) && mission.departments.length) return mission.departments;
+  try {
+    const zones = await fetch('/api/response-zones').then(r => r.json());
+    const set = new Set();
+    for (const z of zones) {
+      if (pointInPolygon(mission.lat, mission.lon, z.polygon)) {
+        const depts = Array.isArray(z.departments) ? z.departments : [];
+        depts.forEach(d => set.add(d));
+      }
+    }
+    return Array.from(set);
+  } catch {
+    return [];
+  }
+}
+
+function pointInPolygon(lat, lon, poly) {
+  const pts = Array.isArray(poly?.coordinates) ? poly.coordinates : [];
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][1], yi = pts[i][0];
+    const xj = pts[j][1], yj = pts[j][0];
+    const intersect = ((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 async function autoDispatch(mission) {
   const area = document.getElementById('manualDispatchArea');
   area.innerHTML = 'Selecting units…';
   try {
     const [stations, allUnitsRaw] = await Promise.all([
-      fetch('/api/stations').then(r=>r.json()),
-      fetch('/api/units?status=available').then(r=>r.json())
-    ]);
-    cacheStations(stations);
-    const stMap = new Map(stations.map(s=>[s.id,s]));
-    const allUnits = allUnitsRaw
-      .filter(u=>{
-        const st = stMap.get(u.station_id);
-        const mDepts = Array.isArray(mission.departments) ? mission.departments : [];
-        return mDepts.length === 0 || (st && mDepts.includes(st.department));
-      })
-      .map(u=>{
-        const st = stMap.get(u.station_id);
-        const dist = st ? haversineKm(st.lat, st.lon, mission.lat, mission.lon) : Infinity;
-        const priority = Number(u.priority) || 1;
-        return { ...u, priority, _dist: dist };
+    fetch('/api/stations').then(r=>r.json()),
+    fetch('/api/units?status=available').then(r=>r.json())
+  ]);
+  cacheStations(stations);
+  const stMap = new Map(stations.map(s=>[s.id,s]));
+  const missionDepts = await missionDepartmentsFor(mission);
+  const allUnits = allUnitsRaw
+    .filter(u=>{
+      const st = stMap.get(u.station_id);
+      return missionDepts.length === 0 || (st && missionDepts.includes(st.department));
+    })
+    .map(u=>{
+      const st = stMap.get(u.station_id);
+      const dist = st ? haversineKm(st.lat, st.lon, mission.lat, mission.lon) : Infinity;
+      const priority = Number(u.priority) || 1;
+      return { ...u, priority, _dist: dist };
       });
 
     const sortUnits = (a,b)=>{
