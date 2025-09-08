@@ -1056,12 +1056,12 @@ async function fetchZones() {
     const coords = (z.polygon?.coordinates || []).map(c => [c[0], c[1]]);
     const deptList = Array.isArray(z.departments) ? z.departments : [];
     const layer = L.polygon(coords, { color: colorForDept(deptList[0]) }).addTo(zoneLayerGroup);
-    layer.bindPopup(`${z.name} (${deptList.join(', ')})`);
+    layer.bindPopup(`${z.name} [P${z.priority ?? 'null'}] (${deptList.join(', ')})`);
     layer.on('click', () => startEditZone(z.id));
     zoneLayers.set(z.id, layer);
     if (list) {
       const el = document.createElement('div');
-      el.innerHTML = `${z.name} (${deptList.join(', ')}) <button class="edit-zone" data-id="${z.id}">Edit</button> <button class="delete-zone" data-id="${z.id}">Delete</button>`;
+      el.innerHTML = `${z.name} [P${z.priority ?? 'null'}] (${deptList.join(', ')}) <button class="edit-zone" data-id="${z.id}">Edit</button> <button class="delete-zone" data-id="${z.id}">Delete</button>`;
       list.appendChild(el);
     }
   });
@@ -1098,16 +1098,18 @@ document.getElementById('saveZoneEditBtn').addEventListener('click', async () =>
     title: 'Edit Zone',
     fields: [
       { name: 'name', label: 'Zone name', type: 'text', value: z?.name || '', required: true },
-      { name: 'departments', label: 'Departments (comma-separated)', type: 'text', value: (z?.departments||[]).join(', ') }
+      { name: 'departments', label: 'Departments (comma-separated)', type: 'text', value: (z?.departments||[]).join(', ') },
+      { name: 'priority', label: 'Priority (lower is higher)', type: 'number', value: z?.priority ?? '' }
     ]
   });
   if (!result) { editingZoneId = null; document.getElementById('saveZoneEditBtn').style.display = 'none'; fetchZones(); return; }
   const name = result.name.trim() || (z?.name || '');
   const departments = (result.departments || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const priority = result.priority === '' ? null : Number(result.priority);
   await fetch(`/api/response-zones/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, departments, polygon: { coordinates: latlngs } })
+    body: JSON.stringify({ name, departments, priority, polygon: { coordinates: latlngs } })
   });
   editingZoneId = null;
   document.getElementById('saveZoneEditBtn').style.display = 'none';
@@ -1131,12 +1133,14 @@ map.on('draw:created', async e => {
     title: 'Create Zone',
     fields: [
       { name: 'name', label: 'Zone name', type: 'text', value: 'Zone', required: true },
-      { name: 'departments', label: `Departments (comma-separated) (${depts.join(', ')})`, type: 'text' }
+      { name: 'departments', label: `Departments (comma-separated) (${depts.join(', ')})`, type: 'text' },
+      { name: 'priority', label: 'Priority (lower is higher)', type: 'number', value: '' }
     ]
   });
   if (!result) { map.removeLayer(e.layer); return; }
   const name = result.name.trim() || 'Zone';
   const departments = (result.departments || '').split(',').map(s=>s.trim()).filter(Boolean);
+  const priority = result.priority === '' ? null : Number(result.priority);
   const newPoly = turf.polygon([ring.map(([lat, lng]) => [lng, lat])]);
   for (const z of [...responseZones]) {
     const existingRing = z.polygon.coordinates.slice();
@@ -1153,7 +1157,7 @@ map.on('draw:created', async e => {
         await fetch(`/api/response-zones/${z.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: z.name, departments: z.departments, polygon: { coordinates: newCoords } })
+          body: JSON.stringify({ name: z.name, departments: z.departments, priority: z.priority ?? null, polygon: { coordinates: newCoords } })
         });
       } else {
         await fetch(`/api/response-zones/${z.id}`, { method: 'DELETE' });
@@ -1163,7 +1167,7 @@ map.on('draw:created', async e => {
   await fetch('/api/response-zones', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, departments, polygon: { coordinates: latlngs } })
+    body: JSON.stringify({ name, departments, priority, polygon: { coordinates: latlngs } })
   });
   fetchZones();
 });
@@ -2546,14 +2550,26 @@ async function missionDepartmentsFor(mission) {
   if (Array.isArray(mission.departments) && mission.departments.length) return mission.departments;
   try {
     const zones = await fetch('/api/response-zones').then(r => r.json());
-    const set = new Set();
+    const matches = [];
     for (const z of zones) {
       if (pointInPolygon(mission.lat, mission.lon, z.polygon)) {
+        const prio = z.priority != null ? Number(z.priority) : Infinity;
         const depts = Array.isArray(z.departments) ? z.departments : [];
-        depts.forEach(d => set.add(d));
+        matches.push({ priority: prio, departments: depts });
       }
     }
-    return Array.from(set);
+    matches.sort((a, b) => a.priority - b.priority);
+    const seen = new Set();
+    const departments = [];
+    for (const m of matches) {
+      m.departments.forEach(d => {
+        if (!seen.has(d)) {
+          seen.add(d);
+          departments.push(d);
+        }
+      });
+    }
+    return departments;
   } catch {
     return [];
   }
