@@ -54,8 +54,8 @@ app.use('/api/stations', stationsRoutes);
 app.use('/api/units', unitsRoutes);
 
 // Route proxy endpoint to avoid client-side CORS issues.  Attempts OSRM first
-// (with snapped coordinates), then falls back to GraphHopper/OpenRouteService
-// before finally returning a straight‐line haversine route.
+// (with snapped coordinates), then falls back to GraphHopper/OpenRouteService.
+// If all providers fail, an error is returned instead of a straight-line route.
 app.get('/api/route', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ error: 'missing from/to' });
@@ -149,21 +149,11 @@ app.get('/api/route', async (req, res) => {
         }
       }
     } catch {
-      /* ignore and fall back */
+      /* ignore and let final error handler run */
     }
 
-    // Final fallback: straight-line haversine
-    const coords = [snappedFrom, snappedTo];
-    const distance = haversine(snappedFrom[0], snappedFrom[1], snappedTo[0], snappedTo[1]);
-    const duration = (distance / 60) * 3600; // assume 60 km/h
-    return res.json({
-      coords,
-      duration,
-      annotations: null,
-      from: snappedFrom,
-      to: snappedTo,
-      provider: 'haversine'
-    });
+    // All routing providers failed; return an error so callers can decide how to handle it.
+    return res.status(502).json({ error: 'No routing provider available' });
   }
 });
 
