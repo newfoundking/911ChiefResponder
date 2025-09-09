@@ -59,15 +59,10 @@ function haversine(aLat, aLon, bLat, bLon) {
 }
 
 async function fetchRouteOSRM(from, to) {
-  const url = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson&annotations=duration,distance&steps=false`;
+  const url = `/api/route?from=${from[0]},${from[1]}&to=${to[0]},${to[1]}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`OSRM ${res.status}`);
-  const json = await res.json();
-  if (!json.routes?.length) throw new Error('No route');
-  const route = json.routes[0];
-  const coords = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
-  const duration = route.duration;
-  const annotations = route.legs?.[0]?.annotation || null;
+  if (!res.ok) throw new Error(`route ${res.status}`);
+  const { coords, duration, annotations } = await res.json();
   return { coords, duration, annotations };
 }
 
