@@ -62,8 +62,10 @@ async function fetchRouteOSRM(from, to) {
   const url = `/api/route?from=${from[0]},${from[1]}&to=${to[0]},${to[1]}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`route ${res.status}`);
-  const { coords, duration, annotations } = await res.json();
-  return { coords, duration, annotations };
+  // Server may return additional metadata such as snapped endpoints and
+  // provider information.  Pass through the full JSON so callers can make
+  // use of it.
+  return res.json();
 }
 
 let cachedMissions = [];
@@ -857,31 +859,20 @@ async function dispatchUnits(mission, units, force=false) {
     try {
       const st = cachedStations.find(s => s.id === u.station_id);
       if (!st) continue;
-      const from = [st.lat, st.lon];
-      const to = [mission.lat, mission.lon];
+      const rawFrom = [st.lat, st.lon];
+      const rawTo = [mission.lat, mission.lon];
 
-      let coords = [];
-      let seg_durations = [];
-      let total_duration = 0;
+      const { coords, duration, annotations, from: snappedFrom, to: snappedTo } = await fetchRouteOSRM(rawFrom, rawTo);
+      const from = snappedFrom || rawFrom;
+      const to = snappedTo || rawTo;
 
-      try {
-        const { coords: osrmCoords, duration, annotations } = await fetchRouteOSRM(from, to);
-        coords = osrmCoords;
-        seg_durations = (annotations?.duration?.length === coords.length - 1)
-          ? annotations.duration
-          : Array.from({ length: coords.length - 1 }, () => duration / Math.max(1, coords.length - 1));
-        const speedMultiplier = { fire: 1.2, police: 1.3, ambulance: 1.25, sar: 1.2 };
-        const mult = speedMultiplier[u.class] || 1;
-        total_duration = Math.max(5, duration / mult);
-      } catch (err) {
-        console.warn('OSRM route failed; straight-line fallback:', err);
-        coords = [from, to];
-        const distKm = haversine(from[0], from[1], to[0], to[1]);
-        const baseSpeed = 56; // km/h
-       const mult = ({ fire: 1.2, police: 1.3, ambulance: 1.25, sar: 1.2 }[u.class] || 1);
-	   total_duration = Math.max(5, (distKm / (baseSpeed * mult)) * 3600);
-        seg_durations = [total_duration];
-      }
+      const seg_durations = (annotations?.duration?.length === coords.length - 1)
+        ? annotations.duration
+        : Array.from({ length: coords.length - 1 }, () => duration / Math.max(1, coords.length - 1));
+
+      const speedMultiplier = { fire: 1.2, police: 1.3, ambulance: 1.25, sar: 1.2 };
+      const mult = speedMultiplier[u.class] || 1;
+      const total_duration = Math.max(5, duration / mult);
 
       await fetch('/api/unit-travel', {
         method: 'POST',

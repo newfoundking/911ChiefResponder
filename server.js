@@ -53,26 +53,117 @@ app.use('/api/missions', missionsRoutes);
 app.use('/api/stations', stationsRoutes);
 app.use('/api/units', unitsRoutes);
 
-// Route proxy endpoint to avoid client-side CORS issues
+// Route proxy endpoint to avoid client-side CORS issues.  Attempts OSRM first
+// (with snapped coordinates), then falls back to GraphHopper/OpenRouteService
+// before finally returning a straight‐line haversine route.
 app.get('/api/route', async (req, res) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ error: 'missing from/to' });
   const [fromLat, fromLon] = from.split(',').map(Number);
   const [toLat, toLon] = to.split(',').map(Number);
+
+  // Snap start/end to the nearest road using OSRM's `nearest` service.
+  let snappedFrom = [fromLat, fromLon];
+  let snappedTo = [toLat, toLon];
   try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${fromLon},${fromLat};${toLon},${toLat}?overview=full&geometries=geojson&annotations=duration,distance&steps=false`;
+    const nf = await axios.get(
+      `https://router.project-osrm.org/nearest/v1/driving/${fromLon},${fromLat}?number=1`,
+      { timeout: 5000 }
+    );
+    if (nf.data?.waypoints?.length) {
+      const [lon, lat] = nf.data.waypoints[0].location;
+      snappedFrom = [lat, lon];
+    }
+    const nt = await axios.get(
+      `https://router.project-osrm.org/nearest/v1/driving/${toLon},${toLat}?number=1`,
+      { timeout: 5000 }
+    );
+    if (nt.data?.waypoints?.length) {
+      const [lon, lat] = nt.data.waypoints[0].location;
+      snappedTo = [lat, lon];
+    }
+  } catch {
+    // Ignore snapping errors; we'll fall back to original coordinates.
+  }
+
+  // Try OSRM routing first.
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${snappedFrom[1]},${snappedFrom[0]};${snappedTo[1]},${snappedTo[0]}?overview=full&geometries=geojson&annotations=duration,distance&steps=false`;
     const { data } = await axios.get(url, { timeout: 5000 });
     if (!data.routes?.length) throw new Error('No route');
     const route = data.routes[0];
     const coords = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
     const duration = route.duration;
     const annotations = route.legs?.[0]?.annotation || null;
-    res.json({ coords, duration, annotations });
+    return res.json({
+      coords,
+      duration,
+      annotations,
+      from: snappedFrom,
+      to: snappedTo,
+      provider: 'osrm'
+    });
   } catch (err) {
-    const coords = [[fromLat, fromLon], [toLat, toLon]];
-    const distance = haversine(fromLat, fromLon, toLat, toLon);
+    // Secondary provider: GraphHopper
+    try {
+      const ghKey = process.env.GRAPHHOPPER_KEY;
+      if (ghKey) {
+        const ghUrl = `https://graphhopper.com/api/1/route?point=${snappedFrom[0]},${snappedFrom[1]}&point=${snappedTo[0]},${snappedTo[1]}&profile=car&calc_points=true&points_encoded=false&key=${ghKey}`;
+        const { data } = await axios.get(ghUrl, { timeout: 5000 });
+        const path = data.paths?.[0];
+        if (path?.points?.coordinates) {
+          const coords = path.points.coordinates.map(([lon, lat]) => [lat, lon]);
+          const duration = path.time / 1000; // ms → s
+          return res.json({
+            coords,
+            duration,
+            annotations: null,
+            from: snappedFrom,
+            to: snappedTo,
+            provider: 'graphhopper'
+          });
+        }
+      }
+    } catch {
+      /* ignore and try next provider */
+    }
+
+    // Secondary provider: OpenRouteService
+    try {
+      const orsKey = process.env.ORS_KEY || process.env.OPENROUTESERVICE_KEY;
+      if (orsKey) {
+        const orsUrl = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${orsKey}&start=${snappedFrom[1]},${snappedFrom[0]}&end=${snappedTo[1]},${snappedTo[0]}`;
+        const { data } = await axios.get(orsUrl, { timeout: 5000 });
+        const route = data.features?.[0];
+        if (route) {
+          const coords = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+          const duration = route.properties?.summary?.duration || 0;
+          return res.json({
+            coords,
+            duration,
+            annotations: null,
+            from: snappedFrom,
+            to: snappedTo,
+            provider: 'openrouteservice'
+          });
+        }
+      }
+    } catch {
+      /* ignore and fall back */
+    }
+
+    // Final fallback: straight-line haversine
+    const coords = [snappedFrom, snappedTo];
+    const distance = haversine(snappedFrom[0], snappedFrom[1], snappedTo[0], snappedTo[1]);
     const duration = (distance / 60) * 3600; // assume 60 km/h
-    res.json({ coords, duration, annotations: null });
+    return res.json({
+      coords,
+      duration,
+      annotations: null,
+      from: snappedFrom,
+      to: snappedTo,
+      provider: 'haversine'
+    });
   }
 });
 
