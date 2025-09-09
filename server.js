@@ -165,7 +165,7 @@ app.get('/api/route', async (req, res) => {
         if (route) {
           const coords = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
           const duration = route.properties?.summary?.duration || 0;
-          return cacheAndReturn({{
+          return cacheAndReturn({
             coords,
             duration,
             annotations: null,
