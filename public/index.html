@@ -710,14 +710,8 @@ async function routeAndAnimateUnit(unitId, from, to, speedClassKmh, onArrive, re
     ensureUnitMarker(u || { id: unitId, station_id: 0, class: 'fire' });
     animateAlongRouteOffset(unitId, coords, seg_durations, onArrive, 0);
   } catch (err) {
-    console.warn('OSRM route failed; straight-line fallback:', err);
-    const R = 6371;
-    const dLat = (to[0]-from[0]) * Math.PI/180, dLon = (to[1]-to[0]) * Math.PI/180;
-    const la1 = from[0] * Math.PI/180, la2 = to[0] * Math.PI/180;
-    const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
-    const distKm = 2*R*Math.asin(Math.sqrt(h));
-      const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 56)) * 3600));
-    animateMoveUnit(unitId, from, to, etaSec * 1000, onArrive);
+    console.error('Routing failed:', err);
+    return;
   }
 }
 
@@ -904,9 +898,10 @@ async function patrolRoute(unitId, from, to, speedClassKmh, onDone) {
     drawRoute(unitId, coords);
     animateAlongRouteOffset(unitId, coords, seg_durations, onDone, 0);
   } catch (err) {
-    const distKm = haversineKm(from[0], from[1], to[0], to[1]);
-    const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 56)) * 3600));
-    animateMoveUnit(unitId, from, to, etaSec * 1000, onDone);
+    console.error('Routing failed during patrol:', err);
+    patrolStates.delete(unitId);
+    if (typeof onDone === 'function') onDone();
+    return;
   }
 }
 
