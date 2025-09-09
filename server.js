@@ -53,6 +53,29 @@ app.use('/api/missions', missionsRoutes);
 app.use('/api/stations', stationsRoutes);
 app.use('/api/units', unitsRoutes);
 
+// Route proxy endpoint to avoid client-side CORS issues
+app.get('/api/route', async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'missing from/to' });
+  const [fromLat, fromLon] = from.split(',').map(Number);
+  const [toLat, toLon] = to.split(',').map(Number);
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${fromLon},${fromLat};${toLon},${toLat}?overview=full&geometries=geojson&annotations=duration,distance&steps=false`;
+    const { data } = await axios.get(url, { timeout: 5000 });
+    if (!data.routes?.length) throw new Error('No route');
+    const route = data.routes[0];
+    const coords = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+    const duration = route.duration;
+    const annotations = route.legs?.[0]?.annotation || null;
+    res.json({ coords, duration, annotations });
+  } catch (err) {
+    const coords = [[fromLat, fromLon], [toLat, toLon]];
+    const distance = haversine(fromLat, fromLon, toLat, toLon);
+    const duration = (distance / 60) * 3600; // assume 60 km/h
+    res.json({ coords, duration, annotations: null });
+  }
+});
+
 db.serialize(() => {
   // Stations
   db.run(`
