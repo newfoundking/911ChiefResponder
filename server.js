@@ -24,6 +24,7 @@ db.serialize(() => {
 const { parseArrayField, reverseGeocode, pointInPolygon } = require('./utils');
 
 const CLASS_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 }; // km/h (25% faster)
+const ROUTE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 function haversine(aLat, aLon, bLat, bLon) {
   const R = 6371;
   const dLat = (bLat - aLat) * Math.PI / 180;
@@ -62,6 +63,32 @@ app.get('/api/route', async (req, res) => {
   const [fromLat, fromLon] = from.split(',').map(Number);
   const [toLat, toLon] = to.split(',').map(Number);
 
+  const now = Date.now();
+  const cacheKey = [fromLat, fromLon, toLat, toLon];
+  try {
+    const row = await new Promise((resolve, reject) => {
+      db.get(
+        `SELECT payload, updated_at FROM route_cache WHERE from_lat=? AND from_lon=? AND to_lat=? AND to_lon=?`,
+        cacheKey,
+        (err, r) => (err ? reject(err) : resolve(r))
+      );
+    });
+    if (row && now - row.updated_at < ROUTE_CACHE_TTL) {
+      return res.json(JSON.parse(row.payload));
+    }
+  } catch {
+    /* ignore cache errors */
+  }
+
+  function cacheAndReturn(payload) {
+    db.run(
+      `INSERT OR REPLACE INTO route_cache (from_lat, from_lon, to_lat, to_lon, payload, updated_at) VALUES (?,?,?,?,?,?)`,
+      [...cacheKey, JSON.stringify(payload), now]
+    );
+    db.run(`DELETE FROM route_cache WHERE updated_at < ?`, now - ROUTE_CACHE_TTL);
+    return res.json(payload);
+  } 
+
   // Snap start/end to the nearest road using OSRM's `nearest` service.
   let snappedFrom = [fromLat, fromLon];
   let snappedTo = [toLat, toLon];
@@ -95,7 +122,7 @@ app.get('/api/route', async (req, res) => {
     const coords = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
     const duration = route.duration;
     const annotations = route.legs?.[0]?.annotation || null;
-    return res.json({
+	return cacheAndReturn({
       coords,
       duration,
       annotations,
@@ -114,7 +141,7 @@ app.get('/api/route', async (req, res) => {
         if (path?.points?.coordinates) {
           const coords = path.points.coordinates.map(([lon, lat]) => [lat, lon]);
           const duration = path.time / 1000; // ms → s
-          return res.json({
+          return cacheAndReturn({
             coords,
             duration,
             annotations: null,
@@ -138,7 +165,7 @@ app.get('/api/route', async (req, res) => {
         if (route) {
           const coords = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
           const duration = route.properties?.summary?.duration || 0;
-          return res.json({
+          return cacheAndReturn({{
             coords,
             duration,
             annotations: null,
@@ -158,6 +185,19 @@ app.get('/api/route', async (req, res) => {
 });
 
 db.serialize(() => {
+  // Route cache
+  db.run(`
+    CREATE TABLE IF NOT EXISTS route_cache (
+      from_lat REAL,
+      from_lon REAL,
+      to_lat REAL,
+      to_lon REAL,
+      payload TEXT,
+      updated_at INTEGER,
+      PRIMARY KEY (from_lat, from_lon, to_lat, to_lon)
+    )
+  `);
+
   // Stations
   db.run(`
     CREATE TABLE IF NOT EXISTS stations (
