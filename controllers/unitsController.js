@@ -1,6 +1,7 @@
 const db = require('../db');
 const { parseArrayField } = require('../utils');
 const unitTypes = require('../unitTypes');
+const { startPatrol } = require('../services/patrol');
 
 // GET /api/units
 function getUnits(req, res) {
@@ -126,8 +127,10 @@ function patchPatrol(req, res) {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid unit id' });
   const patrol = req.body && req.body.patrol ? 1 : 0;
-  db.run('UPDATE units SET patrol=? WHERE id=?', [patrol, id], function (err) {
+  const until = patrol ? Date.now() + 60 * 60 * 1000 : null;
+  db.run('UPDATE units SET patrol=?, patrol_until=? WHERE id=?', [patrol, until, id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
+    if (patrol) startPatrol(id); else db.run('DELETE FROM unit_travel WHERE unit_id=?', [id], () => {});
     res.json({ success: true, patrol: Boolean(patrol) });
   });
 }
