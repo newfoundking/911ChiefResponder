@@ -882,56 +882,26 @@ async function fetchMissions() {
 // ===== Patrol helpers =====
 const patrolStates = new Map();
 
-function randomPointNear(lat, lon, radiusKm) {
-  const r = radiusKm / 6371;
-  const u = Math.random();
-  const v = Math.random();
-  const w = r * Math.sqrt(u);
-  const t = 2 * Math.PI * v;
-  const lat1 = lat * Math.PI/180;
-  const lon1 = lon * Math.PI/180;
-  const newLat = Math.asin(Math.sin(lat1)*Math.cos(w) + Math.cos(lat1)*Math.sin(w)*Math.cos(t));
-  const newLon = lon1 + Math.atan2(Math.sin(t)*Math.sin(w)*Math.cos(lat1), Math.cos(w) - Math.sin(lat1)*Math.sin(newLat));
-  return [newLat*180/Math.PI, newLon*180/Math.PI];
-}
-
-async function patrolRoute(unitId, from, to, speedClassKmh, onDone) {
-  try {
-    const { coords, duration, annotations } = await fetchRouteOSRM(from, to);
-    const seg_durations = (annotations?.duration?.length === coords.length - 1)
-      ? annotations.duration
-      : Array.from({ length: coords.length - 1 }, () => duration / Math.max(1, coords.length - 1));
-    drawRoute(unitId, coords);
-    animateAlongRouteOffset(unitId, coords, seg_durations, onDone, 0);
-  } catch (err) {
-    const distKm = haversineKm(from[0], from[1], to[0], to[1]);
-    const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 56)) * 3600));
-    animateMoveUnit(unitId, from, to, etaSec * 1000, onDone);
-  }
-}
-
-function startUnitPatrol(unit) {
+async function startUnitPatrol(unit) {
   if (!unit || patrolStates.has(unit.id)) return;
-  const st = _stationById.get(unit.station_id);
-  if (!st) return;
-  ensureUnitMarker(unit);
-  const speed = TRAVEL_SPEED[unit.type] || CLASS_SPEED[unit.class] || 63;
-  const state = { start: Date.now() };
-  patrolStates.set(unit.id, state);
-  const maxMs = 60 * 60 * 1000;
-
-  const step = (from) => {
-    const s = patrolStates.get(unit.id);
-    if (!s) return;
-    if (Date.now() - s.start >= maxMs) {
-      patrolRoute(unit.id, from, [st.lat, st.lon], speed, () => patrolStates.delete(unit.id));
+  patrolStates.set(unit.id, true);
+  const step = async () => {
+    let travel = null;
+    try {
+      const travels = await fetch('/api/unit-travel/active').then(r => r.json());
+      travel = travels.find(t => t.unit_id === unit.id);
+    } catch {}
+    if (!travel || travel.phase !== 'patrol') {
+      if (_unitById.get(unit.id)?.patrol) { setTimeout(step, 1000); }
+      else patrolStates.delete(unit.id);
       return;
     }
-    const dest = randomPointNear(st.lat, st.lon, 5);
-    patrolRoute(unit.id, from, dest, speed, () => step(dest));
+    ensureUnitMarker(unit);
+    const speed = TRAVEL_SPEED[unit.type] || CLASS_SPEED[unit.class] || 63;
+    routeAndAnimateUnit(unit.id, travel.from, travel.to, speed, step, { saved: travel, phase: 'patrol' });
+    patrolStates.set(unit.id, true);
   };
-
-  step([st.lat, st.lon]);
+  setTimeout(step, 200);
 }
 
 async function generateMissionAtPOI(poi) {
@@ -2121,7 +2091,13 @@ async function showUnitDetails(unitId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ patrol: val })
     });
-    _unitById.set(unitId, { ...unit, patrol: val });
+    const updated = { ...unit, patrol: val };
+    _unitById.set(unitId, updated);
+    if (val) startUnitPatrol(updated);
+    else {
+      patrolStates.delete(unitId);
+      fetch(`/api/unit-travel/${unitId}`, { method: 'DELETE' }).catch(() => {});
+    }
   });
 
   const cancelBtn = content.querySelector('#cancel-mission-btn');
@@ -2900,6 +2876,10 @@ async function rebuildEnrouteMarkers() {
     for (const t of travels) {
       const u = _unitById.get(t.unit_id);
       if (!u) continue;
+      if (t.phase === 'patrol') {
+        startUnitPatrol(u);
+        continue;
+      }
       ensureUnitMarker(u);
       routeAndAnimateUnit(
           t.unit_id, t.from, t.to, TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56,

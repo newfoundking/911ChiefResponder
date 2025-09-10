@@ -22,6 +22,7 @@ db.serialize(() => {
 });
 
 const { parseArrayField, reverseGeocode, pointInPolygon } = require('./utils');
+const { startPatrol, handlePatrolCompletion } = require('./services/patrol');
 
 const CLASS_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 }; // km/h (25% faster)
 const ROUTE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
@@ -310,6 +311,7 @@ db.serialize(() => {
       responding_icon TEXT,
       responding INTEGER DEFAULT 0,
       patrol INTEGER DEFAULT 0,
+      patrol_until INTEGER,
       FOREIGN KEY (station_id) REFERENCES stations(id)
     )
   `);
@@ -319,6 +321,7 @@ db.serialize(() => {
   db.run(`UPDATE units SET status='available' WHERE status IS NULL OR status='[]'`);
   // Add patrol column for legacy DBs
   db.run(`ALTER TABLE units ADD COLUMN patrol INTEGER DEFAULT 0`, () => {});
+  db.run(`ALTER TABLE units ADD COLUMN patrol_until INTEGER`, () => {});
   // Add priority column for legacy DBs
   db.run(`ALTER TABLE units ADD COLUMN priority INTEGER DEFAULT 1`, () => {});
   // Add tag column for legacy DBs
@@ -1590,8 +1593,10 @@ app.patch('/api/units/:id/patrol', (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid unit id' });
   const patrol = req.body && req.body.patrol ? 1 : 0;
-  db.run('UPDATE units SET patrol=? WHERE id=?', [patrol, id], function (err) {
+  const until = patrol ? Date.now() + 60 * 60 * 1000 : null;
+  db.run('UPDATE units SET patrol=?, patrol_until=? WHERE id=?', [patrol, until, id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
+    if (patrol) startPatrol(id); else db.run('DELETE FROM unit_travel WHERE unit_id=?', [id], () => {});
     res.json({ success: true, patrol: Boolean(patrol) });
   });
 });
@@ -2111,6 +2116,8 @@ function processUnitTravels(rows) {
             db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => resolve());
           });
         }));
+      } else if (r.phase === 'patrol') {
+        afterOps.push(handlePatrolCompletion(r));
       } else {
         // Default: clear travel and set unit available for any other phase
         afterOps.push(new Promise(resolve => {
@@ -2263,6 +2270,19 @@ app.get('/admin', (req, res) => {
 app.get('/mobile', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'mobile.html'));
 });
+
+// Ensure patrolling units keep moving even without a client connected
+setInterval(() => {
+  const now = Date.now();
+  db.all(
+    `SELECT u.id FROM units u WHERE u.patrol=1 AND u.patrol_until > ? AND NOT EXISTS (SELECT 1 FROM unit_travel ut WHERE ut.unit_id=u.id)`,
+    [now],
+    (err, rows) => {
+      if (err || !rows) return;
+      rows.forEach(r => startPatrol(r.id));
+    }
+  );
+}, 10000);
 
 // Periodically process unit travel arrivals/returns so missions can progress
 setInterval(() => {
