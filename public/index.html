@@ -712,7 +712,8 @@ async function routeAndAnimateUnit(unitId, from, to, speedClassKmh, onArrive, re
   } catch (err) {
     console.warn('OSRM route failed; straight-line fallback:', err);
     const R = 6371;
-    const dLat = (to[0]-from[0]) * Math.PI/180, dLon = (to[1]-to[0]) * Math.PI/180;
+    const dLat = (to[0]-from[0]) * Math.PI/180;
+    const dLon = (to[1]-from[1]) * Math.PI/180;
     const la1 = from[0] * Math.PI/180, la2 = to[0] * Math.PI/180;
     const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
     const distKm = 2*R*Math.asin(Math.sqrt(h));
