@@ -28,8 +28,7 @@ export function openPersonnelModal(person, station) {
       </label>
       <label>
         <div>Rank</div>
-        <input id="edit-personnel-rank" type="text" style="width:100%;" value="${currentRank.replace(/"/g, '&quot;')}" list="edit-personnel-rank-options" />
-        <datalist id="edit-personnel-rank-options"></datalist>
+        <select id="edit-personnel-rank" style="width:100%;"></select>
       </label>
       <div>
         <div>Training</div>
@@ -52,15 +51,32 @@ export function openPersonnelModal(person, station) {
     </div>
   `;
   const rankInput = content.querySelector('#edit-personnel-rank');
-  const rankList = content.querySelector('#edit-personnel-rank-options');
   const stationDept = cleanRank(st?.department);
-  if (rankList) {
-    fetchRankOptions(stationDept).then((ranks) => {
+  if (rankInput) {
+    const populateRankSelect = (ranks, currentValue = '') => {
       const safe = Array.isArray(ranks) ? ranks : [];
-      rankList.innerHTML = safe
-        .map(r => `<option value="${String(r || '').replace(/"/g, '&quot;')}"></option>`)
-        .join('');
+      const seen = new Set();
+      const options = ['<option value=""></option>'];
+      safe.forEach(raw => {
+        const value = cleanRank(raw);
+        if (!value) return;
+        const key = value.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        options.push(`<option value="${value.replace(/"/g, '&quot;')}">${value}</option>`);
+      });
+      const current = cleanRank(currentValue);
+      if (current && !seen.has(current.toLowerCase())) {
+        options.push(`<option value="${current.replace(/"/g, '&quot;')}">${current}</option>`);
+      }
+      rankInput.innerHTML = options.join('');
+      rankInput.value = current || '';
+    };
+    populateRankSelect([], currentRank);
+    fetchRankOptions(stationDept).then((ranks) => {
+      populateRankSelect(ranks, rankInput.value || currentRank);
     });
+    rankInput.value = cleanRank(currentRank);
   }
   content.querySelector('#edit-personnel-cancel').onclick = () => { modal.style.display = 'none'; };
   content.querySelector('#edit-personnel-save').onclick = async () => {

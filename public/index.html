@@ -1582,8 +1582,7 @@ async function showStationDetails(station) {
     <button id="create-unit">Create Unit</button>
     <h3>Add Personnel</h3>
     <input id="personnel-name" placeholder="Name (e.g., John Doe)" />
-    <input id="personnel-rank" placeholder="Rank (optional)" list="personnel-rank-options" />
-    <datalist id="personnel-rank-options"></datalist>
+    <select id="personnel-rank"></select>
     <div id="personnel-training">
       ${
         (getTrainingsForClass(station.type).length
@@ -1634,14 +1633,36 @@ async function showStationDetails(station) {
       input.value = `${rnd.first} ${rnd.last}`;
     }
   } catch {}
-  const rankInputEl = document.getElementById('personnel-rank');
-  const rankDatalistEl = document.getElementById('personnel-rank-options');
+  const rankSelectEl = document.getElementById('personnel-rank');
+
+  function populateRankSelect(selectEl, ranks, currentValue = '') {
+    if (!selectEl) return;
+    const safeRanks = Array.isArray(ranks) ? ranks : [];
+    const seen = new Set();
+    const options = ['<option value=""></option>'];
+    safeRanks.forEach(raw => {
+      const value = cleanRankValue(raw);
+      if (!value) return;
+      const key = value.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      options.push(`<option value="${value.replace(/"/g, '&quot;')}">${value}</option>`);
+    });
+    const current = cleanRankValue(currentValue);
+    if (current && !seen.has(current.toLowerCase())) {
+      options.push(`<option value="${current.replace(/"/g, '&quot;')}">${current}</option>`);
+    }
+    selectEl.innerHTML = options.join('');
+    selectEl.value = current || '';
+  }
+
+  populateRankSelect(rankSelectEl, [], '');
 
   async function refreshRankOptionsForStation() {
-    if (!rankDatalistEl) return;
+    if (!rankSelectEl) return;
     const dept = cleanRankValue(station.department);
     const ranks = await fetchDepartmentRanks(dept);
-    rankDatalistEl.innerHTML = ranks.map(r => `<option value="${r.replace(/"/g, '&quot;')}"></option>`).join('');
+    populateRankSelect(rankSelectEl, ranks, rankSelectEl.value);
   }
 
   refreshRankOptionsForStation();
@@ -1809,7 +1830,9 @@ async function showStationDetails(station) {
     const trainings = (p.training || []).map(t => typeof t === 'string' ? t : t.name).join(', ');
     const trainingText = trainings || 'No training';
     const rankLabel = cleanRankValue(p.rank);
-    li.innerHTML = `<strong>${p.name}</strong>${rankLabel ? ` [${rankLabel}]` : ''} (${trainingText}) <button onclick="editPersonnel(${p.id})" style="margin-left:10px;">Edit</button>`;
+    const name = p.name || '';
+    const displayName = rankLabel ? `${rankLabel} ${name}`.trim() : name;
+    li.innerHTML = `<strong>${displayName}</strong> (${trainingText}) <button onclick="editPersonnel(${p.id})" style="margin-left:10px;">Edit</button>`;
     personnelList.appendChild(li);
   });
 
@@ -2373,27 +2396,43 @@ function openStationBuilderModal(initial = {}) {
         })());
 
         const rankField = makeInputGroup('Rank', (() => {
-          const container = document.createElement('div');
-          container.style.display = 'flex';
-          const input = document.createElement('input');
-          input.className = 'station-builder-input';
-          input.value = person.rank || '';
-          const datalistId = `person-rank-options-${idx}`;
-          input.setAttribute('list', datalistId);
-          const datalist = document.createElement('datalist');
-          datalist.id = datalistId;
-          currentRankOptions.forEach((opt) => {
-            const option = document.createElement('option');
-            option.value = opt;
-            datalist.appendChild(option);
-          });
-          input.addEventListener('input', () => {
-            const val = cleanRankValue(input.value);
+          const select = document.createElement('select');
+          select.className = 'station-builder-select';
+          const applyOptions = (selectedValue = '') => {
+            const safe = Array.isArray(currentRankOptions) ? currentRankOptions : [];
+            const seen = new Set();
+            select.innerHTML = '';
+            const blank = document.createElement('option');
+            blank.value = '';
+            blank.textContent = '';
+            select.appendChild(blank);
+            safe.forEach((opt) => {
+              const value = cleanRankValue(opt);
+              if (!value) return;
+              const key = value.toLowerCase();
+              if (seen.has(key)) return;
+              seen.add(key);
+              const option = document.createElement('option');
+              option.value = value;
+              option.textContent = value;
+              select.appendChild(option);
+            });
+            const current = cleanRankValue(selectedValue || person.rank);
+            if (current && !seen.has(current.toLowerCase())) {
+              const option = document.createElement('option');
+              option.value = current;
+              option.textContent = current;
+              select.appendChild(option);
+            }
+            select.value = current || '';
+          };
+          applyOptions(person.rank || '');
+          select.addEventListener('change', () => {
+            const val = cleanRankValue(select.value);
             person.rank = val || '';
             hideError();
           });
-          container.append(input, datalist);
-          return container;
+          return select;
         })());
 
         const assignField = makeInputGroup('Assign to Unit', (() => {
