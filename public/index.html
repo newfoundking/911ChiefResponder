@@ -2414,8 +2414,23 @@ function openStationBuilderModal(initial = {}) {
       updateCostSummary();
     });
 
-    addPersonBtn.addEventListener('click', () => {
-      state.personnel.push({ name: '', training: [], assignedUnit: null });
+    async function fetchRandomPersonName() {
+      try {
+        const rnd = await fetch('/api/random-name').then(r => r.json());
+        if (rnd?.first && rnd?.last) {
+          return `${rnd.first} ${rnd.last}`;
+        }
+      } catch {
+        // ignore failures and fall back to empty string
+      }
+      return '';
+    }
+
+    addPersonBtn.addEventListener('click', async () => {
+      const person = { name: '', training: [], assignedUnit: null };
+      const randomName = await fetchRandomPersonName();
+      if (randomName) person.name = randomName;
+      state.personnel.push(person);
       renderPersonnel();
       updateCostSummary();
     });
