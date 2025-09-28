@@ -2,6 +2,7 @@ node_modules/
 public/images/
 *.db
 game.db
+*.sqlite
 *.db
 *.db
 game.db
