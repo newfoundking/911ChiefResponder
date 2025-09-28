@@ -1,6 +1,7 @@
 const db = require('../db');
 const { parseArrayField, reverseGeocode, pointInPolygon } = require('../utils');
 const { beginMissionClock, clearMissionClock, missionClocks } = require('../services/missionTimers');
+const { resolveMissionById } = require('../services/missions');
 
 // GET /api/missions
 async function getMissions(req, res) {
@@ -110,12 +111,15 @@ async function createMission(req, res) {
 }
 
 // PUT /api/missions/:id
-function updateMission(req, res) {
+async function updateMission(req, res) {
   const missionId = parseInt(req.params.id, 10);
-  db.run(`UPDATE missions SET status='resolved' WHERE id=?`, [missionId], function (err) {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ id: missionId, status: 'resolved' });
-  });
+  if (!missionId) return res.status(400).json({ error: 'invalid id' });
+  try {
+    const result = await resolveMissionById(missionId);
+    res.json({ ok: true, ...(result || {}) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 }
 
 // DELETE /api/missions

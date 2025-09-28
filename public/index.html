@@ -2817,7 +2817,7 @@ function setupTimerForMission(mission, endTime) {
     activeWorkTimers.delete(mission.id);
     persistWorkTimers();
     const assignedBefore = await (await fetch(`/api/missions/${mission.id}/units`)).json();
-    await fetch(`/api/missions/${mission.id}/resolve`, { method:'POST' });
+    await fetch(`/api/missions/${mission.id}`, { method:'PUT' });
     if (!_stationById || _stationById.size===0) {
       const stations = await (await fetch('/api/stations')).json();
       cacheStations(stations);

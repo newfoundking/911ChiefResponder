@@ -23,8 +23,7 @@ db.serialize(() => {
 
 const { parseArrayField, reverseGeocode, pointInPolygon } = require('./utils');
 const { startPatrol, handlePatrolCompletion } = require('./services/patrol');
-
-const CLASS_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 }; // km/h (25% faster)
+const { resolveMissionById, getFacilityOccupancy } = require('./services/missions');
 const ROUTE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 function haversine(aLat, aLon, bLat, bLon) {
   const R = 6371;
@@ -425,170 +424,6 @@ db.run(`
 `);
 db.run(`INSERT OR IGNORE INTO wallet (id, balance) VALUES (1, 100000)`);
 
-
-function getFacilityOccupancy(stationId, type) {
-  return new Promise((resolve, reject) => {
-    const now = Date.now();
-    db.get(
-      `SELECT COUNT(*) AS cnt, MIN(expires_at) AS next FROM facility_load WHERE station_id=? AND type=? AND expires_at>?`,
-      [stationId, type, now],
-      (err, row) => {
-        if (err) return reject(err);
-        resolve({ count: row?.cnt || 0, nextFree: row?.next || 0 });
-      }
-    );
-  });
-}
-
-function addFacilityLoad(stationId, type, expiresAt) {
-  return new Promise((resolve, reject) => {
-    db.run(
-      `INSERT INTO facility_load (station_id, type, expires_at) VALUES (?,?,?)`,
-      [stationId, type, expiresAt],
-      err => (err ? reject(err) : resolve())
-    );
-  });
-}
-
-
-async function allocateTransport(kind, lat, lon, unitClass) {
-  const facilities = await new Promise((resolve, reject) => {
-    if (kind === 'patient') {
-      db.all(
-        `SELECT id, lat, lon, bed_capacity AS capacity FROM stations WHERE type='hospital' AND bed_capacity>0`,
-        (err, rows) => (err ? reject(err) : resolve(rows || []))
-      );
-    } else {
-      db.all(
-        `SELECT id, lat, lon, holding_cells AS capacity FROM stations WHERE (type='jail' OR (type='police' AND holding_cells>0))`,
-        (err, rows) => (err ? reject(err) : resolve(rows || []))
-      );
-    }
-  });
-  if (!facilities.length) return null;
-  facilities.forEach(f => {
-    f.distance = haversine(lat, lon, f.lat, f.lon);
-  });
-  facilities.sort((a, b) => a.distance - b.distance);
-  const speed = CLASS_SPEED[unitClass] || 63;
-  const now = Date.now();
-  for (let i = 0; i < facilities.length; i++) {
-    const f = facilities[i];
-    const occ = await getFacilityOccupancy(f.id, kind);
-    if (occ.count < f.capacity) {
-      await addFacilityLoad(f.id, kind, now + 10 * 60 * 1000);
-      return f.id;
-    }
-    const nextFree = occ.nextFree || now;
-    const timeUntilFree = nextFree - now;
-    const next = facilities[i + 1];
-    const travelToNext = next ? (haversine(lat, lon, next.lat, next.lon) / speed) * 3600 * 1000 : Infinity;
-    if (timeUntilFree < travelToNext) {
-      await addFacilityLoad(f.id, kind, nextFree + 10 * 60 * 1000);
-      return f.id;
-    }
-  }
-  const first = facilities[0];
-  const occ = await getFacilityOccupancy(first.id, kind);
-  const expiry = (occ.nextFree || now) + 10 * 60 * 1000;
-  await addFacilityLoad(first.id, kind, expiry);
-  return first.id;
-}
-
-async function handleTransports(unitIds, lat, lon, patients, prisoners) {
-  let patientCount = 0;
-  for (const p of patients) patientCount += Number(p.count || 0);
-  let prisonerCount = 0;
-  for (const p of prisoners) prisonerCount += Number(p.transport || 0);
-  if (!unitIds.length) return;
-
-  const placeholders = unitIds.map(() => '?').join(',');
-  const rows = await new Promise((resolve, reject) => {
-    db.all(`SELECT id, type FROM units WHERE id IN (${placeholders})`, unitIds, (err, r) =>
-      err ? reject(err) : resolve(r || [])
-    );
-  });
-
-  const medUnits = [];
-  const prisUnits = [];
-  for (const r of rows) {
-    const ut = unitTypes.find(t => t.type === r.type);
-    const attrs = Array.isArray(ut?.attributes) ? ut.attributes : [];
-    if (attrs.includes('medicaltransport')) medUnits.push(r.id);
-    if (attrs.includes('prisonertransport')) prisUnits.push(r.id);
-  }
-
-  const medTransports = Math.min(patientCount, medUnits.length);
-  for (let i = 0; i < medTransports; i++) {
-    await allocateTransport('patient', lat, lon, 'ambulance');
-    await adjustBalance(500);
-  }
-
-  const prisTransports = Math.min(prisonerCount, prisUnits.length);
-  for (let i = 0; i < prisTransports; i++) {
-    await allocateTransport('prisoner', lat, lon, 'police');
-    await adjustBalance(500);
-  }
-}
-
-function resolveMissionById(missionId, cb) {
-  db.serialize(() => {
-    db.run('UPDATE missions SET status=? WHERE id=?', ['resolved', missionId], (e0) => {
-      if (e0) return cb && cb(e0);
-
-      db.all('SELECT unit_id FROM mission_units WHERE mission_id=?', [missionId], async (e1, rows) => {
-        if (e1) return cb && cb(e1);
-        const ids = (rows || []).map(r => r.unit_id);
-        const placeholders = ids.map(() => '?').join(',');
-
-        const freeUnits = ids.length
-          ? new Promise((resolve, reject) =>
-              db.run(`UPDATE units SET status='available', responding=0 WHERE id IN (${placeholders})`, ids, (e) => e ? reject(e) : resolve()))
-          : Promise.resolve();
-
-        const clearTravels = ids.length
-          ? new Promise((resolve, reject) =>
-              db.run(`DELETE FROM unit_travel WHERE unit_id IN (${placeholders})`, ids, (e) => e ? reject(e) : resolve()))
-          : Promise.resolve();
-
-        try {
-          await freeUnits;
-          await clearTravels;
-          db.run('DELETE FROM mission_units WHERE mission_id=?', [missionId], (e2) => {
-            if (e2) return cb && cb(e2);
-
-            db.get('SELECT type, lat, lon, patients, prisoners, penalties FROM missions WHERE id=?', [missionId], (e3, m) => {
-              if (e3) return cb && cb(e3);
-              const missionName = m?.type || '';
-              let pats = []; let pris = [];
-              try { pats = JSON.parse(m?.patients || '[]'); } catch {}
-              try { pris = JSON.parse(m?.prisoners || '[]'); } catch {}
-              let penalties = [];
-              try { penalties = JSON.parse(m?.penalties || '[]'); } catch {}
-              db.get('SELECT rewards FROM mission_templates WHERE name=?', [missionName], async (e4, trow) => {
-                if (e4) return cb && cb(e4);
-                const baseReward = Number(trow?.rewards || 0);
-                const rewardPenalty = penalties.reduce((s,p)=> s + (Number(p.rewardPenalty)||0),0);
-                const reward = Math.max(0, baseReward * (1 - rewardPenalty/100));
-                try {
-                  if (reward > 0) await adjustBalance(+reward);
-                  await handleTransports(ids, m.lat, m.lon, pats, pris);
-                  const bal = await getBalance();
-                  clearMissionClock(missionId);
-                  cb && cb(null, { freed: ids.length, reward, balance: bal });
-                } catch (eAdj) {
-                  cb && cb(eAdj);
-                }
-              });
-            });
-          });
-        } catch (eFree) {
-          cb && cb(eFree);
-        }
-      });
-    });
-  });
-}
 
 const { missionClocks, beginMissionClock, clearMissionClock, rehydrateMissionClocks } = require('./services/missionTimers');
 rehydrateMissionClocks();
@@ -1246,17 +1081,6 @@ app.patch('/api/missions/:id/penalties', express.json(), (req, res) => {
   db.run('UPDATE missions SET penalties=? WHERE id=?', [penalties, id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ id, penalties: JSON.parse(penalties) });
-  });
-});
-
-// Resolve mission & free units + credit rewards from template(name==type)
-app.post('/api/missions/:id/resolve', (req, res) => {
-  const missionId = parseInt(req.params.id, 10);
-  if (!missionId) return res.status(400).json({ error: 'invalid id' });
-
-  resolveMissionById(missionId, (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ ok: true, ...(result || {}) });
   });
 });
 
