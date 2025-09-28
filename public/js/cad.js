@@ -356,7 +356,9 @@ async function showStation(id) {
   html += `</ul></div><div><h4>Personnel</h4><ul>`;
   html += personnel.map(p => {
     const rank = cleanRank(p.rank);
-    return `<li class="cad-personnel" data-id="${p.id}">${p.name}${rank ? ` [${rank}]` : ''} - ${p.unit}</li>`;
+    const name = p.name || '';
+    const displayName = rank ? `${rank} ${name}`.trim() : name;
+    return `<li class="cad-personnel" data-id="${p.id}">${displayName} - ${p.unit}</li>`;
   }).join('');
   html += `</ul></div></div></div>`;
   pane.innerHTML = html;
@@ -398,8 +400,8 @@ function openNewPersonnel(st) {
   let html = `<div style="text-align:right"><button id="cancelNewPers">Back</button></div>`;
   html += `<h3>Add Personnel - ${st.name}</h3>`;
   html += `<input id="persName" placeholder="Name"/>`;
-  html += `<input id="persRank" placeholder="Rank (optional)" list="persRankOptions"/>`;
-  html += `<datalist id="persRankOptions"></datalist><div id="persTrainings">`;
+  html += `<select id="persRank"></select>`;
+  html += `<div id="persTrainings">`;
   html += options.map((t, idx)=>{
     const name = typeof t === 'string' ? t : t.name;
     const cost = typeof t === 'object' && t.cost ? t.cost : 0;
@@ -410,12 +412,30 @@ function openNewPersonnel(st) {
   document.getElementById('cancelNewPers').onclick = () => showStation(st.id);
   const nameInput = document.getElementById('persName');
   const rankInput = document.getElementById('persRank');
-  const rankList = document.getElementById('persRankOptions');
   const dept = cleanRank(st.department);
-  if (rankList) {
-    fetchRankOptions(dept).then((ranks) => {
+  if (rankInput) {
+    const populateRankSelect = (ranks, currentValue = '') => {
       const safe = Array.isArray(ranks) ? ranks : [];
-      rankList.innerHTML = safe.map(r => `<option value="${String(r || '').replace(/"/g, '&quot;')}"></option>`).join('');
+      const seen = new Set();
+      const options = ['<option value=""></option>'];
+      safe.forEach(raw => {
+        const value = cleanRank(raw);
+        if (!value) return;
+        const key = value.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        options.push(`<option value="${value.replace(/"/g, '&quot;')}">${value}</option>`);
+      });
+      const current = cleanRank(currentValue);
+      if (current && !seen.has(current.toLowerCase())) {
+        options.push(`<option value="${current.replace(/"/g, '&quot;')}">${current}</option>`);
+      }
+      rankInput.innerHTML = options.join('');
+      rankInput.value = current || '';
+    };
+    populateRankSelect([], '');
+    fetchRankOptions(dept).then((ranks) => {
+      populateRankSelect(ranks, rankInput.value);
     });
   }
   fetch('/api/random-name').then(r=>r.json()).then(n=>{
@@ -520,7 +540,9 @@ async function showUnitDetail(unitId) {
             try { trainings = JSON.parse(p.training); } catch { trainings = []; }
           }
           const trainingText = Array.isArray(trainings) && trainings.length ? ` (${trainings.join(', ')})` : '';
-          return `<li>${p.name || '(no name)'}${rank ? ` [${rank}]` : ''}${trainingText} <button class="unassign-btn" data-person-id="${p.id}" data-station-id="${p.station_id}">Unassign</button></li>`;
+          const baseName = p.name || '(no name)';
+          const displayName = rank ? `${rank} ${baseName}`.trim() : baseName;
+          return `<li>${displayName}${trainingText} <button class="unassign-btn" data-person-id="${p.id}" data-station-id="${p.station_id}">Unassign</button></li>`;
         }).join('')}</ul>`
       : '<p>No personnel assigned to this unit.</p>';
     const missionHtml = mission && mission.id
