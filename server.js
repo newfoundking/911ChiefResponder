@@ -49,6 +49,7 @@ app.get('/config/osmPoiTypes.js', (req,res)=>res.sendFile(path.join(__dirname,'o
 const missionsRoutes = require('./routes/missions');
 const stationsRoutes = require('./routes/stations');
 const unitsRoutes = require('./routes/units');
+const stationsController = require('./controllers/stationsController');
 
 app.use('/api/missions', missionsRoutes);
 app.use('/api/stations', stationsRoutes);
@@ -1174,31 +1175,7 @@ app.patch('/api/stations/:id/bays', async (req, res) => {
 });
 
 
-app.post('/api/stations', async (req, res) => {
-  try {
-    const { name, type, lat, lon, department = null, beds = 0, holding_cells = 0 } = req.body || {};
-    const BUILD_COST = 50000;
-    const holdingCost = (type === 'police' || type === 'jail') ? priceHolding(holding_cells, false) : 0;
-    const totalCost = BUILD_COST + holdingCost;
-
-    const ok = await requireFunds(totalCost);
-    if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: totalCost });
-
-    db.run('INSERT INTO stations (name, type, lat, lon, department, bay_count, equipment_slots, holding_cells, bed_capacity) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)',
-      [name, type, lat, lon, department, holding_cells, beds],
-      async function (err) {
-        if (err) return res.status(500).send('Failed to insert station');
-        await adjustBalance(-totalCost);
-        const balance = await getBalance();
-        res.json({ id: this.lastID, name, type, lat, lon, department, bay_count: 0, equipment_slots: 0, holding_cells, bed_capacity: beds, equipment: [], charged: totalCost, balance });
-
-      }
-    );
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Internal error' });
-  }
-});
+app.post('/api/stations', (req, res) => stationsController.createStation(req, res));
 
 const EQUIPMENT_SLOT_COST = 1000;
 
