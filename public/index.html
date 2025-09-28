@@ -1699,33 +1699,780 @@ async function showStationDetails(station) {
   refreshBayInfo(station.id);
 }
 
-// Build station
-document.getElementById("buildStation").addEventListener("click", () => { buildStationMode = true; alert("Click the map to place your new station"); });
-map.on("click", async (e) => {
-  if (!buildStationMode) return;
-  const result = await openFormModal({
-    title: 'Create Station',
-    fields: [
-      { name: 'name', label: 'Station Name', type: 'text', required: true },
-	  { name: 'type', label: 'Type', type: 'select', value: 'fire', options: ['fire','police','ambulance','sar','hospital','jail'], required: true },
-      { name: 'department', label: 'Department', type: 'text' },
-      { name: 'holding_cells', label: 'Holding cells', type: 'number', value: 0, min: 0, showIf: v => ['police','jail'].includes((v.type||'').toLowerCase()) },
-      { name: 'beds', label: 'Beds', type: 'number', value: 0, min: 0, showIf: v => (v.type||'').toLowerCase() === 'hospital' }
-    ]
+function openStationBuilderModal(initial = {}) {
+  const allowedTypes = ['fire', 'police', 'ambulance', 'sar', 'hospital', 'jail'];
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '20000';
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-content station-builder-modal';
+
+    const title = document.createElement('h2');
+    title.textContent = 'Create Station';
+    modal.appendChild(title);
+
+    const errorBox = document.createElement('div');
+    errorBox.className = 'station-builder-error';
+    errorBox.style.display = 'none';
+    modal.appendChild(errorBox);
+
+    const state = {
+      name: typeof initial.name === 'string' ? initial.name : '',
+      department: typeof initial.department === 'string' ? initial.department : '',
+      type: allowedTypes.includes(String(initial.type || '').toLowerCase())
+        ? String(initial.type).toLowerCase()
+        : 'fire',
+      bays: Math.max(1, Number(initial.bays ?? 1) || 1),
+      equipment_slots: Math.max(0, Number(initial.equipment_slots ?? 0) || 0),
+      holding_cells: Math.max(0, Number(initial.holding_cells ?? 0) || 0),
+      bed_capacity: Math.max(0, Number(initial.bed_capacity ?? 0) || 0),
+      storageEquipment: Array.isArray(initial.equipment) ? initial.equipment.slice() : [],
+      units: Array.isArray(initial.units) ? initial.units.slice() : [],
+      personnel: Array.isArray(initial.personnel) ? initial.personnel.slice() : [],
+    };
+    state.units = state.units.map(u => ({
+      name: typeof u?.name === 'string' ? u.name : '',
+      type: typeof u?.type === 'string' ? u.type : '',
+      tag: typeof u?.tag === 'string' ? u.tag : '',
+      priority: Math.min(5, Math.max(1, Number(u?.priority ?? 1) || 1)),
+      equipment: Array.isArray(u?.equipment) ? u.equipment.slice() : [],
+    }));
+    state.personnel = state.personnel.map(p => ({
+      name: typeof p?.name === 'string' ? p.name : '',
+      training: Array.isArray(p?.training) ? p.training.slice() : [],
+      assignedUnit: Number.isInteger(p?.assigned_unit) ? p.assigned_unit : null,
+    }));
+
+    const BUILD_COST = 50000;
+    const BAY_COST = 5000;
+    const EQUIP_SLOT_COST = 1000;
+    const HOLDING_COST = 2500;
+    const BASE_PERSON_COST = 100;
+
+    const basicSection = document.createElement('div');
+    basicSection.className = 'station-builder-section';
+    const basicTitle = document.createElement('h3');
+    basicTitle.textContent = 'Station Details';
+    basicSection.appendChild(basicTitle);
+    const basicGrid = document.createElement('div');
+    basicGrid.className = 'station-builder-grid';
+    basicSection.appendChild(basicGrid);
+
+    const equipmentSection = document.createElement('div');
+    equipmentSection.className = 'station-builder-section';
+    const equipmentTitle = document.createElement('h3');
+    equipmentTitle.textContent = 'Station Equipment';
+    equipmentSection.appendChild(equipmentTitle);
+    const equipmentContainer = document.createElement('div');
+    equipmentContainer.className = 'station-builder-checkboxes';
+    equipmentSection.appendChild(equipmentContainer);
+
+    const unitsSection = document.createElement('div');
+    unitsSection.className = 'station-builder-section';
+    const unitsHeader = document.createElement('div');
+    unitsHeader.className = 'station-builder-row';
+    const unitsTitle = document.createElement('h3');
+    unitsTitle.textContent = 'Units';
+    const addUnitBtn = document.createElement('button');
+    addUnitBtn.textContent = 'Add Unit';
+    unitsHeader.append(unitsTitle, addUnitBtn);
+    unitsSection.appendChild(unitsHeader);
+    const unitsContainer = document.createElement('div');
+    unitsContainer.className = 'station-builder-list';
+    unitsSection.appendChild(unitsContainer);
+
+    const personnelSection = document.createElement('div');
+    personnelSection.className = 'station-builder-section';
+    const personnelHeader = document.createElement('div');
+    personnelHeader.className = 'station-builder-row';
+    const personnelTitle = document.createElement('h3');
+    personnelTitle.textContent = 'Personnel';
+    const addPersonBtn = document.createElement('button');
+    addPersonBtn.textContent = 'Add Personnel';
+    personnelHeader.append(personnelTitle, addPersonBtn);
+    personnelSection.appendChild(personnelHeader);
+    const personnelContainer = document.createElement('div');
+    personnelContainer.className = 'station-builder-list';
+    personnelSection.appendChild(personnelContainer);
+
+    const summarySection = document.createElement('div');
+    summarySection.className = 'station-builder-section station-builder-summary';
+    const summaryTitle = document.createElement('h3');
+    summaryTitle.textContent = 'Cost Summary';
+    const summaryContent = document.createElement('div');
+    summaryContent.className = 'station-builder-cost';
+    summarySection.append(summaryTitle, summaryContent);
+
+    modal.appendChild(basicSection);
+    modal.appendChild(equipmentSection);
+    modal.appendChild(unitsSection);
+    modal.appendChild(personnelSection);
+    modal.appendChild(summarySection);
+
+    const actions = document.createElement('div');
+    actions.className = 'station-builder-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'Cancel';
+    const createBtn = document.createElement('button');
+    createBtn.textContent = 'Create Station';
+    createBtn.style.background = '#0b5';
+    createBtn.style.color = '#fff';
+    actions.append(cancelBtn, createBtn);
+    modal.appendChild(actions);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const nameInput = document.createElement('input');
+    nameInput.className = 'station-builder-input';
+    nameInput.placeholder = 'Station Name';
+    nameInput.value = state.name;
+    nameInput.addEventListener('input', () => { state.name = nameInput.value; hideError(); });
+
+    const deptInput = document.createElement('input');
+    deptInput.className = 'station-builder-input';
+    deptInput.placeholder = 'Department';
+    deptInput.value = state.department;
+    deptInput.addEventListener('input', () => { state.department = deptInput.value; hideError(); });
+
+    const typeSelect = document.createElement('select');
+    typeSelect.className = 'station-builder-select';
+    allowedTypes.forEach((t) => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+      typeSelect.appendChild(opt);
+    });
+    typeSelect.value = state.type;
+
+    const baysInput = document.createElement('input');
+    baysInput.type = 'number';
+    baysInput.min = '0';
+    baysInput.value = state.bays;
+    baysInput.className = 'station-builder-input';
+    baysInput.addEventListener('input', () => {
+      state.bays = Math.max(Number(baysInput.value) || 0, 0);
+      hideError();
+      updateCostSummary();
+    });
+
+    const slotsInput = document.createElement('input');
+    slotsInput.type = 'number';
+    slotsInput.min = '0';
+    slotsInput.value = state.equipment_slots;
+    slotsInput.className = 'station-builder-input';
+    slotsInput.addEventListener('input', () => {
+      state.equipment_slots = Math.max(Number(slotsInput.value) || 0, 0);
+      hideError();
+      updateCostSummary();
+    });
+
+    const holdingInput = document.createElement('input');
+    holdingInput.type = 'number';
+    holdingInput.min = '0';
+    holdingInput.value = state.holding_cells;
+    holdingInput.className = 'station-builder-input';
+    holdingInput.addEventListener('input', () => {
+      state.holding_cells = Math.max(Number(holdingInput.value) || 0, 0);
+      hideError();
+      updateCostSummary();
+    });
+
+    const bedsInput = document.createElement('input');
+    bedsInput.type = 'number';
+    bedsInput.min = '0';
+    bedsInput.value = state.bed_capacity;
+    bedsInput.className = 'station-builder-input';
+    bedsInput.addEventListener('input', () => {
+      state.bed_capacity = Math.max(Number(bedsInput.value) || 0, 0);
+      hideError();
+      updateCostSummary();
+    });
+
+    function makeInputGroup(labelText, input) {
+      const wrapper = document.createElement('label');
+      wrapper.className = 'station-builder-field';
+      const span = document.createElement('span');
+      span.textContent = labelText;
+      wrapper.append(span, input);
+      return wrapper;
+    }
+
+    basicGrid.append(
+      makeInputGroup('Station Name', nameInput),
+      makeInputGroup('Department', deptInput),
+      makeInputGroup('Station Class', typeSelect),
+      makeInputGroup('Bays', baysInput),
+      makeInputGroup('Equipment Slots', slotsInput)
+    );
+
+    const holdingGroup = makeInputGroup('Holding Cells', holdingInput);
+    const bedsGroup = makeInputGroup('Beds', bedsInput);
+    basicGrid.append(holdingGroup, bedsGroup);
+
+    function hideError() {
+      errorBox.textContent = '';
+      errorBox.style.display = 'none';
+    }
+    function showError(msg) {
+      errorBox.textContent = msg;
+      errorBox.style.display = msg ? 'block' : 'none';
+    }
+
+    function equipmentOptions() {
+      const list = (equipment && equipment[state.type]) || [];
+      return list.map((item) => {
+        if (typeof item === 'string') return { name: item, cost: 0 };
+        return { name: item?.name || '', cost: Number(item?.cost) || 0 };
+      }).filter(opt => opt.name);
+    }
+
+    function trainingOptions() {
+      const list = typeof getTrainingsForClass === 'function' ? getTrainingsForClass(state.type) || [] : [];
+      return list.map((item) => {
+        if (typeof item === 'string') return { name: item, cost: 0 };
+        return { name: item?.name || '', cost: Number(item?.cost) || 0 };
+      }).filter(opt => opt.name);
+    }
+
+    function allowedUnitTypes() {
+      return (unitTypes || []).filter((u) => String(u.class || '').toLowerCase() === state.type);
+    }
+
+    function findEquipmentCost(name) {
+      const key = String(name || '').toLowerCase();
+      const lists = Object.values(equipment || {});
+      for (const arr of lists) {
+        for (const item of arr || []) {
+          if (typeof item === 'string' && item.toLowerCase() === key) return 0;
+          if (item?.name && String(item.name).toLowerCase() === key) return Number(item.cost) || 0;
+        }
+      }
+      return 0;
+    }
+
+    function findTrainingCost(name) {
+      const key = String(name || '').toLowerCase();
+      const lists = Object.values(trainingsByClass || {});
+      for (const arr of lists) {
+        for (const item of arr || []) {
+          if (typeof item === 'string' && item.toLowerCase() === key) return 0;
+          if (item?.name && String(item.name).toLowerCase() === key) return Number(item.cost) || 0;
+        }
+      }
+      return 0;
+    }
+
+    function sanitizeAssignments() {
+      state.personnel.forEach((p) => {
+        if (p.assignedUnit == null || p.assignedUnit === '') { p.assignedUnit = null; return; }
+        const idx = Number(p.assignedUnit);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= state.units.length) {
+          p.assignedUnit = null;
+        }
+      });
+    }
+
+    function sanitizeByType() {
+      hideError();
+      holdingGroup.style.display = ['police', 'jail'].includes(state.type) ? 'flex' : 'none';
+      bedsGroup.style.display = state.type === 'hospital' ? 'flex' : 'none';
+      const eqNames = new Set(equipmentOptions().map((e) => e.name));
+      state.storageEquipment = state.storageEquipment.filter((name) => eqNames.has(name));
+
+      const unitDefs = allowedUnitTypes();
+      if (!unitDefs.length) {
+        state.units = [];
+      } else {
+        state.units.forEach((unit) => {
+          if (!unitDefs.find((def) => def.type === unit.type)) {
+            unit.type = unitDefs[0]?.type || '';
+          }
+          const def = unitDefs.find((d) => d.type === unit.type);
+          const slots = Number(def?.equipmentSlots || 0);
+          unit.equipment = unit.equipment.filter((name) => eqNames.has(name));
+          if (slots && unit.equipment.length > slots) {
+            unit.equipment = unit.equipment.slice(0, slots);
+          }
+          if (!slots) unit.equipment = [];
+        });
+      }
+
+      const trainingNames = new Set(trainingOptions().map((t) => t.name));
+      state.personnel.forEach((person) => {
+        person.training = person.training.filter((name) => trainingNames.has(name));
+      });
+
+      if (!['police', 'jail'].includes(state.type)) {
+        state.holding_cells = 0;
+        holdingInput.value = '0';
+      }
+      if (state.type !== 'hospital') {
+        state.bed_capacity = 0;
+        bedsInput.value = '0';
+      }
+      sanitizeAssignments();
+    }
+
+    function renderStationEquipment() {
+      equipmentContainer.innerHTML = '';
+      const options = equipmentOptions();
+      state.storageEquipment = state.storageEquipment.filter((name) => options.some((opt) => opt.name === name));
+      if (!options.length) {
+        const empty = document.createElement('div');
+        empty.className = 'station-builder-empty';
+        empty.textContent = 'No purchasable equipment for this class.';
+        equipmentContainer.appendChild(empty);
+        return;
+      }
+      options.forEach((opt) => {
+        const id = `station-equip-${opt.name.replace(/\s+/g, '-')}`;
+        const label = document.createElement('label');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = id;
+        checkbox.checked = state.storageEquipment.includes(opt.name);
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) {
+            if (!state.storageEquipment.includes(opt.name)) state.storageEquipment.push(opt.name);
+          } else {
+            state.storageEquipment = state.storageEquipment.filter((n) => n !== opt.name);
+          }
+          hideError();
+          updateCostSummary();
+        });
+        const span = document.createElement('span');
+        span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+        label.append(checkbox, span);
+        equipmentContainer.appendChild(label);
+      });
+    }
+
+    function renderUnits() {
+      unitsContainer.innerHTML = '';
+      if (!state.units.length) {
+        const empty = document.createElement('div');
+        empty.className = 'station-builder-empty';
+        empty.textContent = 'No units selected.';
+        unitsContainer.appendChild(empty);
+        baysInput.min = '0';
+        return;
+      }
+      const defs = allowedUnitTypes();
+      baysInput.min = String(state.units.length);
+      state.units.forEach((unit, idx) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'station-builder-unit';
+        const header = document.createElement('div');
+        header.className = 'station-builder-header';
+        header.textContent = `Unit ${idx + 1}`;
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = 'Remove';
+        removeBtn.addEventListener('click', () => {
+          state.units.splice(idx, 1);
+          sanitizeAssignments();
+          renderUnits();
+          renderPersonnel();
+          updateCostSummary();
+        });
+        header.appendChild(removeBtn);
+        wrapper.appendChild(header);
+
+        const nameField = makeInputGroup('Name', (() => {
+          const input = document.createElement('input');
+          input.className = 'station-builder-input';
+          input.value = unit.name;
+          input.addEventListener('input', () => { unit.name = input.value; hideError(); });
+          return input;
+        })());
+
+        const typeField = makeInputGroup('Type', (() => {
+          const select = document.createElement('select');
+          select.className = 'station-builder-select';
+          defs.forEach((def) => {
+            const opt = document.createElement('option');
+            opt.value = def.type;
+            opt.textContent = def.type;
+            select.appendChild(opt);
+          });
+          if (!defs.find((def) => def.type === unit.type)) {
+            unit.type = defs[0]?.type || '';
+          }
+          select.value = unit.type;
+          select.addEventListener('change', () => {
+            unit.type = select.value;
+            const def = defs.find((d) => d.type === unit.type);
+            const slots = Number(def?.equipmentSlots || 0);
+            if (!slots) unit.equipment = [];
+            if (slots && unit.equipment.length > slots) {
+              unit.equipment = unit.equipment.slice(0, slots);
+            }
+            hideError();
+            renderUnits();
+            updateCostSummary();
+          });
+          return select;
+        })());
+
+        const tagField = makeInputGroup('Tag', (() => {
+          const input = document.createElement('input');
+          input.className = 'station-builder-input';
+          input.value = unit.tag;
+          input.addEventListener('input', () => { unit.tag = input.value; });
+          return input;
+        })());
+
+        const priorityField = makeInputGroup('Priority', (() => {
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.min = '1';
+          input.max = '5';
+          input.value = unit.priority;
+          input.className = 'station-builder-input';
+          input.addEventListener('input', () => {
+            unit.priority = Math.min(5, Math.max(1, Number(input.value) || 1));
+          });
+          return input;
+        })());
+
+        const equipField = document.createElement('div');
+        equipField.className = 'station-builder-checkboxes';
+        const equipLabel = document.createElement('div');
+        const def = defs.find((d) => d.type === unit.type);
+        const slots = Number(def?.equipmentSlots || 0);
+        equipLabel.textContent = slots ? `Equipment (${slots} slots)` : 'Equipment';
+        equipLabel.style.fontWeight = 'bold';
+        wrapper.append(nameField, typeField, tagField, priorityField, equipLabel);
+        const opts = equipmentOptions();
+        unit.equipment = unit.equipment.filter((name) => opts.some((opt) => opt.name === name));
+        opts.forEach((opt) => {
+          const label = document.createElement('label');
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = unit.equipment.includes(opt.name);
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked) {
+              if (slots && unit.equipment.length >= slots) {
+                checkbox.checked = false;
+                showError(`Unit ${idx + 1} has no free equipment slots.`);
+                return;
+              }
+              if (!unit.equipment.includes(opt.name)) unit.equipment.push(opt.name);
+            } else {
+              unit.equipment = unit.equipment.filter((name) => name !== opt.name);
+            }
+            hideError();
+            updateCostSummary();
+          });
+          const span = document.createElement('span');
+          span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+          label.append(checkbox, span);
+          equipField.appendChild(label);
+        });
+        if (!opts.length) {
+          const emptyEquip = document.createElement('div');
+          emptyEquip.className = 'station-builder-empty';
+          emptyEquip.textContent = 'No equipment available for this class.';
+          equipField.appendChild(emptyEquip);
+        }
+        wrapper.appendChild(equipField);
+        unitsContainer.appendChild(wrapper);
+      });
+    }
+
+    function renderPersonnel() {
+      personnelContainer.innerHTML = '';
+      if (!state.personnel.length) {
+        const empty = document.createElement('div');
+        empty.className = 'station-builder-empty';
+        empty.textContent = 'No personnel selected.';
+        personnelContainer.appendChild(empty);
+        return;
+      }
+      const trainings = trainingOptions();
+      state.personnel.forEach((person, idx) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'station-builder-person';
+        const header = document.createElement('div');
+        header.className = 'station-builder-header';
+        header.textContent = `Personnel ${idx + 1}`;
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = 'Remove';
+        removeBtn.addEventListener('click', () => {
+          state.personnel.splice(idx, 1);
+          renderPersonnel();
+          updateCostSummary();
+        });
+        header.appendChild(removeBtn);
+        wrapper.appendChild(header);
+
+        const nameField = makeInputGroup('Name', (() => {
+          const input = document.createElement('input');
+          input.className = 'station-builder-input';
+          input.value = person.name;
+          input.addEventListener('input', () => { person.name = input.value; hideError(); });
+          return input;
+        })());
+
+        const assignField = makeInputGroup('Assign to Unit', (() => {
+          const select = document.createElement('select');
+          select.className = 'station-builder-select';
+          const none = document.createElement('option');
+          none.value = '';
+          none.textContent = 'Unassigned';
+          select.appendChild(none);
+          state.units.forEach((unit, unitIdx) => {
+            const opt = document.createElement('option');
+            const label = unit.name ? `${unit.name}` : `Unit ${unitIdx + 1}`;
+            opt.value = String(unitIdx);
+            opt.textContent = label;
+            select.appendChild(opt);
+          });
+          if (person.assignedUnit != null && person.assignedUnit < state.units.length) {
+            select.value = String(person.assignedUnit);
+          } else {
+            select.value = '';
+            person.assignedUnit = null;
+          }
+          select.addEventListener('change', () => {
+            person.assignedUnit = select.value === '' ? null : Number(select.value);
+            hideError();
+          });
+          return select;
+        })());
+
+        const trainingField = document.createElement('div');
+        trainingField.className = 'station-builder-checkboxes';
+        const label = document.createElement('div');
+        label.textContent = 'Training';
+        label.style.fontWeight = 'bold';
+        wrapper.append(nameField, assignField, label);
+        trainings.forEach((opt) => {
+          const tLabel = document.createElement('label');
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = person.training.includes(opt.name);
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked) {
+              if (!person.training.includes(opt.name)) person.training.push(opt.name);
+            } else {
+              person.training = person.training.filter((name) => name !== opt.name);
+            }
+            hideError();
+            updateCostSummary();
+          });
+          const span = document.createElement('span');
+          span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+          tLabel.append(checkbox, span);
+          trainingField.appendChild(tLabel);
+        });
+        if (!trainings.length) {
+          const emptyTrain = document.createElement('div');
+          emptyTrain.className = 'station-builder-empty';
+          emptyTrain.textContent = 'No training available for this class.';
+          trainingField.appendChild(emptyTrain);
+        }
+        wrapper.appendChild(trainingField);
+        personnelContainer.appendChild(wrapper);
+      });
+    }
+
+    function calculateCostBreakdown() {
+      const stationCost =
+        BUILD_COST +
+        BAY_COST * (Number(state.bays) || 0) +
+        EQUIP_SLOT_COST * (Number(state.equipment_slots) || 0) +
+        (['police', 'jail'].includes(state.type) ? HOLDING_COST * (Number(state.holding_cells) || 0) : 0);
+      const unitCost = state.units.reduce((sum, unit) => {
+        const def = allowedUnitTypes().find((d) => d.type === unit.type);
+        return sum + (Number(def?.cost) || 0);
+      }, 0);
+      const stationEquipCost = state.storageEquipment.reduce((sum, item) => sum + findEquipmentCost(item), 0);
+      const unitEquipCost = state.units.reduce(
+        (sum, unit) => sum + unit.equipment.reduce((s, item) => s + findEquipmentCost(item), 0),
+        0
+      );
+      const personnelCost = state.personnel.reduce((sum, person) => {
+        if (!person.name?.trim()) return sum;
+        const trainingCost = person.training.reduce((s, t) => s + findTrainingCost(t), 0);
+        return sum + BASE_PERSON_COST + trainingCost;
+      }, 0);
+      const total = stationCost + unitCost + stationEquipCost + unitEquipCost + personnelCost;
+      return { stationCost, unitCost, stationEquipCost, unitEquipCost, personnelCost, total };
+    }
+
+    function updateCostSummary() {
+      const costs = calculateCostBreakdown();
+      summaryContent.innerHTML = `
+        <div>Station build: $${costs.stationCost.toLocaleString()}</div>
+        <div>Units: $${costs.unitCost.toLocaleString()}</div>
+        <div>Equipment: $${(costs.stationEquipCost + costs.unitEquipCost).toLocaleString()} (Station $${costs.stationEquipCost.toLocaleString()}, Units $${costs.unitEquipCost.toLocaleString()})</div>
+        <div>Personnel: $${costs.personnelCost.toLocaleString()}</div>
+        <div>Total: $${costs.total.toLocaleString()}</div>
+      `;
+    }
+
+    function buildPayload() {
+      hideError();
+      try {
+        const trimmedName = state.name.trim();
+        if (!trimmedName) throw new Error('Station name is required.');
+        if (!allowedTypes.includes(state.type)) throw new Error('Select a valid station class.');
+        const bays = Math.max(0, Number(state.bays) || 0);
+        if (state.units.length && bays < state.units.length) {
+          throw new Error(`Bays must be at least ${state.units.length} for the selected units.`);
+        }
+        const equipmentSlots = Math.max(0, Number(state.equipment_slots) || 0);
+        if (state.storageEquipment.length > equipmentSlots) {
+          throw new Error('Not enough equipment slots for station storage.');
+        }
+        const units = state.units.map((unit, idx) => {
+          const name = unit.name.trim();
+          if (!name) throw new Error(`Unit ${idx + 1} requires a name.`);
+          if (!unit.type) throw new Error(`Unit ${idx + 1} requires a type.`);
+          const def = allowedUnitTypes().find((d) => d.type === unit.type);
+          if (!def) throw new Error(`Unit ${idx + 1} type is invalid.`);
+          const slots = Number(def?.equipmentSlots || 0);
+          if (slots && unit.equipment.length > slots) {
+            throw new Error(`Unit ${idx + 1} exceeds equipment slots (${unit.equipment.length}/${slots}).`);
+          }
+          if (!slots && unit.equipment.length) {
+            throw new Error(`Unit ${idx + 1} cannot carry equipment.`);
+          }
+          return {
+            name,
+            type: def.type,
+            class: def.class,
+            tag: unit.tag ? unit.tag.trim() : '',
+            priority: Math.min(5, Math.max(1, Number(unit.priority) || 1)),
+            equipment: unit.equipment.slice(),
+          };
+        });
+
+        const personnel = state.personnel
+          .map((person, idx) => {
+            const name = person.name.trim();
+            if (!name) return null;
+            const assigned = person.assignedUnit == null || person.assignedUnit === ''
+              ? null
+              : Number(person.assignedUnit);
+            if (assigned != null && (!Number.isInteger(assigned) || assigned < 0 || assigned >= units.length)) {
+              throw new Error(`Personnel ${idx + 1} has an invalid unit assignment.`);
+            }
+            const uniqueTraining = Array.from(new Set(person.training || []));
+            return { name, training: uniqueTraining, assigned_unit: assigned };
+          })
+          .filter(Boolean);
+
+        return {
+          name: trimmedName,
+          department: state.department,
+          type: state.type,
+          bays,
+          equipment_slots: equipmentSlots,
+          holding_cells: ['police', 'jail'].includes(state.type) ? Math.max(0, Number(state.holding_cells) || 0) : 0,
+          bed_capacity: state.type === 'hospital' ? Math.max(0, Number(state.bed_capacity) || 0) : 0,
+          equipment: state.storageEquipment.slice(),
+          units,
+          personnel,
+        };
+      } catch (err) {
+        showError(err.message || 'Invalid input.');
+        return null;
+      }
+    }
+
+    function close(result) {
+      document.removeEventListener('keydown', keyHandler);
+      overlay.remove();
+      resolve(result);
+    }
+
+    const keyHandler = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close(null);
+      }
+    };
+    document.addEventListener('keydown', keyHandler);
+
+    cancelBtn.addEventListener('click', () => close(null));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+    createBtn.addEventListener('click', () => {
+      const payload = buildPayload();
+      if (!payload) return;
+      close(payload);
+    });
+
+    addUnitBtn.addEventListener('click', () => {
+      const defs = allowedUnitTypes();
+      state.units.push({ name: '', type: defs[0]?.type || '', tag: '', priority: 1, equipment: [] });
+      renderUnits();
+      renderPersonnel();
+      updateCostSummary();
+    });
+
+    addPersonBtn.addEventListener('click', () => {
+      state.personnel.push({ name: '', training: [], assignedUnit: null });
+      renderPersonnel();
+      updateCostSummary();
+    });
+
+    typeSelect.addEventListener('change', () => {
+      state.type = typeSelect.value;
+      sanitizeByType();
+      renderStationEquipment();
+      renderUnits();
+      renderPersonnel();
+      updateCostSummary();
+    });
+
+    sanitizeByType();
+    renderStationEquipment();
+    renderUnits();
+    renderPersonnel();
+    updateCostSummary();
+    nameInput.focus();
   });
-  if (!result) { buildStationMode = false; pendingStationCoords = null; return; }
-  const name = result.name.trim();
-  const type = (result.type || '').toLowerCase();
-  const department = result.department ? result.department.trim() : null;
-  if (!name || !["fire","police","ambulance","sar","hospital","jail"].includes(type)) { alert("Cancelled or invalid type."); buildStationMode=false; return; }
-  let holding_cells = Number(result.holding_cells) || 0;
-  let beds = Number(result.beds) || 0;
-  if (!['police','jail'].includes(type)) holding_cells = 0;
-  if (type !== 'hospital') beds = 0;
-  await fetch("/api/stations", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, type, department, lat:e.latlng.lat, lon:e.latlng.lng, holding_cells, beds }) });
+}
+
+// Build station
+document.getElementById('buildStation').addEventListener('click', () => {
+  buildStationMode = true;
+  alert('Click the map to place your new station');
+});
+
+map.on('click', async (e) => {
+  if (!buildStationMode) return;
   buildStationMode = false;
   pendingStationCoords = null;
-  fetchStations();
+  const result = await openStationBuilderModal();
+  if (!result) return;
+  const payload = {
+    ...result,
+    lat: e.latlng.lat,
+    lon: e.latlng.lng,
+  };
+  try {
+    const res = await fetch('/api/stations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      notifyError(`Failed to create station: ${data.error || res.statusText}`);
+      return;
+    }
+    const totalCost = Number(data?.cost_breakdown?.total) || 0;
+    notifySuccess(`Station created. Total cost: $${totalCost.toLocaleString()}`);
+    if (typeof refreshWallet === 'function') refreshWallet();
+    fetchStations();
+  } catch (err) {
+    notifyError(`Failed to create station: ${err.message}`);
+  }
 });
 
 function randomCount({min=0, max=0, chance=1}) {
