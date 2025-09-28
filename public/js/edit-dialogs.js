@@ -1,3 +1,15 @@
+const cleanRank = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+};
+
+const fetchRankOptions = (dept) => {
+  if (typeof window !== 'undefined' && typeof window.fetchDepartmentRanks === 'function') {
+    return window.fetchDepartmentRanks(dept);
+  }
+  return Promise.resolve([]);
+};
+
 export function openPersonnelModal(person, station) {
   const modal = document.getElementById('editPersonnelModal');
   const content = document.getElementById('editPersonnelContent');
@@ -5,6 +17,7 @@ export function openPersonnelModal(person, station) {
   const getTrainings = typeof getTrainingsForClass === 'function' ? getTrainingsForClass : () => [];
   const availableTrainings = getTrainings(st.type);
   const currentName = person?.name || '';
+  const currentRank = cleanRank(person?.rank);
   const currentTraining = Array.isArray(person?.training) ? person.training : [];
   const curSet = new Set(currentTraining.map(t => String(t).toLowerCase()));
   content.innerHTML = `
@@ -12,6 +25,11 @@ export function openPersonnelModal(person, station) {
       <label>
         <div>Name</div>
         <input id="edit-personnel-name" type="text" style="width:100%;" value="${currentName.replace(/"/g, '&quot;')}" />
+      </label>
+      <label>
+        <div>Rank</div>
+        <input id="edit-personnel-rank" type="text" style="width:100%;" value="${currentRank.replace(/"/g, '&quot;')}" list="edit-personnel-rank-options" />
+        <datalist id="edit-personnel-rank-options"></datalist>
       </label>
       <div>
         <div>Training</div>
@@ -33,12 +51,24 @@ export function openPersonnelModal(person, station) {
       </div>
     </div>
   `;
+  const rankInput = content.querySelector('#edit-personnel-rank');
+  const rankList = content.querySelector('#edit-personnel-rank-options');
+  const stationDept = cleanRank(st?.department);
+  if (rankList) {
+    fetchRankOptions(stationDept).then((ranks) => {
+      const safe = Array.isArray(ranks) ? ranks : [];
+      rankList.innerHTML = safe
+        .map(r => `<option value="${String(r || '').replace(/"/g, '&quot;')}"></option>`)
+        .join('');
+    });
+  }
   content.querySelector('#edit-personnel-cancel').onclick = () => { modal.style.display = 'none'; };
   content.querySelector('#edit-personnel-save').onclick = async () => {
     const nameEl = content.querySelector('#edit-personnel-name');
     const name = (nameEl?.value || '').trim();
+    const rankVal = cleanRank(rankInput?.value);
     const selectedTrainings = Array.from(content.querySelectorAll('#edit-training-list input[type=checkbox]:checked')).map(cb => cb.value);
-    const payload = { id: person.id, station_id: (station && station.id) || person.station_id, name, training: selectedTrainings };
+    const payload = { id: person.id, station_id: (station && station.id) || person.station_id, name, rank: rankVal || null, training: selectedTrainings };
     const urlBase = `/api/personnel/${person.id}`;
     const attempts = [
       { method: 'PATCH', url: urlBase, body: payload },

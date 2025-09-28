@@ -3,12 +3,18 @@ const { parseArrayField } = require('../utils');
 const unitTypes = require('../unitTypes');
 const { startPatrol } = require('../services/patrol');
 
+function normalizeRank(value) {
+  if (value === null || value === undefined) return null;
+  const str = String(value).trim();
+  return str.length ? str : null;
+}
+
 // GET /api/units
 function getUnits(req, res) {
   const { station_id, status } = req.query;
   const params = [];
   let sql =
-    `SELECT u.*, COALESCE(json_group_array(json_object('id', p.id, 'name', p.name, 'training', p.training)), '[]') AS personnel
+    `SELECT u.*, COALESCE(json_group_array(json_object('id', p.id, 'name', p.name, 'rank', p.rank, 'training', p.training)), '[]') AS personnel
      FROM units u
      LEFT JOIN personnel p ON p.unit_id = u.id`;
   const where = [];
@@ -29,6 +35,7 @@ function getUnits(req, res) {
         try {
           return JSON.parse(u.personnel || '[]').map(p => ({
             ...p,
+            rank: normalizeRank(p.rank),
             training: parseArrayField(p.training)
           }));
         } catch {

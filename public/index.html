@@ -304,6 +304,95 @@ function makeTagIcon(tag, unitClass, responding, width = 36, height = 24) {
   });
 }
 
+function cleanRankValue(value) {
+  if (value === null || value === undefined) return '';
+  const str = String(value).trim();
+  return str;
+}
+
+function normalizeRankListInput(input) {
+  let arr;
+  if (Array.isArray(input)) {
+    arr = input;
+  } else if (typeof input === 'string') {
+    arr = input.split(/[\n,]/);
+  } else {
+    arr = [];
+  }
+  const seen = new Set();
+  const result = [];
+  for (const item of arr) {
+    const val = cleanRankValue(item);
+    if (!val) continue;
+    const key = val.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(val);
+  }
+  return result;
+}
+
+const departmentRankCache = new Map();
+
+async function fetchDepartmentRanks(department) {
+  const dept = cleanRankValue(department);
+  if (!dept) return [];
+  if (departmentRankCache.has(dept)) {
+    return departmentRankCache.get(dept);
+  }
+  try {
+    const res = await fetch(`/api/departments/${encodeURIComponent(dept)}/ranks`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const ranks = Array.isArray(data?.ranks) ? data.ranks.map(cleanRankValue).filter(Boolean) : [];
+    departmentRankCache.set(dept, ranks);
+    return ranks;
+  } catch (err) {
+    console.warn('Failed to fetch ranks for', department, err);
+    return [];
+  }
+}
+
+function cacheDepartmentRanks(department, ranks) {
+  const dept = cleanRankValue(department);
+  if (!dept) return;
+  departmentRankCache.set(dept, normalizeRankListInput(ranks));
+}
+
+async function promptManageDepartmentRanks(initialDepartment) {
+  const initial = cleanRankValue(initialDepartment);
+  const dept = initial || cleanRankValue(prompt('Enter department to configure ranks:'));
+  if (!dept) return null;
+  const existing = await fetchDepartmentRanks(dept);
+  const response = prompt(
+    `Enter ranks for ${dept} (comma-separated):`,
+    existing.join(', ')
+  );
+  if (response === null) return null;
+  const ranks = normalizeRankListInput(response);
+  try {
+    const res = await fetch(`/api/departments/${encodeURIComponent(dept)}/ranks`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ranks }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || res.statusText);
+    cacheDepartmentRanks(dept, ranks);
+    if (typeof notifySuccess === 'function') {
+      notifySuccess(`Saved ${ranks.length} rank${ranks.length === 1 ? '' : 's'} for ${dept}.`);
+    }
+    return { department: dept, ranks };
+  } catch (err) {
+    if (typeof notifyError === 'function') {
+      notifyError(`Failed to save ranks: ${err.message || err}`);
+    } else {
+      alert(`Failed to save ranks: ${err.message || err}`);
+    }
+    return null;
+  }
+}
+
 const missionIcons = {
   none: makeIcon("/warning1.png", 30),
   partial: makeIcon("/warning2.png", 30),
@@ -1484,7 +1573,7 @@ async function showStationDetails(station) {
     <h2>${station.name}</h2>
         <button id="change-station-icon">Change Icon</button>
     <p>Type: ${station.type}</p>
-    <p>Department: <span id="station-dept">${station.department || ''}</span> <button id="change-station-dept">Change Department</button></p>
+    <p>Department: <span id="station-dept">${station.department || ''}</span> <button id="change-station-dept">Change Department</button> <button id="manage-station-ranks">Manage Ranks</button></p>
     <h3>Create Unit</h3>
     <select id="unit-type">${unitOptions}</select>
     <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
@@ -1493,6 +1582,8 @@ async function showStationDetails(station) {
     <button id="create-unit">Create Unit</button>
     <h3>Add Personnel</h3>
     <input id="personnel-name" placeholder="Name (e.g., John Doe)" />
+    <input id="personnel-rank" placeholder="Rank (optional)" list="personnel-rank-options" />
+    <datalist id="personnel-rank-options"></datalist>
     <div id="personnel-training">
       ${
         (getTrainingsForClass(station.type).length
@@ -1543,6 +1634,17 @@ async function showStationDetails(station) {
       input.value = `${rnd.first} ${rnd.last}`;
     }
   } catch {}
+  const rankInputEl = document.getElementById('personnel-rank');
+  const rankDatalistEl = document.getElementById('personnel-rank-options');
+
+  async function refreshRankOptionsForStation() {
+    if (!rankDatalistEl) return;
+    const dept = cleanRankValue(station.department);
+    const ranks = await fetchDepartmentRanks(dept);
+    rankDatalistEl.innerHTML = ranks.map(r => `<option value="${r.replace(/"/g, '&quot;')}"></option>`).join('');
+  }
+
+  refreshRankOptionsForStation();
           const iconBtn = detail.querySelector('#change-station-icon');
           iconBtn?.addEventListener('click', async () => {
                 const url = prompt('Enter icon URL:');
@@ -1573,6 +1675,18 @@ async function showStationDetails(station) {
                 _stationById.set(station.id, station);
                 fetchStations();
                 showStationDetails(station);
+          });
+          const manageRanksBtn = detail.querySelector('#manage-station-ranks');
+          manageRanksBtn?.addEventListener('click', async () => {
+                const result = await promptManageDepartmentRanks(station.department);
+                if (!result) return;
+                const configured = cleanRankValue(result.department);
+                if (!configured) return;
+                cacheDepartmentRanks(configured, result.ranks || []);
+                const currentDept = cleanRankValue(station.department);
+                if (currentDept && configured.toLowerCase() === currentDept.toLowerCase()) {
+                  await refreshRankOptionsForStation();
+                }
           });
         async function refreshBayInfo(stationId) {
           const [s, us] = await Promise.all([
@@ -1675,9 +1789,10 @@ async function showStationDetails(station) {
   });
   document.getElementById('create-personnel').addEventListener('click', async ()=>{
     const name = document.getElementById('personnel-name').value;
+    const rankValue = cleanRankValue(document.getElementById('personnel-rank')?.value);
     const training = Array.from(document.querySelectorAll('#personnel-training input[type=checkbox]:checked')).map(cb=>cb.value);
     if (!name) return notifyError("Missing name");
-    const res = await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, station_id: station.id, training })});
+    const res = await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, rank: rankValue || null, station_id: station.id, training })});
     const data = await res.json();
     if (!res.ok) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
     notifySuccess(`Personnel added. Cost: ${data.charged}`);
@@ -1692,7 +1807,9 @@ async function showStationDetails(station) {
   personnel.forEach(p=>{
     const li = document.createElement("li");
     const trainings = (p.training || []).map(t => typeof t === 'string' ? t : t.name).join(', ');
-    li.innerHTML = `<strong>${p.name}</strong> (${trainings}) <button onclick="editPersonnel(${p.id})" style="margin-left:10px;">Edit</button>`;
+    const trainingText = trainings || 'No training';
+    const rankLabel = cleanRankValue(p.rank);
+    li.innerHTML = `<strong>${p.name}</strong>${rankLabel ? ` [${rankLabel}]` : ''} (${trainingText}) <button onclick="editPersonnel(${p.id})" style="margin-left:10px;">Edit</button>`;
     personnelList.appendChild(li);
   });
 
@@ -1741,6 +1858,7 @@ function openStationBuilderModal(initial = {}) {
     }));
     state.personnel = state.personnel.map(p => ({
       name: typeof p?.name === 'string' ? p.name : '',
+      rank: cleanRankValue(p?.rank) || '',
       training: Array.isArray(p?.training) ? p.training.slice() : [],
       assignedUnit: Number.isInteger(p?.assigned_unit) ? p.assigned_unit : null,
     }));
@@ -1750,6 +1868,18 @@ function openStationBuilderModal(initial = {}) {
     const EQUIP_SLOT_COST = 1000;
     const HOLDING_COST = 2500;
     const BASE_PERSON_COST = 100;
+
+    let currentRankOptions = [];
+    let rankOptionsVersion = 0;
+
+    async function refreshCurrentRankOptions() {
+      const version = ++rankOptionsVersion;
+      const dept = cleanRankValue(state.department);
+      const ranks = await fetchDepartmentRanks(dept);
+      if (version !== rankOptionsVersion) return;
+      currentRankOptions = ranks;
+      renderPersonnel();
+    }
 
     const basicSection = document.createElement('div');
     basicSection.className = 'station-builder-section';
@@ -1835,7 +1965,33 @@ function openStationBuilderModal(initial = {}) {
     deptInput.className = 'station-builder-input';
     deptInput.placeholder = 'Department';
     deptInput.value = state.department;
-    deptInput.addEventListener('input', () => { state.department = deptInput.value; hideError(); });
+    deptInput.addEventListener('input', () => {
+      state.department = deptInput.value;
+      hideError();
+      refreshCurrentRankOptions();
+    });
+    const deptRankBtn = document.createElement('button');
+    deptRankBtn.type = 'button';
+    deptRankBtn.textContent = 'Manage Ranks';
+    deptRankBtn.style.whiteSpace = 'nowrap';
+    deptRankBtn.addEventListener('click', async () => {
+      const result = await promptManageDepartmentRanks(state.department);
+      if (!result) return;
+      const configured = cleanRankValue(result.department);
+      if (!configured) return;
+      cacheDepartmentRanks(configured, result.ranks || []);
+      const currentDept = cleanRankValue(state.department);
+      if (!currentDept) {
+        state.department = configured;
+        deptInput.value = configured;
+      }
+      if (currentDept && configured.toLowerCase() !== currentDept.toLowerCase()) return;
+      refreshCurrentRankOptions();
+    });
+    const deptWrapper = document.createElement('div');
+    deptWrapper.style.display = 'flex';
+    deptWrapper.style.gap = '0.5em';
+    deptWrapper.append(deptInput, deptRankBtn);
 
     const typeSelect = document.createElement('select');
     typeSelect.className = 'station-builder-select';
@@ -1902,7 +2058,7 @@ function openStationBuilderModal(initial = {}) {
 
     basicGrid.append(
       makeInputGroup('Station Name', nameInput),
-      makeInputGroup('Department', deptInput),
+      makeInputGroup('Department', deptWrapper),
       makeInputGroup('Station Class', typeSelect),
       makeInputGroup('Bays', baysInput),
       makeInputGroup('Equipment Slots', slotsInput)
@@ -2216,6 +2372,30 @@ function openStationBuilderModal(initial = {}) {
           return input;
         })());
 
+        const rankField = makeInputGroup('Rank', (() => {
+          const container = document.createElement('div');
+          container.style.display = 'flex';
+          const input = document.createElement('input');
+          input.className = 'station-builder-input';
+          input.value = person.rank || '';
+          const datalistId = `person-rank-options-${idx}`;
+          input.setAttribute('list', datalistId);
+          const datalist = document.createElement('datalist');
+          datalist.id = datalistId;
+          currentRankOptions.forEach((opt) => {
+            const option = document.createElement('option');
+            option.value = opt;
+            datalist.appendChild(option);
+          });
+          input.addEventListener('input', () => {
+            const val = cleanRankValue(input.value);
+            person.rank = val || '';
+            hideError();
+          });
+          container.append(input, datalist);
+          return container;
+        })());
+
         const assignField = makeInputGroup('Assign to Unit', (() => {
           const select = document.createElement('select');
           select.className = 'station-builder-select';
@@ -2248,7 +2428,7 @@ function openStationBuilderModal(initial = {}) {
         const label = document.createElement('div');
         label.textContent = 'Training';
         label.style.fontWeight = 'bold';
-        wrapper.append(nameField, assignField, label);
+        wrapper.append(nameField, rankField, assignField, label);
         trainings.forEach((opt) => {
           const tLabel = document.createElement('label');
           const checkbox = document.createElement('input');
@@ -2362,7 +2542,8 @@ function openStationBuilderModal(initial = {}) {
               throw new Error(`Personnel ${idx + 1} has an invalid unit assignment.`);
             }
             const uniqueTraining = Array.from(new Set(person.training || []));
-            return { name, training: uniqueTraining, assigned_unit: assigned };
+            const rank = cleanRankValue(person.rank);
+            return { name, rank: rank || null, training: uniqueTraining, assigned_unit: assigned };
           })
           .filter(Boolean);
 
@@ -2427,7 +2608,7 @@ function openStationBuilderModal(initial = {}) {
     }
 
     addPersonBtn.addEventListener('click', async () => {
-      const person = { name: '', training: [], assignedUnit: null };
+      const person = { name: '', rank: '', training: [], assignedUnit: null };
       const randomName = await fetchRandomPersonName();
       if (randomName) person.name = randomName;
       state.personnel.push(person);
@@ -2448,6 +2629,7 @@ function openStationBuilderModal(initial = {}) {
     renderStationEquipment();
     renderUnits();
     renderPersonnel();
+    refreshCurrentRankOptions();
     updateCostSummary();
     nameInput.focus();
   });

@@ -3,6 +3,18 @@ import { getMissions, renderMissionRow } from './missions.js';
 import { getStations, renderStationList } from './stations.js';
 import { editUnit, editPersonnel } from './edit-dialogs.js';
 
+const cleanRank = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+};
+
+const fetchRankOptions = (dept) => {
+  if (typeof window !== 'undefined' && typeof window.fetchDepartmentRanks === 'function') {
+    return window.fetchDepartmentRanks(dept);
+  }
+  return Promise.resolve([]);
+};
+
 let missionTemplates = [];
 fetch('/api/mission-templates')
   .then(r => r.json())
@@ -336,13 +348,16 @@ async function showStation(id) {
   window.currentStation = st;
   const pane = document.getElementById('cadStations');
   const personnel = [];
-  units.forEach(u => (u.personnel || []).forEach(p => personnel.push({ ...p, unit: u.name })));
-  unassigned.forEach(p => personnel.push({ ...p, unit: 'Unassigned' }));
+  units.forEach(u => (u.personnel || []).forEach(p => personnel.push({ ...p, rank: cleanRank(p.rank), unit: u.name })));
+  unassigned.forEach(p => personnel.push({ ...p, rank: cleanRank(p.rank), unit: 'Unassigned' }));
   let html = `<div class="cad-station-detail"><div class="cad-station-header"><button id="closeStationDetail">Close</button><button id="newPersonnel">New Personnel</button> <button id="newUnit">New Unit</button> <button id="newEquipment">New Equipment</button></div><h3>${st.name}</h3><p>Type: ${st.type}</p><p>Department: ${st.department||''}</p>`;
   html += `<div style="display:flex; gap:20px;"><div><h4>Units</h4><ul>`;
   html += units.map(u => `<li class="cad-unit" data-id="${u.id}">${u.name}${u.status !== 'available' ? ` <button class="cancel-unit" data-id="${u.id}">Cancel</button>` : ''}</li>`).join('');
   html += `</ul></div><div><h4>Personnel</h4><ul>`;
-  html += personnel.map(p => `<li class="cad-personnel" data-id="${p.id}">${p.name} - ${p.unit}</li>`).join('');
+  html += personnel.map(p => {
+    const rank = cleanRank(p.rank);
+    return `<li class="cad-personnel" data-id="${p.id}">${p.name}${rank ? ` [${rank}]` : ''} - ${p.unit}</li>`;
+  }).join('');
   html += `</ul></div></div></div>`;
   pane.innerHTML = html;
   document.getElementById('closeStationDetail').onclick = loadStations;
@@ -382,7 +397,9 @@ function openNewPersonnel(st) {
   const options = trainings.length ? trainings : [{ name: 'general', cost: 0 }];
   let html = `<div style="text-align:right"><button id="cancelNewPers">Back</button></div>`;
   html += `<h3>Add Personnel - ${st.name}</h3>`;
-  html += `<input id="persName" placeholder="Name"/><div id="persTrainings">`;
+  html += `<input id="persName" placeholder="Name"/>`;
+  html += `<input id="persRank" placeholder="Rank (optional)" list="persRankOptions"/>`;
+  html += `<datalist id="persRankOptions"></datalist><div id="persTrainings">`;
   html += options.map((t, idx)=>{
     const name = typeof t === 'string' ? t : t.name;
     const cost = typeof t === 'object' && t.cost ? t.cost : 0;
@@ -392,6 +409,15 @@ function openNewPersonnel(st) {
   pane.innerHTML = html;
   document.getElementById('cancelNewPers').onclick = () => showStation(st.id);
   const nameInput = document.getElementById('persName');
+  const rankInput = document.getElementById('persRank');
+  const rankList = document.getElementById('persRankOptions');
+  const dept = cleanRank(st.department);
+  if (rankList) {
+    fetchRankOptions(dept).then((ranks) => {
+      const safe = Array.isArray(ranks) ? ranks : [];
+      rankList.innerHTML = safe.map(r => `<option value="${String(r || '').replace(/"/g, '&quot;')}"></option>`).join('');
+    });
+  }
   fetch('/api/random-name').then(r=>r.json()).then(n=>{
     if (n.first && n.last) nameInput.value = `${n.first} ${n.last}`;
   }).catch(()=>{});
@@ -405,9 +431,10 @@ function openNewPersonnel(st) {
   updateCost();
   document.getElementById('createPers').onclick = async ()=>{
     const name = nameInput.value.trim();
+    const rankVal = cleanRank(rankInput?.value);
     const training = Array.from(document.querySelectorAll('#persTrainings input:checked')).map(cb=>cb.value);
     if (!name) return notifyError('Missing name');
-    const res = await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, station_id: st.id, training })});
+    const res = await fetch('/api/personnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ name, rank: rankVal || null, station_id: st.id, training })});
     const data = await res.json();
     if (!res.ok) { notifyError(`Failed: ${data.error || res.statusText}`); return; }
     notifySuccess(`Personnel added. Cost: $${data.charged}`);
@@ -485,7 +512,16 @@ async function showUnitDetail(unitId) {
       ? `<select id="unit-equip-select">${availableEq.map(n=>`<option value="${n}">${n}</option>`).join('')}</select> <button id="assign-equip-btn">Assign</button>`
       : '<p><em>No equipment in station storage.</em></p>';
     const personnelHtml = assigned.length
-      ? `<ul>${assigned.map(p=>`<li>${p.name || '(no name)'} ${Array.isArray(p.training)&&p.training.length?`(${p.training.join(', ')})`:''} <button class="unassign-btn" data-person-id="${p.id}" data-station-id="${p.station_id}">Unassign</button></li>`).join('')}</ul>`
+      ? `<ul>${assigned.map(p=>{
+          const rank = cleanRank(p.rank);
+          let trainings = [];
+          if (Array.isArray(p.training)) trainings = p.training;
+          else if (typeof p.training === 'string') {
+            try { trainings = JSON.parse(p.training); } catch { trainings = []; }
+          }
+          const trainingText = Array.isArray(trainings) && trainings.length ? ` (${trainings.join(', ')})` : '';
+          return `<li>${p.name || '(no name)'}${rank ? ` [${rank}]` : ''}${trainingText} <button class="unassign-btn" data-person-id="${p.id}" data-station-id="${p.station_id}">Unassign</button></li>`;
+        }).join('')}</ul>`
       : '<p>No personnel assigned to this unit.</p>';
     const missionHtml = mission && mission.id
       ? `<p><strong>Current Mission:</strong> #${mission.id} ${mission.type}</p>`
