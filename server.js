@@ -34,6 +34,35 @@ function haversine(aLat, aLon, bLat, bLon) {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+function normalizeRankList(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const result = [];
+  for (const item of list) {
+    let value = '';
+    if (typeof item === 'string') value = item;
+    else if (item && typeof item === 'object' && typeof item.name === 'string') value = item.name;
+    else if (item != null) value = String(item);
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function parseRankStorage(raw) {
+  return normalizeRankList(parseArrayField(raw));
+}
+
+function coerceRankValue(value) {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed.length ? trimmed : null;
+}
+
 const app = express();
 const PORT = 911;
 
@@ -332,11 +361,21 @@ db.serialize(() => {
     CREATE TABLE IF NOT EXISTS personnel (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT,
+      rank TEXT,
       training TEXT DEFAULT '[]',
       station_id INTEGER,
       unit_id INTEGER,
       FOREIGN KEY (station_id) REFERENCES stations(id),
       FOREIGN KEY (unit_id) REFERENCES units(id)
+    )
+  `);
+
+  db.run(`ALTER TABLE personnel ADD COLUMN rank TEXT`, () => {});
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS department_ranks (
+      department TEXT PRIMARY KEY,
+      ranks TEXT DEFAULT '[]'
     )
   `);
 
@@ -807,7 +846,7 @@ app.get('/api/missions/:id/units', (req, res) => {
        MIN(ut.started_at) AS travel_started_at,
        MIN(ut.total_duration) AS travel_total_duration,
        COALESCE(json_group_array(
-         json_object('id', p.id, 'name', p.name, 'training', p.training)
+        json_object('id', p.id, 'name', p.name, 'rank', p.rank, 'training', p.training)
        ), '[]') AS personnel
      FROM mission_units mu
      JOIN units u ON u.id = mu.unit_id
@@ -831,6 +870,7 @@ app.get('/api/missions/:id/units', (req, res) => {
             try {
               return JSON.parse(r.personnel||'[]').map(p => ({
                 ...p,
+                rank: coerceRankValue(p.rank),
                 training: (()=>{ try { return JSON.parse(p.training||'[]'); } catch { return []; } })()
               }));
             } catch {
@@ -1006,7 +1046,7 @@ app.get('/api/missions/:id/units', (req, res) => {
        MIN(ut.started_at) AS travel_started_at,
        MIN(ut.total_duration) AS travel_total_duration,
        COALESCE(json_group_array(
-         json_object('id', p.id, 'name', p.name, 'training', p.training)
+        json_object('id', p.id, 'name', p.name, 'rank', p.rank, 'training', p.training)
        ), '[]') AS personnel
      FROM mission_units mu
      JOIN units u ON u.id = mu.unit_id
@@ -1030,6 +1070,7 @@ app.get('/api/missions/:id/units', (req, res) => {
             try {
               return JSON.parse(r.personnel||'[]').map(p => ({
                 ...p,
+                rank: coerceRankValue(p.rank),
                 training: (()=>{ try { return JSON.parse(p.training||'[]'); } catch { return []; } })()
               }));
             } catch {
@@ -1450,7 +1491,11 @@ app.get('/api/personnel', (req, res) => {
   if (station_id) { query += ' WHERE station_id = ?'; params.push(station_id); }
   db.all(query, params, (err, rows) => {
     if (err) return res.status(500).json({ error: 'Failed to fetch personnel' });
-    const processed = rows.map(p => ({ ...p, training: JSON.parse(p.training || '[]') }));
+    const processed = rows.map((p) => ({
+      ...p,
+      rank: coerceRankValue(p.rank),
+      training: JSON.parse(p.training || '[]'),
+    }));
     res.json(processed);
   });
 });
@@ -1460,13 +1505,14 @@ app.get('/api/personnel/:id', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!row) return res.status(404).json({ error: 'Not found' });
     row.training = JSON.parse(row.training || '[]');
+    row.rank = coerceRankValue(row.rank);
     res.json(row);
   });
 });
 
 app.post('/api/personnel', async (req, res) => {
   try {
-    const { name, station_id, training = [] } = req.body || {};
+    const { name, station_id, rank, training = [] } = req.body || {};
     const BASE_PERSON_COST = 100;
 
     // sum of training costs
@@ -1480,13 +1526,20 @@ app.post('/api/personnel', async (req, res) => {
     if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: total });
 
     db.run(
-      'INSERT INTO personnel (name, station_id, training) VALUES (?, ?, ?)',
-      [name, station_id, JSON.stringify(training || [])],
+      'INSERT INTO personnel (name, rank, station_id, training) VALUES (?, ?, ?, ?)',
+      [name, coerceRankValue(rank), station_id, JSON.stringify(training || [])],
       async function (err) {
         if (err) return res.status(500).send('Failed to insert personnel');
         await adjustBalance(-total);
         const balance = await getBalance();
-        res.json({ id: this.lastID, charged: total, base: BASE_PERSON_COST, training_cost: tCost, balance });
+        res.json({
+          id: this.lastID,
+          charged: total,
+          base: BASE_PERSON_COST,
+          training_cost: tCost,
+          balance,
+          rank: coerceRankValue(rank),
+        });
       }
     );
   } catch (e) {
@@ -1498,10 +1551,10 @@ app.post('/api/personnel', async (req, res) => {
 
 app.put('/api/personnel/:id', (req, res) => {
   const id = req.params.id;
-  const { name, training } = req.body;
+  const { name, rank, training } = req.body;
   db.run(
-    'UPDATE personnel SET name = ?, training = ? WHERE id = ?',
-    [name, JSON.stringify(training || []), id],
+    'UPDATE personnel SET name = ?, rank = ?, training = ? WHERE id = ?',
+    [name, coerceRankValue(rank), JSON.stringify(training || []), id],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ success: true });
@@ -1518,6 +1571,10 @@ app.patch('/api/personnel/:id', (req, res) => {
   if (req.body.name !== undefined) {
     fields.push('name = ?');
     params.push(req.body.name);
+  }
+  if (req.body.rank !== undefined) {
+    fields.push('rank = ?');
+    params.push(coerceRankValue(req.body.rank));
   }
   if (req.body.training !== undefined) {
     fields.push('training = ?');
@@ -1539,6 +1596,51 @@ app.patch('/api/personnel/:id', (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ success: true, changed: this.changes });
   });
+});
+
+app.get('/api/departments/ranks', (req, res) => {
+  db.all('SELECT department, ranks FROM department_ranks ORDER BY LOWER(department)', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const result = rows.map((row) => ({
+      department: row.department,
+      ranks: parseRankStorage(row.ranks),
+    }));
+    res.json(result);
+  });
+});
+
+app.get('/api/departments/:department/ranks', (req, res) => {
+  const dept = coerceRankValue(decodeURIComponent(req.params.department || ''));
+  if (!dept) return res.status(400).json({ error: 'department is required' });
+  db.get('SELECT ranks FROM department_ranks WHERE department = ?', [dept], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ department: dept, ranks: row ? parseRankStorage(row.ranks) : [] });
+  });
+});
+
+app.put('/api/departments/:department/ranks', (req, res) => {
+  const dept = coerceRankValue(decodeURIComponent(req.params.department || ''));
+  if (!dept) return res.status(400).json({ error: 'department is required' });
+  const bodyRanks = req.body?.ranks;
+  let ranksInput;
+  if (Array.isArray(bodyRanks)) {
+    ranksInput = bodyRanks;
+  } else if (typeof bodyRanks === 'string') {
+    ranksInput = bodyRanks.split(/[\n,]/);
+  } else {
+    ranksInput = [];
+  }
+  const ranks = normalizeRankList(ranksInput);
+  db.run(
+    `INSERT INTO department_ranks (department, ranks)
+     VALUES (?, ?)
+     ON CONFLICT(department) DO UPDATE SET ranks=excluded.ranks`,
+    [dept, JSON.stringify(ranks)],
+    function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ department: dept, ranks, updated: this.changes > 0 });
+    }
+  );
 });
 
 
@@ -1724,7 +1826,11 @@ app.post('/api/mission-units', (req, res) => {
           const uType = unitTypes.find(t => t.class === unitRow.class && t.type === unitRow.type) || {};
           const maxPersonnel = Number(uType.capacity || 0);
           const maxEquip = Number(uType.equipmentSlots || 0);
-          let currentPersonnel = parseArrayField(unitRow.personnel);
+          let currentPersonnel = parseArrayField(unitRow.personnel).map((p) => (
+            p && typeof p === 'object'
+              ? { ...p, rank: coerceRankValue(p.rank) }
+              : p
+          ));
           let currentEquipment = parseArrayField(unitRow.equipment);
           const remainingPersonnel = Math.max(0, maxPersonnel - currentPersonnel.length);
           const remainingEquipment = Math.max(0, maxEquip - currentEquipment.length);
@@ -1740,7 +1846,7 @@ app.post('/api/mission-units', (req, res) => {
                 err4 => {
                   if (err4) return res.status(500).json({ error: err4.message });
                   db.get(
-                    `SELECT u.*, COALESCE(json_group_array(json_object('id', p.id, 'name', p.name, 'training', p.training)), '[]') AS personnel
+                    `SELECT u.*, COALESCE(json_group_array(json_object('id', p.id, 'name', p.name, 'rank', p.rank, 'training', p.training)), '[]') AS personnel
                      FROM units u LEFT JOIN personnel p ON p.unit_id = u.id
                      WHERE u.id=? GROUP BY u.id`,
                     [unit_id],
@@ -1758,7 +1864,7 @@ app.post('/api/mission-units', (req, res) => {
 
           // Assign personnel up to remaining capacity
           db.all(
-            'SELECT id, name, training FROM personnel WHERE station_id=? AND (unit_id IS NULL OR unit_id="") LIMIT ?',
+            'SELECT id, name, rank, training FROM personnel WHERE station_id=? AND (unit_id IS NULL OR unit_id="") LIMIT ?',
             [unitRow.station_id, remainingPersonnel],
             (perr, pers) => {
               if (perr) return res.status(500).json({ error: perr.message });
@@ -1770,7 +1876,7 @@ app.post('/api/mission-units', (req, res) => {
                   err3 => {
                     if (err3) return res.status(500).json({ error: err3.message });
                     currentPersonnel = currentPersonnel.concat(
-                      pers.map(p => ({ id: p.id, name: p.name, training: p.training }))
+                      pers.map(p => ({ id: p.id, name: p.name, rank: coerceRankValue(p.rank), training: p.training }))
                     );
                     assignEquipment();
                   }
@@ -2103,7 +2209,7 @@ setInterval(() => {
       if (err || !missions) return;
       missions.forEach(m => {
         db.all(
-          `SELECT u.*, COALESCE(json_group_array(json_object('id', p.id, 'name', p.name, 'training', p.training)), '[]') AS personnel
+          `SELECT u.*, COALESCE(json_group_array(json_object('id', p.id, 'name', p.name, 'rank', p.rank, 'training', p.training)), '[]') AS personnel
            FROM mission_units mu
            JOIN units u ON u.id = mu.unit_id
            LEFT JOIN personnel p ON p.unit_id = u.id

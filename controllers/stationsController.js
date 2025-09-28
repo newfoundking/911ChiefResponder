@@ -37,6 +37,12 @@ function normalizeTrainingList(list) {
     .map((t) => t.trim());
 }
 
+function normalizeRank(value) {
+  if (value === null || value === undefined) return null;
+  const str = String(value).trim();
+  return str.length ? str : null;
+}
+
 function runAsync(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function (err) {
@@ -193,9 +199,10 @@ async function createStation(req, res) {
           const pname = String(personRaw?.name || '').trim();
           if (!pname) return;
           const training = normalizeTrainingList(personRaw?.training);
+          const rank = normalizeRank(personRaw?.rank);
           const trainingCost = training.reduce((sum, t) => sum + (findTrainingCostByName(t) || 0), 0);
           personnelCostTotal += BASE_PERSON_COST + trainingCost;
-          unitPersonnelBuckets[idx].push({ name: pname, training });
+          unitPersonnelBuckets[idx].push({ name: pname, rank, training });
         });
       }
     }
@@ -212,7 +219,8 @@ async function createStation(req, res) {
       const pname = String(personRaw?.name || '').trim();
       if (!pname) continue;
       const training = normalizeTrainingList(personRaw?.training);
-      const entry = { name: pname, training };
+      const rank = normalizeRank(personRaw?.rank);
+      const entry = { name: pname, rank, training };
       const trainingCost = training.reduce((sum, t) => sum + (findTrainingCostByName(t) || 0), 0);
       personnelCostTotal += BASE_PERSON_COST + trainingCost;
 
@@ -283,8 +291,8 @@ async function createStation(req, res) {
         const assigned = unitPersonnelBuckets[i];
         for (const person of assigned) {
           const insertPerson = await runAsync(
-            `INSERT INTO personnel (name, station_id, unit_id, training) VALUES (?, ?, ?, ?)` ,
-            [person.name, stationId, unitId, JSON.stringify(person.training)]
+            `INSERT INTO personnel (name, rank, station_id, unit_id, training) VALUES (?, ?, ?, ?, ?)` ,
+            [person.name, person.rank ?? null, stationId, unitId, JSON.stringify(person.training)]
           );
           createdPersonnel.push({ id: insertPerson.lastID, ...person, unit_id: unitId });
         }
@@ -292,8 +300,8 @@ async function createStation(req, res) {
 
       for (const person of stationPersonnel) {
         const insertPerson = await runAsync(
-          `INSERT INTO personnel (name, station_id, unit_id, training) VALUES (?, ?, NULL, ?)` ,
-          [person.name, stationId, JSON.stringify(person.training)]
+          `INSERT INTO personnel (name, rank, station_id, unit_id, training) VALUES (?, ?, ?, NULL, ?)` ,
+          [person.name, person.rank ?? null, stationId, JSON.stringify(person.training)]
         );
         createdPersonnel.push({ id: insertPerson.lastID, ...person, unit_id: null });
       }
@@ -490,7 +498,15 @@ function getStationPersonnel(req, res) {
     [stationId],
     (err, rows) => {
       if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
+      const processed = rows.map((row) => ({
+        ...row,
+        rank: normalizeRank(row.rank),
+        training: (() => {
+          try { return JSON.parse(row.training || '[]'); }
+          catch { return []; }
+        })(),
+      }));
+      res.json(processed);
     }
   );
 }
