@@ -70,6 +70,15 @@ function runAsync(sql, params = []) {
   });
 }
 
+function getAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) return reject(err);
+      resolve(row);
+    });
+  });
+}
+
 const EQUIPMENT_SLOT_COST = 1000;
 const BAY_BASE_COST = 5000;
 const BAY_EXP_MULTIPLIER = 2.0;
@@ -401,12 +410,54 @@ function patchIcon(req, res) {
   });
 }
 
+// PATCH /api/stations/:id/name  { name: <string> }
+async function patchName(req, res) {
+  const id = Number(req.params.id);
+  const name = String(req.body?.name || '').trim();
+  if (!id) return res.status(400).json({ error: 'Invalid station id' });
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+  if (name.length > 200) return res.status(400).json({ error: 'Name too long' });
+  try {
+    const result = await runAsync('UPDATE stations SET name=? WHERE id=?', [name, id]);
+    if (!result.changes) return res.status(404).json({ error: 'Station not found' });
+    res.json({ success: true, id, name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
 // DELETE /api/stations
 function deleteStations(req, res) {
   db.run('DELETE FROM stations', err => {
     if (err) return res.status(500).send('Error deleting stations.');
     res.send('All stations deleted.');
   });
+}
+
+// DELETE /api/stations/:id
+async function deleteStation(req, res) {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid station id' });
+
+  try {
+    const exists = await getAsync('SELECT id FROM stations WHERE id=?', [id]);
+    if (!exists) return res.status(404).json({ error: 'Station not found' });
+
+    await runAsync('BEGIN TRANSACTION');
+    await runAsync('DELETE FROM facility_load WHERE station_id=?', [id]);
+    await runAsync('DELETE FROM response_zones WHERE station_id=?', [id]);
+    await runAsync('DELETE FROM personnel WHERE unit_id IN (SELECT id FROM units WHERE station_id=?)', [id]);
+    await runAsync('DELETE FROM personnel WHERE station_id=?', [id]);
+    await runAsync('DELETE FROM mission_units WHERE unit_id IN (SELECT id FROM units WHERE station_id=?)', [id]);
+    await runAsync('DELETE FROM unit_travel WHERE unit_id IN (SELECT id FROM units WHERE station_id=?)', [id]);
+    await runAsync('DELETE FROM units WHERE station_id=?', [id]);
+    await runAsync('DELETE FROM stations WHERE id=?', [id]);
+    await runAsync('COMMIT');
+    res.json({ success: true, id });
+  } catch (err) {
+    try { await runAsync('ROLLBACK'); } catch { /* ignore */ }
+    res.status(500).json({ error: err.message });
+  }
 }
 
 // POST /api/stations/:id/equipment  { name: <string> }
@@ -537,7 +588,9 @@ module.exports = {
   createStation,
   patchBays,
   patchIcon,
+  patchName,
   deleteStations,
+  deleteStation,
   buyEquipment,
   patchEquipmentSlots,
   patchDepartment,

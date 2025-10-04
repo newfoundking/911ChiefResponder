@@ -383,7 +383,7 @@ async function showStation(id) {
   const personnel = [];
   units.forEach(u => (u.personnel || []).forEach(p => personnel.push({ ...p, rank: cleanRank(p.rank), unit: u.name })));
   unassigned.forEach(p => personnel.push({ ...p, rank: cleanRank(p.rank), unit: 'Unassigned' }));
-  let html = `<div class="cad-station-detail"><div class="cad-station-header"><button id="closeStationDetail">Close</button><button id="newPersonnel">New Personnel</button> <button id="newUnit">New Unit</button> <button id="newEquipment">New Equipment</button></div><h3>${st.name}</h3><p>Type: ${st.type}</p><p>Department: ${st.department||''}</p>`;
+  let html = `<div class="cad-station-detail"><div class="cad-station-header"><button id="closeStationDetail">Close</button><button id="newPersonnel">New Personnel</button> <button id="newUnit">New Unit</button> <button id="newEquipment">New Equipment</button> <button id="editStation">Edit Station</button> <button id="deleteStation">Delete Station</button></div><h3>${st.name}</h3><p>Type: ${st.type}</p><p>Department: ${st.department||''}</p>`;
   html += `<div style="display:flex; gap:20px;"><div><h4>Units</h4><ul>`;
   html += units.map(u => `<li class="cad-unit" data-id="${u.id}">${u.name}${u.status !== 'available' ? ` <button class="cancel-unit" data-id="${u.id}">Cancel</button>` : ''}</li>`).join('');
   html += `</ul></div><div><h4>Personnel</h4><ul>`;
@@ -399,6 +399,10 @@ async function showStation(id) {
   document.getElementById('newPersonnel').onclick = () => openNewPersonnel(st);
   document.getElementById('newUnit').onclick = () => openNewUnit(st);
   document.getElementById('newEquipment').onclick = () => openNewEquipment(st);
+  const editStationBtn = document.getElementById('editStation');
+  if (editStationBtn) editStationBtn.onclick = () => editStationName(st);
+  const deleteStationBtn = document.getElementById('deleteStation');
+  if (deleteStationBtn) deleteStationBtn.onclick = () => deleteStationWithConfirm(st);
   pane.querySelectorAll('.cad-unit').forEach(li => li.addEventListener('click', () => showUnitDetail(Number(li.dataset.id))));
   pane.querySelectorAll('.cad-personnel').forEach(li => li.addEventListener('click', () => editPersonnel(Number(li.dataset.id), st)));
   pane.querySelectorAll('.cancel-unit').forEach(btn => {
@@ -413,6 +417,50 @@ async function showStation(id) {
 }
 
 window.refreshStationPanelNoCache = showStation;
+
+async function editStationName(st) {
+  const currentName = st?.name || '';
+  const newName = window.prompt('Enter a new name for this station:', currentName);
+  if (newName === null) return;
+  const trimmed = String(newName).trim();
+  if (!trimmed) { notifyError('Station name is required.'); return; }
+  try {
+    const res = await fetch(`/api/stations/${st.id}/name`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmed })
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      notifyError(`Failed to update station: ${data.error || res.statusText}`);
+      return;
+    }
+    await loadStations();
+    await showStation(st.id);
+  } catch (err) {
+    console.error('Failed to rename station', err);
+    notifyError('Failed to update station.');
+  }
+}
+
+async function deleteStationWithConfirm(st) {
+  const name = st?.name || 'this station';
+  const confirmed = window.confirm(`Delete ${name}? This will remove the station and all assigned units and personnel.`);
+  if (!confirmed) return;
+  try {
+    const res = await fetch(`/api/stations/${st.id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      notifyError(`Failed to delete station: ${data.error || res.statusText}`);
+      return;
+    }
+    window.currentStation = null;
+    await loadStations();
+  } catch (err) {
+    console.error('Failed to delete station', err);
+    notifyError('Failed to delete station.');
+  }
+}
 
 function getTrainingsForClass(cls) {
   const key = String(cls || '').toLowerCase();
