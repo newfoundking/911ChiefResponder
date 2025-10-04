@@ -15,6 +15,39 @@ const fetchRankOptions = (dept) => {
   return Promise.resolve([]);
 };
 
+const defaultEquipmentProvider = (typeof globalThis !== 'undefined' && typeof globalThis.getDefaultUnitEquipment === 'function')
+  ? globalThis.getDefaultUnitEquipment
+  : (typeof window !== 'undefined' && typeof window.getDefaultUnitEquipment === 'function'
+      ? window.getDefaultUnitEquipment
+      : null);
+
+const equipmentKey = (name) => {
+  if (name === null || name === undefined) return '';
+  const trimmed = String(name).trim();
+  return trimmed ? trimmed.toLowerCase() : '';
+};
+
+function gatherEquipmentForUnit(unit) {
+  const counts = new Map();
+  if (!unit) return counts;
+  const eqArr = Array.isArray(unit.equipment) ? unit.equipment : [];
+  for (const eq of eqArr) {
+    const label = typeof eq === 'string' ? eq : eq?.name;
+    const key = equipmentKey(label);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  if (typeof defaultEquipmentProvider === 'function') {
+    const defaults = defaultEquipmentProvider(unit.class, unit.type) || [];
+    for (const provided of defaults) {
+      const key = equipmentKey(provided);
+      if (!key || counts.has(key)) continue;
+      counts.set(key, 1);
+    }
+  }
+  return counts;
+}
+
 let missionTemplates = [];
 fetch('/api/mission-templates')
   .then(r => r.json())
@@ -790,9 +823,10 @@ async function autoDispatch(mission) {
       return c;
     }
     function equipmentCount(u, name) {
-      return Array.isArray(u.equipment)
-        ? u.equipment.filter(e=>String(e).toLowerCase()===String(name).toLowerCase()).length
-        : 0;
+      const key = equipmentKey(name);
+      if (!key) return 0;
+      const counts = gatherEquipmentForUnit(u);
+      return counts.get(key) || 0;
     }
 
     const selected = [];
