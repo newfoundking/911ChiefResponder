@@ -422,6 +422,13 @@ function getTrainingsForClass(cls) {
   return [];
 }
 
+function expandTrainingListForClass(list, cls) {
+  if (typeof trainingHelpers !== 'undefined' && trainingHelpers && typeof trainingHelpers.expandTrainingList === 'function') {
+    return trainingHelpers.expandTrainingList(list, cls) || [];
+  }
+  return Array.isArray(list) ? list : [];
+}
+
 if (typeof window !== 'undefined') {
   window.getTrainingsForClass = getTrainingsForClass;
 }
@@ -814,11 +821,13 @@ async function autoDispatch(mission) {
     };
 
     function trainingCount(u, name) {
+      const target = String(name || '').trim().toLowerCase();
+      if (!target) return 0;
       let c = 0;
-      for (const p of Array.isArray(u.personnel)?u.personnel:[]) {
-        for (const t of Array.isArray(p.training)?p.training:[]) {
-          if (String(t).toLowerCase() === String(name).toLowerCase()) c++;
-        }
+      for (const p of Array.isArray(u.personnel) ? u.personnel : []) {
+        const list = Array.isArray(p.training) ? p.training : [];
+        const expanded = expandTrainingListForClass(list, u.class);
+        if (expanded.some((t) => String(t || '').trim().toLowerCase() === target)) c++;
       }
       return c;
     }

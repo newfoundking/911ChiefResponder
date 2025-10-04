@@ -1,8 +1,25 @@
 const db = require('../db');
 const { findEquipmentCostByName, requireFunds, adjustBalance, getBalance } = require('../wallet');
 const unitTypes = require('../unitTypes');
-let trainingsByClass = {};
-try { trainingsByClass = require('../trainings'); } catch { trainingsByClass = {}; }
+let trainingModule = {};
+try { trainingModule = require('../trainings'); } catch { trainingModule = {}; }
+const trainingsByClass = trainingModule.trainingsByClass || {};
+const collapseTrainingList = typeof trainingModule.collapseTrainingList === 'function'
+  ? trainingModule.collapseTrainingList
+  : (list) => {
+      const seen = new Set();
+      const result = [];
+      (Array.isArray(list) ? list : []).forEach((value) => {
+        const raw = typeof value === 'string' ? value : value?.name;
+        const trimmed = String(raw || '').trim();
+        if (!trimmed) return;
+        const key = trimmed.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(trimmed);
+      });
+      return result;
+    };
 
 function findUnitDefinition(unitClass, unitType) {
   const cls = String(unitClass || '').toLowerCase();
@@ -18,12 +35,13 @@ function findUnitCostByType(unitClass, unitType) {
 }
 
 function findTrainingCostByName(name) {
-  const key = String(name || '').toLowerCase();
+  const key = String(name || '').trim().toLowerCase();
+  if (!key) return 0;
   const lists = Object.values(trainingsByClass || {});
   for (const arr of lists || []) {
     for (const item of arr || []) {
-      if (typeof item === 'string' && item.toLowerCase() === key) return 0;
-      if (item?.name && String(item.name).toLowerCase() === key) return Number(item.cost) || 0;
+      if (typeof item === 'string' && item.trim().toLowerCase() === key) return 0;
+      if (item?.name && String(item.name).trim().toLowerCase() === key) return Number(item.cost) || 0;
     }
   }
   return 0;
@@ -198,7 +216,8 @@ async function createStation(req, res) {
         unitRaw.personnel.forEach((personRaw) => {
           const pname = String(personRaw?.name || '').trim();
           if (!pname) return;
-          const training = normalizeTrainingList(personRaw?.training);
+          const trainingRaw = normalizeTrainingList(personRaw?.training);
+          const training = collapseTrainingList(trainingRaw, type);
           const rank = normalizeRank(personRaw?.rank);
           const trainingCost = training.reduce((sum, t) => sum + (findTrainingCostByName(t) || 0), 0);
           personnelCostTotal += BASE_PERSON_COST + trainingCost;
@@ -218,7 +237,8 @@ async function createStation(req, res) {
       const personRaw = personnelInput[idx];
       const pname = String(personRaw?.name || '').trim();
       if (!pname) continue;
-      const training = normalizeTrainingList(personRaw?.training);
+      const trainingRaw = normalizeTrainingList(personRaw?.training);
+      const training = collapseTrainingList(trainingRaw, type);
       const rank = normalizeRank(personRaw?.rank);
       const entry = { name: pname, rank, training };
       const trainingCost = training.reduce((sum, t) => sum + (findTrainingCostByName(t) || 0), 0);
