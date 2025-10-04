@@ -9,6 +9,7 @@
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
         <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+        <script src="/config/defaultEquipment.js"></script>
         <script src="js/notifications.js"></script>
         <script type="module" src="js/common.js"></script>
         <script type="module" src="js/forms.js"></script>
@@ -1285,6 +1286,33 @@ async function refreshAssignedUnitsUI(missionId) {
 }
 
 // ===== Dynamic requirements =====
+function equipmentKey(name) {
+  if (name === null || name === undefined) return '';
+  const trimmed = String(name).trim();
+  return trimmed ? trimmed.toLowerCase() : '';
+}
+
+function gatherUnitEquipment(unit) {
+  const counts = new Map();
+  if (!unit) return counts;
+  const eqArr = Array.isArray(unit.equipment) ? unit.equipment : [];
+  for (const eq of eqArr) {
+    const label = typeof eq === 'string' ? eq : eq?.name;
+    const key = equipmentKey(label);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  if (typeof getDefaultUnitEquipment === 'function') {
+    const defaults = getDefaultUnitEquipment(unit.class, unit.type) || [];
+    for (const provided of defaults) {
+      const key = equipmentKey(provided);
+      if (!key || counts.has(key)) continue;
+      counts.set(key, 1);
+    }
+  }
+  return counts;
+}
+
 function renderRequirementsDynamic(mission, assigned) {
   const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
   const reqTraining = Array.isArray(mission.required_training) ? mission.required_training : [];
@@ -1312,8 +1340,9 @@ function renderRequirementsDynamic(mission, assigned) {
       }
     }
     if (eTarget) {
-      for (const eq of Array.isArray(u.equipment) ? u.equipment : []) {
-        eTarget.set(eq, (eTarget.get(eq) || 0) + 1);
+      const provided = gatherUnitEquipment(u);
+      for (const [key, count] of provided.entries()) {
+        eTarget.set(key, (eTarget.get(key) || 0) + count);
       }
     }
   }
@@ -1351,12 +1380,13 @@ function renderRequirementsDynamic(mission, assigned) {
   const equipmentItems = reqEquipment.map(r => {
     const baseNeed = r.qty ?? r.quantity ?? r.count ?? 1;
     const name = r.name || r.type || r;
+    const key = equipmentKey(name);
     const ignored = penalties
-      .filter(p => p.category === 'equipment' && p.type === name)
+      .filter(p => p.category === 'equipment' && key && equipmentKey(p.type || p.name) === key)
       .reduce((s, p) => s + (p.quantity || 0), 0);
     const need = Math.max(0, baseNeed - ignored);
-    const onScene = equipmentCounts.on_scene.get(name) || 0;
-    const enroute = equipmentCounts.enroute.get(name) || 0;
+    const onScene = key ? (equipmentCounts.on_scene.get(key) || 0) : 0;
+    const enroute = key ? (equipmentCounts.enroute.get(key) || 0) : 0;
     const outstanding = Math.max(0, need - enroute - onScene);
     return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
   });
@@ -3580,7 +3610,10 @@ async function autoDispatch(mission) {
       return c;
     }
     function equipmentCount(u, name) {
-      return Array.isArray(u.equipment)?u.equipment.filter(e=>String(e).toLowerCase()===String(name).toLowerCase()).length:0;
+      const key = equipmentKey(name);
+      if (!key) return 0;
+      const counts = gatherUnitEquipment(u);
+      return counts.get(key) || 0;
     }
 
     const selected = [];

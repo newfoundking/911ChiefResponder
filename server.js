@@ -10,8 +10,14 @@ const db = require('./db');             // your sqlite3 instance
 const unitTypes = require('./unitTypes');
 let trainingsByClass = {};
 let equipment = {};
+let getDefaultUnitEquipment = () => [];
 try { trainingsByClass = require('./trainings'); } catch { /* falls back to {} */ }
 try { equipment = require('./equipment'); } catch { /* falls back to {} */ }
+try {
+  ({ getDefaultUnitEquipment } = require('./defaultEquipment'));
+} catch {
+  getDefaultUnitEquipment = () => [];
+}
 
 // Normalize legacy status values missing the underscore.
 // Older clients used "onscene" while the server expects "on_scene".
@@ -72,6 +78,7 @@ app.use(express.static('public'));
 app.get('/config/unitTypes.js', (req,res)=>res.sendFile(path.join(__dirname,'unitTypes.js')));
 app.get('/config/trainings.js', (req,res)=>res.sendFile(path.join(__dirname,'trainings.js')));
 app.get('/config/equipment.js', (req,res)=>res.sendFile(path.join(__dirname,'equipment.js')));
+app.get('/config/defaultEquipment.js', (req,res)=>res.sendFile(path.join(__dirname,'defaultEquipment.js')));
 app.get('/config/osmPoiTypes.js', (req,res)=>res.sendFile(path.join(__dirname,'osmPoiTypes.js')));
 
 // Modular routes
@@ -468,6 +475,12 @@ db.run(`INSERT OR IGNORE INTO wallet (id, balance) VALUES (1, 100000)`);
 const { missionClocks, beginMissionClock, clearMissionClock, rehydrateMissionClocks } = require('./services/missionTimers');
 rehydrateMissionClocks();
 
+function equipmentKey(name) {
+  if (name === null || name === undefined) return '';
+  const trimmed = String(name).trim();
+  return trimmed ? trimmed.toLowerCase() : '';
+}
+
 function missionRequirementsMet(mission, assigned) {
   const unitOnScene = new Map();
   const equipOnScene = new Map();
@@ -484,9 +497,21 @@ function missionRequirementsMet(mission, assigned) {
     if (normStatus !== 'on_scene' && normStatus !== 'onscene') continue;
     unitOnScene.set(u.type, (unitOnScene.get(u.type) || 0) + 1);
 
-    const eqArr = parseArrayField(u.equipment);
+    const eqArr = Array.isArray(u.equipment) ? u.equipment : parseArrayField(u.equipment);
+    const eqKeys = new Set();
     for (const e of eqArr) {
-      equipOnScene.set(e, (equipOnScene.get(e) || 0) + 1);
+      const name = typeof e === 'string' ? e : e?.name;
+      const key = equipmentKey(name);
+      if (!key) continue;
+      equipOnScene.set(key, (equipOnScene.get(key) || 0) + 1);
+      eqKeys.add(key);
+    }
+    const defaults = getDefaultUnitEquipment(u.class, u.type) || [];
+    for (const provided of defaults) {
+      const key = equipmentKey(provided);
+      if (!key || eqKeys.has(key)) continue;
+      equipOnScene.set(key, (equipOnScene.get(key) || 0) + 1);
+      eqKeys.add(key);
     }
 
     const personnel = parseArrayField(u.personnel);
@@ -510,11 +535,16 @@ function missionRequirementsMet(mission, assigned) {
 
   const reqEquip = parseArrayField(mission.equipment_required).map(r => {
     const name = r.name || r.type || r;
+    const key = equipmentKey(name);
     const ignored = penalties
-      .filter(p => p.category === 'equipment' && (p.type === name || p.name === name))
+      .filter(p => {
+        if (p.category !== 'equipment') return false;
+        const penaltyName = p.name || p.type;
+        return key && equipmentKey(penaltyName) === key;
+      })
       .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
     const qty = Math.max(0, (r.qty ?? r.quantity ?? r.count ?? 1) - ignored);
-    return { ...r, name, quantity: qty };
+    return { ...r, name, key, quantity: qty };
   });
 
   const reqTrain = parseArrayField(mission.required_training).map(r => {
@@ -532,7 +562,8 @@ function missionRequirementsMet(mission, assigned) {
   });
   const equipMet = reqEquip.every(r => {
     const need = r.quantity ?? r.qty ?? r.count ?? 1;
-    return (equipOnScene.get(r.name) || 0) >= need;
+    if (!r.key) return need <= 0;
+    return (equipOnScene.get(r.key) || 0) >= need;
   });
   const trainMet = reqTrain.every(r => {
     const need = r.quantity ?? r.qty ?? r.count ?? 1;
