@@ -8,16 +8,36 @@ const { getBalance, adjustBalance, requireFunds } = require('./wallet');
 
 const db = require('./db');             // your sqlite3 instance
 const unitTypes = require('./unitTypes');
-let trainingsByClass = {};
+let trainingModule = {};
 let equipment = {};
 let getDefaultUnitEquipment = () => [];
-try { trainingsByClass = require('./trainings'); } catch { /* falls back to {} */ }
+try { trainingModule = require('./trainings'); } catch { trainingModule = {}; }
 try { equipment = require('./equipment'); } catch { /* falls back to {} */ }
 try {
   ({ getDefaultUnitEquipment } = require('./defaultEquipment'));
 } catch {
   getDefaultUnitEquipment = () => [];
 }
+const trainingsByClass = trainingModule.trainingsByClass || {};
+const expandTrainingList = typeof trainingModule.expandTrainingList === 'function'
+  ? trainingModule.expandTrainingList
+  : (list) => (Array.isArray(list) ? list.slice() : []);
+const collapseTrainingList = typeof trainingModule.collapseTrainingList === 'function'
+  ? trainingModule.collapseTrainingList
+  : (list) => {
+      const seen = new Set();
+      const result = [];
+      (Array.isArray(list) ? list : []).forEach((value) => {
+        const raw = typeof value === 'string' ? value : value?.name;
+        const trimmed = String(raw || '').trim();
+        if (!trimmed) return;
+        const key = trimmed.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(trimmed);
+      });
+      return result;
+    };
 
 // Normalize legacy status values missing the underscore.
 // Older clients used "onscene" while the server expects "on_scene".
@@ -481,6 +501,12 @@ function equipmentKey(name) {
   return trimmed ? trimmed.toLowerCase() : '';
 }
 
+function trainingKey(name) {
+  if (name === null || name === undefined) return '';
+  const trimmed = String(name).trim();
+  return trimmed ? trimmed.toLowerCase() : '';
+}
+
 function missionRequirementsMet(mission, assigned) {
   const unitOnScene = new Map();
   const equipOnScene = new Map();
@@ -517,8 +543,11 @@ function missionRequirementsMet(mission, assigned) {
     const personnel = parseArrayField(u.personnel);
     for (const p of personnel) {
       const tList = Array.isArray(p.training) ? p.training : parseArrayField(p.training);
-      for (const t of tList) {
-        trainOnScene.set(t, (trainOnScene.get(t) || 0) + 1);
+      const expanded = expandTrainingList(tList, u.class);
+      for (const t of expanded) {
+        const key = trainingKey(t);
+        if (!key) continue;
+        trainOnScene.set(key, (trainOnScene.get(key) || 0) + 1);
       }
     }
   }
@@ -549,11 +578,16 @@ function missionRequirementsMet(mission, assigned) {
 
   const reqTrain = parseArrayField(mission.required_training).map(r => {
     const name = r.training || r.name || r;
+    const key = trainingKey(name);
     const ignored = penalties
-      .filter(p => p.category === 'training' && (p.type === name || p.name === name))
+      .filter(p => {
+        if (p.category !== 'training') return false;
+        const penaltyName = p.type !== undefined ? p.type : p.name;
+        return key && trainingKey(penaltyName) === key;
+      })
       .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
     const qty = Math.max(0, (r.qty ?? r.quantity ?? r.count ?? 1) - ignored);
-    return { ...r, name, quantity: qty };
+    return { ...r, name, key, quantity: qty };
   });
 
   const unitsMet = reqUnits.every(r => {
@@ -567,7 +601,8 @@ function missionRequirementsMet(mission, assigned) {
   });
   const trainMet = reqTrain.every(r => {
     const need = r.quantity ?? r.qty ?? r.count ?? 1;
-    return (trainOnScene.get(r.name) || 0) >= need;
+    if (!r.key) return need <= 0;
+    return (trainOnScene.get(r.key) || 0) >= need;
   });
 
   return unitsMet && equipMet && trainMet;
@@ -582,11 +617,13 @@ function findUnitCostByType(t) {
 }
 function findTrainingCostByName(name) {
   try {
+    const key = trainingKey(name);
+    if (!key) return 0;
     const lists = Object.values(trainingsByClass || {});
-    for (const arr of lists) {
+    for (const arr of lists || []) {
       for (const item of arr || []) {
-        if (typeof item === 'string' && item === name) return 0;
-        if (item?.name === name) return Number(item.cost) || 0;
+        if (typeof item === 'string' && trainingKey(item) === key) return 0;
+        if (item?.name && trainingKey(item.name) === key) return Number(item.cost) || 0;
       }
     }
     return 0;

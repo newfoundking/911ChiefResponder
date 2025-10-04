@@ -2146,6 +2146,55 @@ function openStationBuilderModal(initial = {}) {
       }).filter(opt => opt.name);
     }
 
+    function expandTrainingListForState(list) {
+      if (typeof trainingHelpers !== 'undefined' && trainingHelpers && typeof trainingHelpers.expandTrainingList === 'function') {
+        return trainingHelpers.expandTrainingList(list, state.type) || [];
+      }
+      const seen = new Set();
+      const result = [];
+      (Array.isArray(list) ? list : []).forEach((value) => {
+        const trimmed = String(value || '').trim();
+        if (!trimmed) return;
+        const key = trimmed.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(trimmed);
+      });
+      return result;
+    }
+
+    function collapseTrainingListForState(list) {
+      if (typeof trainingHelpers !== 'undefined' && trainingHelpers && typeof trainingHelpers.collapseTrainingList === 'function') {
+        return trainingHelpers.collapseTrainingList(list, state.type) || [];
+      }
+      const seen = new Set();
+      const result = [];
+      (Array.isArray(list) ? list : []).forEach((value) => {
+        const trimmed = String(value || '').trim();
+        if (!trimmed) return;
+        const key = trimmed.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(trimmed);
+      });
+      return result;
+    }
+
+    function getDefaultTrainingsForState(options) {
+      const opts = Array.isArray(options) ? options : [];
+      const validNames = new Set(opts.map((opt) => String(opt?.name || '').toLowerCase()).filter(Boolean));
+      if (typeof trainingHelpers !== 'undefined' && trainingHelpers && typeof trainingHelpers.getTrainingDefaults === 'function') {
+        const defaults = trainingHelpers.getTrainingDefaults(state.type) || [];
+        return defaults.filter((name) => validNames.has(String(name || '').toLowerCase()));
+      }
+      const key = String(state.type || '').toLowerCase();
+      const defaults = (typeof trainingDefaults !== 'undefined' && trainingDefaults && trainingDefaults[key]) || [];
+      const arr = Array.isArray(defaults) ? defaults : [defaults];
+      return arr
+        .map((name) => String(name || '').trim())
+        .filter((name) => name && validNames.has(name.toLowerCase()));
+    }
+
     function allowedUnitTypes() {
       return (unitTypes || []).filter((u) => String(u.class || '').toLowerCase() === state.type);
     }
@@ -2163,12 +2212,12 @@ function openStationBuilderModal(initial = {}) {
     }
 
     function findTrainingCost(name) {
-      const key = String(name || '').toLowerCase();
+      const key = String(name || '').trim().toLowerCase();
       const lists = Object.values(trainingsByClass || {});
       for (const arr of lists) {
         for (const item of arr || []) {
-          if (typeof item === 'string' && item.toLowerCase() === key) return 0;
-          if (item?.name && String(item.name).toLowerCase() === key) return Number(item.cost) || 0;
+          if (typeof item === 'string' && item.trim().toLowerCase() === key) return 0;
+          if (item?.name && String(item.name).trim().toLowerCase() === key) return Number(item.cost) || 0;
         }
       }
       return 0;
@@ -2209,9 +2258,11 @@ function openStationBuilderModal(initial = {}) {
         });
       }
 
-      const trainingNames = new Set(trainingOptions().map((t) => t.name));
+      const availableTrainings = trainingOptions();
+      const trainingNames = new Set(availableTrainings.map((t) => t.name));
       state.personnel.forEach((person) => {
-        person.training = person.training.filter((name) => trainingNames.has(name));
+        const filtered = (Array.isArray(person.training) ? person.training : []).filter((name) => trainingNames.has(name));
+        person.training = expandTrainingListForState(filtered);
       });
 
       if (!['police', 'jail'].includes(state.type)) {
@@ -2402,6 +2453,7 @@ function openStationBuilderModal(initial = {}) {
       }
       const trainings = trainingOptions();
       state.personnel.forEach((person, idx) => {
+        if (!Array.isArray(person.training)) person.training = [];
         const wrapper = document.createElement('div');
         wrapper.className = 'station-builder-person';
         const header = document.createElement('div');
@@ -2498,18 +2550,41 @@ function openStationBuilderModal(initial = {}) {
         label.textContent = 'Training';
         label.style.fontWeight = 'bold';
         wrapper.append(nameField, rankField, assignField, label);
+        const trainingSet = new Set((person.training || []).map((name) => String(name || '').toLowerCase()));
         trainings.forEach((opt) => {
           const tLabel = document.createElement('label');
           const checkbox = document.createElement('input');
           checkbox.type = 'checkbox';
-          checkbox.checked = person.training.includes(opt.name);
+          checkbox.checked = trainingSet.has(opt.name.toLowerCase());
           checkbox.addEventListener('change', () => {
+            const name = opt.name;
+            const targetKey = name.toLowerCase();
             if (checkbox.checked) {
-              if (!person.training.includes(opt.name)) person.training.push(opt.name);
+              const combined = Array.isArray(person.training) ? person.training.slice() : [];
+              if (!combined.some((item) => String(item || '').toLowerCase() === targetKey)) {
+                combined.push(name);
+              }
+              const collapsed = collapseTrainingListForState(combined);
+              person.training = expandTrainingListForState(collapsed);
             } else {
-              person.training = person.training.filter((name) => name !== opt.name);
+              let current = Array.isArray(person.training) ? person.training.slice() : [];
+              current = current.filter((item) => String(item || '').toLowerCase() !== targetKey);
+              let collapsed = collapseTrainingListForState(current);
+              collapsed = collapsed.filter((item) => String(item || '').toLowerCase() !== targetKey);
+              const toRemove = new Set();
+              collapsed.forEach((item) => {
+                const expandedSingle = expandTrainingListForState([item]);
+                if (expandedSingle.some((t) => String(t || '').toLowerCase() === targetKey)) {
+                  toRemove.add(String(item || '').toLowerCase());
+                }
+              });
+              if (toRemove.size) {
+                collapsed = collapsed.filter((item) => !toRemove.has(String(item || '').toLowerCase()));
+              }
+              person.training = expandTrainingListForState(collapsed);
             }
             hideError();
+            renderPersonnel();
             updateCostSummary();
           });
           const span = document.createElement('span');
@@ -2545,7 +2620,8 @@ function openStationBuilderModal(initial = {}) {
       );
       const personnelCost = state.personnel.reduce((sum, person) => {
         if (!person.name?.trim()) return sum;
-        const trainingCost = person.training.reduce((s, t) => s + findTrainingCost(t), 0);
+        const collapsedTraining = collapseTrainingListForState(person.training);
+        const trainingCost = collapsedTraining.reduce((s, t) => s + findTrainingCost(t), 0);
         return sum + BASE_PERSON_COST + trainingCost;
       }, 0);
       const total = stationCost + unitCost + stationEquipCost + unitEquipCost + personnelCost;
@@ -2610,7 +2686,7 @@ function openStationBuilderModal(initial = {}) {
             if (assigned != null && (!Number.isInteger(assigned) || assigned < 0 || assigned >= units.length)) {
               throw new Error(`Personnel ${idx + 1} has an invalid unit assignment.`);
             }
-            const uniqueTraining = Array.from(new Set(person.training || []));
+            const uniqueTraining = collapseTrainingListForState(person.training);
             const rank = cleanRankValue(person.rank);
             return { name, rank: rank || null, training: uniqueTraining, assigned_unit: assigned };
           })
@@ -2677,7 +2753,10 @@ function openStationBuilderModal(initial = {}) {
     }
 
     addPersonBtn.addEventListener('click', async () => {
-      const person = { name: '', rank: '', training: [], assignedUnit: null };
+      const options = trainingOptions();
+      const defaults = getDefaultTrainingsForState(options);
+      const expandedDefaults = expandTrainingListForState(defaults);
+      const person = { name: '', rank: '', training: expandedDefaults.slice(), assignedUnit: null };
       const randomName = await fetchRandomPersonName();
       if (randomName) person.name = randomName;
       state.personnel.push(person);
