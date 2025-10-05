@@ -1,5 +1,5 @@
 const db = require('../db');
-const { parseArrayField } = require('../utils');
+const { parseArrayField, getSeatInfo } = require('../utils');
 const unitTypes = require('../unitTypes');
 const { startPatrol } = require('../services/patrol');
 
@@ -25,12 +25,17 @@ function getUnits(req, res) {
 
   db.all(sql, params, (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    const parsed = rows.map(u => ({
-      ...u,
-      priority: Number(u.priority) || 1,
-      patrol: u.patrol === 1 || u.patrol === true,
-      responding: u.responding === 1 || u.responding === true,
-      equipment: parseArrayField(u.equipment),
+    const parsed = rows.map(u => {
+      const seatData = getSeatInfo(u.class, u.type, u.seat_override);
+      return {
+        ...u,
+        priority: Number(u.priority) || 1,
+        patrol: u.patrol === 1 || u.patrol === true,
+        responding: u.responding === 1 || u.responding === true,
+        equipment: parseArrayField(u.equipment),
+        seat_override: seatData.seatOverride,
+        seat_capacity: seatData.seatCapacity,
+        default_capacity: seatData.defaultCapacity,
       personnel: (() => {
         try {
           return JSON.parse(u.personnel || '[]').map(p => ({
@@ -42,7 +47,8 @@ function getUnits(req, res) {
           return [];
         }
       })()
-    }));
+      };
+    });
     res.json(parsed);
   });
 }
@@ -54,12 +60,16 @@ function getUnit(req, res) {
   db.get('SELECT * FROM units WHERE id=?', [id], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!row) return res.status(404).json({ error: 'Not found' });
+    const seatData = getSeatInfo(row.class, row.type, row.seat_override);
     const parsed = {
       ...row,
       priority: Number(row.priority) || 1,
       patrol: row.patrol === 1 || row.patrol === true,
       responding: row.responding === 1 || row.responding === true,
       equipment: parseArrayField(row.equipment),
+      seat_override: seatData.seatOverride,
+      seat_capacity: seatData.seatCapacity,
+      default_capacity: seatData.defaultCapacity,
     };
     res.json(parsed);
   });
@@ -95,26 +105,64 @@ function getUnitMission(req, res) {
 function updateUnit(req, res) {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid unit id' });
-
-  const fields = [];
-  const params = [];
-  if (req.body.name !== undefined) { fields.push('name = ?'); params.push(req.body.name); }
-  if (req.body.type !== undefined) { fields.push('type = ?'); params.push(req.body.type); }
-  if (req.body.class !== undefined) { fields.push('class = ?'); params.push(req.body.class); }
-  if (req.body.tag !== undefined) { fields.push('tag = ?'); params.push(req.body.tag); }
-  if (req.body.priority !== undefined) {
-    let pr = Number(req.body.priority);
-    if (!Number.isFinite(pr)) pr = 1;
-    pr = Math.min(5, Math.max(1, pr));
-    fields.push('priority = ?');
-    params.push(pr);
-  }
-  if (!fields.length) return res.status(400).json({ error: 'No updatable fields provided' });
-  params.push(id);
-  const sql = `UPDATE units SET ${fields.join(', ')} WHERE id = ?`;
-  db.run(sql, params, function (err) {
+  db.get('SELECT class, type FROM units WHERE id=?', [id], (err, current) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true, changed: this.changes });
+    if (!current) return res.status(404).json({ error: 'Unit not found' });
+
+    const fields = [];
+    const params = [];
+
+    if (req.body.name !== undefined) {
+      fields.push('name = ?');
+      params.push(String(req.body.name));
+    }
+
+    let updatedClass = current.class;
+    if (req.body.class !== undefined) {
+      updatedClass = String(req.body.class).trim();
+      fields.push('class = ?');
+      params.push(updatedClass);
+    }
+
+    let updatedType = current.type;
+    if (req.body.type !== undefined) {
+      updatedType = String(req.body.type).trim();
+      fields.push('type = ?');
+      params.push(updatedType);
+    }
+
+    if (req.body.tag !== undefined) {
+      fields.push('tag = ?');
+      params.push(req.body.tag != null ? String(req.body.tag) : null);
+    }
+
+    if (req.body.priority !== undefined) {
+      let pr = Number(req.body.priority);
+      if (!Number.isFinite(pr)) pr = 1;
+      pr = Math.min(5, Math.max(1, pr));
+      fields.push('priority = ?');
+      params.push(pr);
+    }
+
+    const seatInput = req.body?.seats ?? req.body?.seat_capacity ?? req.body?.seat_override;
+    if (seatInput !== undefined) {
+      const seatData = getSeatInfo(updatedClass, updatedType, seatInput);
+      if (seatData.seatOverride === null || seatData.seatOverride === undefined) {
+        fields.push('seat_override = NULL');
+      } else {
+        fields.push('seat_override = ?');
+        params.push(seatData.seatOverride);
+      }
+    }
+
+    if (!fields.length) return res.status(400).json({ error: 'No updatable fields provided' });
+
+    params.push(id);
+    const sql = `UPDATE units SET ${fields.join(', ')} WHERE id = ?`;
+    db.run(sql, params, function (runErr) {
+      if (runErr) return res.status(500).json({ error: runErr.message });
+      res.json({ success: true, changed: this.changes });
+    });
   });
 }
 

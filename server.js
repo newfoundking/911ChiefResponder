@@ -47,7 +47,7 @@ db.serialize(() => {
   db.run("UPDATE missions SET status='on_scene' WHERE status='onscene'");
 });
 
-const { parseArrayField, reverseGeocode, pointInPolygon } = require('./utils');
+const { parseArrayField, reverseGeocode, pointInPolygon, getSeatInfo } = require('./utils');
 const { startPatrol, handlePatrolCompletion } = require('./services/patrol');
 const { resolveMissionById, getFacilityOccupancy } = require('./services/missions');
 const ROUTE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
@@ -368,6 +368,7 @@ db.serialize(() => {
       responding INTEGER DEFAULT 0,
       patrol INTEGER DEFAULT 0,
       patrol_until INTEGER,
+      seat_override INTEGER,
       FOREIGN KEY (station_id) REFERENCES stations(id)
     )
   `);
@@ -382,6 +383,8 @@ db.serialize(() => {
   db.run(`ALTER TABLE units ADD COLUMN priority INTEGER DEFAULT 1`, () => {});
   // Add tag column for legacy DBs
   db.run(`ALTER TABLE units ADD COLUMN tag TEXT`, () => {});
+  // Add seat override column for legacy DBs
+  db.run(`ALTER TABLE units ADD COLUMN seat_override INTEGER`, () => {});
 
   // Personnel
   db.run(`
@@ -727,12 +730,15 @@ app.post('/api/units', async (req, res) => {
   try {
     const { station_id, class: unitClass, type, name, tag } = req.body || {};
     let { priority } = req.body || {};
+    const seatInput = req.body?.seats ?? req.body?.seat_capacity ?? req.body?.seat_override;
     if (!station_id || !unitClass || !type || !name)
       return res.status(400).json({ error: 'station_id, class, type, name are required' });
 
     priority = Number(priority);
     if (!Number.isFinite(priority)) priority = 1;
     priority = Math.min(5, Math.max(1, priority));
+
+    const seatInfo = getSeatInfo(unitClass, type, seatInput);
 
     const usage = await stationBayUsage(Number(station_id));
     if (!usage.ok) return res.status(404).json({ error: usage.reason });
@@ -743,13 +749,20 @@ app.post('/api/units', async (req, res) => {
     if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: cost });
 
     db.run(
-      `INSERT INTO units (station_id, class, type, name, tag, priority, status) VALUES (?,?,?,?,?,?, 'available')`,
-      [station_id, unitClass, type, name, tag, priority],
+      `INSERT INTO units (station_id, class, type, name, tag, priority, status, seat_override) VALUES (?,?,?,?,?,?, 'available', ?)` ,
+      [station_id, unitClass, type, name, tag, priority, seatInfo.seatOverride],
       async function (err) {
         if (err) return res.status(500).json({ error: err.message });
         if (cost > 0) await adjustBalance(-cost);
         const balance = await getBalance();
-        res.json({ ok:true, id: this.lastID, charged: cost, balance });
+        res.json({
+          ok: true,
+          id: this.lastID,
+          charged: cost,
+          balance,
+          seat_capacity: seatInfo.seatCapacity,
+          default_capacity: seatInfo.defaultCapacity,
+        });
       }
     );
   } catch (e) {
@@ -1015,14 +1028,12 @@ app.post('/api/units/:id/personnel', (req, res) => {
     const { personnelId } = req.body;
 
     // Fetch unit details to determine capacity
-    db.get(`SELECT class, type FROM units WHERE id = ?`, [unitId], (err, unit) => {
+    db.get(`SELECT class, type, seat_override FROM units WHERE id = ?`, [unitId], (err, unit) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!unit) return res.status(404).json({ error: 'Unit not found' });
 
-        const uType = unitTypes.find(
-            (t) => t.class === unit.class && t.type === unit.type
-        );
-        const capacity = Number(uType?.capacity || 0);
+        const seatInfo = getSeatInfo(unit.class, unit.type, unit.seat_override);
+        const capacity = Number(seatInfo.seatCapacity || 0);
 
         db.get(
             `SELECT COUNT(*) AS cnt FROM personnel WHERE unit_id = ?`,
@@ -1867,7 +1878,7 @@ app.post('/api/mission-units', (req, res) => {
 
   // Guard: prevent double-dispatch across all missions and fetch department
   db.get(
-    'SELECT u.status, u.station_id, u.class, u.type, u.personnel, u.equipment, s.department FROM units u LEFT JOIN stations s ON u.station_id = s.id WHERE u.id=?',
+    'SELECT u.status, u.station_id, u.class, u.type, u.personnel, u.equipment, u.seat_override, s.department FROM units u LEFT JOIN stations s ON u.station_id = s.id WHERE u.id=?',
     [unit_id],
     (e, unitRow) => {
       if (e) return res.status(500).json({ error: e.message });
@@ -1892,7 +1903,8 @@ app.post('/api/mission-units', (req, res) => {
 
           // Determine unit capacities from unitTypes
           const uType = unitTypes.find(t => t.class === unitRow.class && t.type === unitRow.type) || {};
-          const maxPersonnel = Number(uType.capacity || 0);
+          const seatInfo = getSeatInfo(unitRow.class, unitRow.type, unitRow.seat_override);
+          const maxPersonnel = Number(seatInfo.seatCapacity || 0);
           const maxEquip = Number(uType.equipmentSlots || 0);
           let currentPersonnel = parseArrayField(unitRow.personnel).map((p) => (
             p && typeof p === 'object'

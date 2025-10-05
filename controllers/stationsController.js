@@ -1,5 +1,6 @@
 const db = require('../db');
 const { findEquipmentCostByName, requireFunds, adjustBalance, getBalance } = require('../wallet');
+const { getSeatInfo } = require('../utils');
 const unitTypes = require('../unitTypes');
 const { getFacilityOccupancy } = require('../services/missions');
 let trainingModule = {};
@@ -253,6 +254,9 @@ async function createStation(req, res) {
         return res.status(400).json({ error: `Unit type ${unitType} (${unitClass}) is not allowed` });
       }
 
+      const seatInfo = getSeatInfo(unitDef.class, unitDef.type, unitRaw?.seats ?? unitRaw?.seat_override ?? unitRaw?.seat_capacity);
+      const seatCapacity = Number(seatInfo.seatCapacity || 0);
+
       const equipmentList = Array.isArray(unitRaw?.equipment)
         ? unitRaw.equipment
             .map((item) => String(item || '').trim())
@@ -279,12 +283,15 @@ async function createStation(req, res) {
         tag,
         priority,
         equipment: equipmentList,
+        seat_override: seatInfo.seatOverride,
+        seat_capacity: seatCapacity,
+        default_capacity: seatInfo.defaultCapacity,
       };
       unitsNormalized.push(normalized);
       unitPersonnelBuckets.push([]);
 
       if (Array.isArray(unitRaw?.personnel)) {
-        unitRaw.personnel.forEach((personRaw) => {
+        for (const personRaw of unitRaw.personnel) {
           const pname = String(personRaw?.name || '').trim();
           if (!pname) return;
           const trainingRaw = normalizeTrainingList(personRaw?.training);
@@ -292,8 +299,11 @@ async function createStation(req, res) {
           const rank = normalizeRank(personRaw?.rank);
           const trainingCost = training.reduce((sum, t) => sum + (findTrainingCostByName(t) || 0), 0);
           personnelCostTotal += BASE_PERSON_COST + trainingCost;
+          if (seatCapacity && unitPersonnelBuckets[idx].length >= seatCapacity) {
+            return res.status(400).json({ error: `Unit ${unitName} exceeds seat capacity (${seatCapacity})` });
+          }
           unitPersonnelBuckets[idx].push({ name: pname, rank, training });
-        });
+        }
       }
     }
 
@@ -321,6 +331,11 @@ async function createStation(req, res) {
         const assignedIndex = Number(rawAssignment);
         if (!Number.isInteger(assignedIndex) || assignedIndex < 0 || assignedIndex >= unitPersonnelBuckets.length) {
           return res.status(400).json({ error: `Personnel #${idx + 1} has an invalid unit assignment` });
+        }
+        const unitInfo = unitsNormalized[assignedIndex];
+        const capacity = Number(unitInfo?.seat_capacity || 0);
+        if (capacity && unitPersonnelBuckets[assignedIndex].length >= capacity) {
+          return res.status(400).json({ error: `Unit ${unitInfo?.name || assignedIndex + 1} exceeds seat capacity (${capacity})` });
         }
         unitPersonnelBuckets[assignedIndex].push(entry);
       } else {
@@ -372,9 +387,18 @@ async function createStation(req, res) {
       for (let i = 0; i < unitsNormalized.length; i += 1) {
         const unit = unitsNormalized[i];
         const insertUnit = await runAsync(
-          `INSERT INTO units (station_id, class, type, name, tag, priority, status, equipment)
-           VALUES (?, ?, ?, ?, ?, ?, 'available', ?)` ,
-          [stationId, unit.class, unit.type, unit.name, unit.tag, unit.priority, JSON.stringify(unit.equipment)]
+          `INSERT INTO units (station_id, class, type, name, tag, priority, status, equipment, seat_override)
+           VALUES (?, ?, ?, ?, ?, ?, 'available', ?, ?)` ,
+          [
+            stationId,
+            unit.class,
+            unit.type,
+            unit.name,
+            unit.tag,
+            unit.priority,
+            JSON.stringify(unit.equipment),
+            unit.seat_override ?? null,
+          ]
         );
         const unitId = insertUnit.lastID;
         createdUnits.push({ id: unitId, ...unit });

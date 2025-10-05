@@ -1,4 +1,5 @@
 const axios = require('axios');
+const unitTypes = require('../unitTypes');
 
 // Safely parse JSON fields that should be arrays.
 function parseArrayField(str) {
@@ -37,8 +38,51 @@ function pointInPolygon(lat, lon, poly) {
   return inside;
 }
 
+function findUnitDefinition(unitClass, unitType) {
+  const cls = String(unitClass || '').toLowerCase();
+  const type = String(unitType || '').toLowerCase();
+  return unitTypes.find(
+    (u) => String(u.class || '').toLowerCase() === cls && String(u.type || '').toLowerCase() === type
+  ) || null;
+}
+
+function getSeatInfo(unitClass, unitType, requested) {
+  const def = findUnitDefinition(unitClass, unitType);
+  const defaultCapacity = Number(def?.capacity || 0) || 0;
+  const hasDefault = defaultCapacity > 0;
+  let seatOverride = null;
+  let seatCapacity = defaultCapacity;
+
+  if (requested !== undefined && requested !== null && requested !== '') {
+    let value = Number(requested);
+    if (Number.isFinite(value)) {
+      value = Math.floor(value);
+      if (hasDefault) {
+        value = Math.max(1, Math.min(defaultCapacity, value));
+        if (value !== defaultCapacity) {
+          seatOverride = value;
+          seatCapacity = value;
+        } else {
+          seatOverride = null;
+          seatCapacity = defaultCapacity;
+        }
+      } else {
+        seatOverride = Math.max(0, value);
+        seatCapacity = seatOverride;
+      }
+    }
+  }
+
+  if (!hasDefault && seatOverride == null) {
+    seatCapacity = 0;
+  }
+
+  return { defaultCapacity, seatCapacity, seatOverride };
+}
+
 module.exports = {
   parseArrayField,
   reverseGeocode,
   pointInPolygon,
+  getSeatInfo,
 };
