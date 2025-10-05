@@ -88,11 +88,14 @@ async function allocateTransport(kind, lat, lon, unitClass) {
 }
 
 async function handleTransports(unitIds, lat, lon, patients, prisoners) {
+  const summary = { patientTransports: 0, prisonerTransports: 0, transportReward: 0 };
+
   let patientCount = 0;
   for (const p of patients) patientCount += Number(p.count || 0);
   let prisonerCount = 0;
   for (const p of prisoners) prisonerCount += Number(p.transport || 0);
-  if (!unitIds.length || (patientCount === 0 && prisonerCount === 0)) return;
+
+  if (!unitIds.length || (patientCount === 0 && prisonerCount === 0)) return summary;
 
   const placeholders = unitIds.map(() => '?').join(',');
   const rows = await all(`SELECT id, type FROM units WHERE id IN (${placeholders})`, unitIds);
@@ -111,14 +114,22 @@ async function handleTransports(unitIds, lat, lon, patients, prisoners) {
   const medTransports = Math.min(patientCount, medUnits.length);
   for (let i = 0; i < medTransports; i++) {
     await allocateTransport('patient', lat, lon, 'ambulance');
-    await adjustBalance(500);
+    summary.patientTransports += 1;
+    summary.transportReward += 500;
   }
 
   const prisTransports = Math.min(prisonerCount, prisUnits.length);
   for (let i = 0; i < prisTransports; i++) {
     await allocateTransport('prisoner', lat, lon, 'police');
-    await adjustBalance(500);
+    summary.prisonerTransports += 1;
+    summary.transportReward += 500;
   }
+
+  if (summary.transportReward > 0) {
+    await adjustBalance(summary.transportReward);
+  }
+
+  return summary;
 }
 
 function haversine(aLat, aLon, bLat, bLon) {
@@ -167,14 +178,15 @@ function resolveMissionById(missionId, cb) {
       await adjustBalance(+reward);
     }
 
+    let transportSummary = { patientTransports: 0, prisonerTransports: 0, transportReward: 0 };
     if (mission) {
-      await handleTransports(ids, mission.lat, mission.lon, patients, prisoners);
+      transportSummary = await handleTransports(ids, mission.lat, mission.lon, patients, prisoners);
     }
 
     const balance = await getBalance();
     clearMissionClock(missionId);
 
-    return { freed: ids.length, reward, balance };
+    return { freed: ids.length, reward, balance, ...transportSummary };
   })();
 
   if (typeof cb === 'function') {
