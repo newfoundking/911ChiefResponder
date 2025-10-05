@@ -184,9 +184,15 @@
                 </div>
                 <div id="walletDisplay">Balance: $0</div>
                 <script>
+                function setWalletBalanceDisplay(balance){
+                  const el = document.getElementById('walletDisplay');
+                  if (!el) return;
+                  el.textContent = `Balance: $${balance}`;
+                }
+
                 async function refreshWallet(){
                   const w = await fetch('/api/wallet').then(r=>r.json());
-                  document.getElementById('walletDisplay').textContent = `Balance: $${w.balance}`;
+                  setWalletBalanceDisplay(w.balance);
                 }
                 setInterval(refreshWallet, 5000);
                 refreshWallet();
@@ -4061,7 +4067,17 @@ function setupTimerForMission(mission, endTime) {
     activeWorkTimers.delete(mission.id);
     persistWorkTimers();
     const assignedBefore = await (await fetch(`/api/missions/${mission.id}/units`)).json();
-    await fetch(`/api/missions/${mission.id}`, { method:'PUT' });
+    let resolutionResult = null;
+    try {
+      const resp = await fetch(`/api/missions/${mission.id}`, { method:'PUT' });
+      if (!resp.ok) throw new Error(`Mission resolve failed: ${resp.status}`);
+      resolutionResult = await resp.json();
+      if (resolutionResult && typeof resolutionResult.balance !== 'undefined') {
+        setWalletBalanceDisplay(resolutionResult.balance);
+      }
+    } catch (err) {
+      console.error(err);
+    }
     if (!_stationById || _stationById.size===0) {
       const stations = await (await fetch('/api/stations')).json();
       cacheStations(stations);
@@ -4091,7 +4107,26 @@ function setupTimerForMission(mission, endTime) {
     await refreshAssignedUnitsUI(mission.id);
     await fetchMissions();
     const area = document.getElementById('manualDispatchArea');
-    if (area) area.innerHTML = '<strong>Mission resolved.</strong>';
+    const parts = [];
+    if (resolutionResult) {
+      const reward = Number(resolutionResult.reward);
+      const freed = Number(resolutionResult.freed);
+      if (Number.isFinite(reward) && reward !== 0) {
+        const rewardPrefix = reward > 0 ? '+' : '-';
+        const rewardLabel = reward > 0 ? 'transport payout' : 'penalty';
+        parts.push(`${rewardPrefix}$${Math.abs(reward).toLocaleString()} ${rewardLabel}`);
+      }
+      if (Number.isFinite(freed) && freed > 0) {
+        parts.push(`${freed} unit${freed === 1 ? '' : 's'} freed`);
+      }
+      if (parts.length && typeof window.notifySuccess === 'function') {
+        window.notifySuccess(parts.join(', '));
+      }
+    }
+    const message = parts.length ? `Mission resolved. ${parts.join(', ')}` : 'Mission resolved.';
+    if (area) {
+      area.textContent = message;
+    }
   }, ms);
   activeWorkTimers.set(mission.id, { timeoutId: tid, endTime });
   startMissionCountdown(mission.id, endTime);
