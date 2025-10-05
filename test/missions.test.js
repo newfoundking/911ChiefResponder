@@ -9,6 +9,7 @@ process.env.DB_PATH = dbPath;
 
 const db = require('../db');
 const missionsController = require('../controllers/missionsController');
+const { handleTransports } = require('../services/missions');
 const { missionClocks } = require('../services/missionTimers');
 
 function exec(sql) {
@@ -188,4 +189,22 @@ test('PUT /api/missions/:id resolves missions and releases resources', async () 
   assert.strictEqual(missionRow.resolve_at, null);
 
   assert.equal(missionClocks.has(missionId), false);
+});
+
+test('handleTransports counts prisoner transports regardless of attribute case', async () => {
+  await run(`INSERT INTO units (id, type, status, responding) VALUES (?,?,?,?)`, [201, 'Patrol Car', 'on_scene', 1]);
+  await run(`INSERT INTO wallet (id, balance) VALUES (1, 0)`);
+  await run(
+    `INSERT INTO stations (id, lat, lon, bed_capacity, holding_cells, type) VALUES (?,?,?,?,?,?)`,
+    [301, 40.0, -75.0, 0, 3, 'police']
+  );
+
+  await handleTransports([201], 40.0, -75.0, [], [{ transport: 1 }]);
+
+  const loads = await all(`SELECT type FROM facility_load`);
+  assert.equal(loads.length, 1);
+  assert.equal(loads[0].type, 'prisoner');
+
+  const walletRow = await get(`SELECT balance FROM wallet WHERE id=1`);
+  assert.equal(walletRow.balance, 500);
 });
