@@ -1057,16 +1057,23 @@ async function openManualDispatch(mission) {
     const dist = st ? haversine(mission.lat, mission.lon, st.lat, st.lon) : Infinity;
     return { ...u, department: st?.department || 'Unknown', distance: dist };
   });
-  const groups = {};
-  available.forEach(u=>{
-    if (!groups[u.department]) groups[u.department] = [];
-    groups[u.department].push(u);
-  });
   let html = '<div class="cad-unit-header"><button id="dispatchUnits">Dispatch</button><button id="closeUnits">Close</button></div>';
-  for (const dept of Object.keys(groups).sort()) {
+  const orderedUnits = available.slice().sort((a,b)=>a.distance - b.distance);
+  const deptOrder = [];
+  const groups = new Map();
+  for (const unit of orderedUnits) {
+    const dept = unit.department;
+    if (!groups.has(dept)) {
+      groups.set(dept, []);
+      deptOrder.push(dept);
+    }
+    groups.get(dept).push(unit);
+  }
+  for (const dept of deptOrder) {
     html += `<h4>${dept}</h4><ul>`;
-    for (const u of groups[dept].sort((a,b)=>a.distance - b.distance)) {
-      html += `<li><label><input type="checkbox" value="${u.id}"> ${u.name} (${u.distance.toFixed(1)} km)</label></li>`;
+    for (const u of groups.get(dept)) {
+      const distLabel = Number.isFinite(u.distance) ? `${u.distance.toFixed(1)} km` : 'N/A';
+      html += `<li><label><input type="checkbox" value="${u.id}"> ${u.name} (${distLabel})</label></li>`;
     }
     html += '</ul>';
   }
