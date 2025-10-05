@@ -42,7 +42,66 @@
     }
 
     #mapTab {
+      position: relative;
       padding: 0;
+    }
+
+    .map-overlay {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      display: flex;
+      justify-content: flex-start;
+      pointer-events: none;
+      z-index: 500;
+    }
+
+    .map-overlay__panel {
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.95);
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.25);
+      max-width: 320px;
+    }
+
+    .map-overlay__action {
+      align-self: flex-start;
+      border: none;
+      border-radius: 999px;
+      padding: 8px 18px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      background: #1d4ed8;
+      color: #ffffff;
+      box-shadow: 0 8px 16px rgba(29, 78, 216, 0.25);
+    }
+
+    .map-overlay__action:disabled {
+      opacity: 0.6;
+      box-shadow: none;
+    }
+
+    .map-overlay__status {
+      min-height: 1.1em;
+      font-size: 0.8rem;
+      color: #475569;
+    }
+
+    .map-overlay__status[data-tone='success'] {
+      color: #15803d;
+    }
+
+    .map-overlay__status[data-tone='error'] {
+      color: #b91c1c;
+    }
+
+    .map-overlay__status[data-tone='info'] {
+      color: #0f172a;
     }
 
     .tab-controls {
@@ -839,6 +898,20 @@
         color: #e2e8f0;
       }
 
+      .map-overlay__panel {
+        background: rgba(15, 23, 42, 0.9);
+        box-shadow: 0 18px 36px rgba(2, 6, 23, 0.7);
+      }
+
+      .map-overlay__action {
+        background: #2563eb;
+        color: #f8fafc;
+      }
+
+      .map-overlay__status[data-tone='info'] {
+        color: #e2e8f0;
+      }
+
       .section-title,
       .detail-section__title {
         color: #94a3b8;
@@ -852,7 +925,24 @@
   </style>
 </head>
 <body>
-  <div id="mapTab" class="tab active"><div id="map"></div></div>
+  <div id="mapTab" class="tab active">
+    <div class="map-overlay">
+      <div class="map-overlay__panel">
+        <div class="control-group">
+          <span class="control-label">Call Speed</span>
+          <div class="segmented">
+            <button class="mission-speed active" data-speed="pause" type="button">Pause</button>
+            <button class="mission-speed" data-speed="slow" type="button">Slow</button>
+            <button class="mission-speed" data-speed="medium" type="button">Medium</button>
+            <button class="mission-speed" data-speed="fast" type="button">Fast</button>
+          </div>
+        </div>
+        <button id="generateMission" class="map-overlay__action" type="button">Generate Call</button>
+        <div id="mapCallStatus" class="map-overlay__status" data-tone="info"></div>
+      </div>
+    </div>
+    <div id="map"></div>
+  </div>
   <div id="missionsTab" class="tab"></div>
   <div id="stationsTab" class="tab"></div>
   <div id="unitsTab" class="tab"></div>

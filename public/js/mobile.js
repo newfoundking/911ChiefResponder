@@ -1,4 +1,4 @@
-import { fetchNoCache, formatStatus, formatTime, haversineKm } from './common.js';
+import { fetchNoCache, formatStatus, formatTime, haversineKm, playSound } from './common.js';
 
 // Tab navigation
 const tabButtons = document.querySelectorAll('.tab-bar button');
@@ -85,6 +85,16 @@ let loadInProgress = false;
 let stationSortMode = 'name';
 let activeUnitDepartment = 'all';
 let unitSortMode = 'status';
+let missionGenTimer = null;
+let missionGenRange = null;
+let generateMissionInProgress = false;
+let missionTemplates = [];
+let missionTemplatesLoading = null;
+let callStatusIdleMessage = '';
+let callStatusIdleTone = 'info';
+let callStatusResetTimer = null;
+let callStatusEl = null;
+let generateMissionButton = null;
 
 const defaultEquipmentProvider =
   typeof globalThis !== 'undefined' && typeof globalThis.getDefaultUnitEquipment === 'function'
@@ -118,6 +128,284 @@ function gatherEquipmentForUnit(unit) {
     }
   }
   return counts;
+}
+
+function randomCount({ min = 0, max = 0, chance = 1 }) {
+  min = Math.floor(min);
+  max = Math.floor(max);
+  if (max <= min) return min;
+  if (Math.random() < chance) return max;
+  return min + Math.floor(Math.random() * (max - min));
+}
+
+function instantiatePatients(arr) {
+  return (arr || [])
+    .map((p) => {
+      const count = randomCount(p);
+      return { count, codes: p.codes };
+    })
+    .filter((p) => p.count > 0);
+}
+
+function instantiatePrisoners(arr) {
+  return (arr || [])
+    .map((p) => {
+      const count = randomCount(p);
+      const transportChance = Number(p.transportChance) || 0;
+      let transport = 0;
+      for (let i = 0; i < count; i++) {
+        if (Math.random() < transportChance) transport++;
+      }
+      return { count, transport };
+    })
+    .filter((p) => p.count > 0);
+}
+
+async function loadMissionTemplates() {
+  const templates = await fetchJson('/api/mission-templates');
+  missionTemplates = Array.isArray(templates)
+    ? templates.map((t) => ({ ...t, frequency: Number(t.frequency) || 3 }))
+    : [];
+}
+
+async function ensureMissionTemplates() {
+  if (missionTemplates.length) return;
+  if (!missionTemplatesLoading) {
+    missionTemplatesLoading = loadMissionTemplates()
+      .catch((err) => {
+        console.error('Failed to load mission templates', err);
+        throw err;
+      })
+      .finally(() => {
+        missionTemplatesLoading = null;
+      });
+  }
+  await missionTemplatesLoading;
+}
+
+async function generateMission(retry = false, excludeIndex = null) {
+  await ensureMissionTemplates();
+  if (!missionTemplates.length) {
+    throw new Error('No mission templates loaded.');
+  }
+
+  let stations;
+  try {
+    stations = await fetchJson('/api/stations');
+  } catch (err) {
+    console.error('Failed to load stations for mission generation', err);
+    throw new Error('Failed to load stations.');
+  }
+
+  if (!Array.isArray(stations) || !stations.length) {
+    throw new Error('No stations available.');
+  }
+
+  const station = stations[Math.floor(Math.random() * stations.length)];
+  const radius = 5000;
+
+  let availableTemplates = missionTemplates;
+  if (excludeIndex !== null) {
+    availableTemplates = missionTemplates.filter((_, idx) => idx !== excludeIndex);
+    if (!availableTemplates.length) {
+      return false;
+    }
+  }
+
+  const weights = availableTemplates.map((t) => Math.max(1, 6 - (Number(t.frequency) || 3)));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  let pick = Math.random() * totalWeight;
+  let template = availableTemplates[0];
+  for (let i = 0; i < availableTemplates.length; i++) {
+    if ((pick -= weights[i]) < 0) {
+      template = availableTemplates[i];
+      break;
+    }
+  }
+  const templateIndex = missionTemplates.indexOf(template);
+
+  let lat;
+  let lon;
+
+  if (template.trigger_type === 'poi' && template.trigger_filter) {
+    try {
+      const pois = await fetch(`/api/pois?lat=${station.lat}&lon=${station.lon}&radius=${radius}`)
+        .then((r) => r.json())
+        .catch(() => []);
+      const matches = pois.filter((poi) => {
+        if (!poi?.tags) return false;
+        if ((template.trigger_filter || '').includes('=')) {
+          const [key, val] = template.trigger_filter.split('=');
+          return poi.tags[key] === val;
+        }
+        return poi.tags.amenity === template.trigger_filter;
+      });
+      if (matches.length) {
+        const poi = matches[Math.floor(Math.random() * matches.length)];
+        lat = poi.lat ?? poi.center?.lat;
+        lon = poi.lon ?? poi.center?.lon;
+      } else {
+        console.warn(
+          `No matching POI found for mission template "${template?.name || template?.id}" (ID: ${template?.id})`,
+          template
+        );
+        if (!retry) return generateMission(true, templateIndex);
+        return false;
+      }
+    } catch (err) {
+      console.error('POI lookup failed', err);
+      throw new Error('POI lookup failed.');
+    }
+  } else if (template.trigger_type === 'intersection' && template.trigger_filter) {
+    const [r1Raw, r2Raw] = String(template.trigger_filter).split('|');
+    const road1 = r1Raw?.trim();
+    const road2 = r2Raw?.trim();
+    if (road1 && road2) {
+      try {
+        const query = `[out:json];(
+          way["name"="${road1}"](around:${radius},${station.lat},${station.lon});
+        )->.r1;(
+          way["name"="${road2}"](around:${radius},${station.lat},${station.lon});
+        )->.r2;
+        node(w.r1)(w.r2);
+        out;`;
+        const resp = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
+        const data = await resp.json();
+        if (Array.isArray(data.elements) && data.elements.length) {
+          const inter = data.elements[0];
+          lat = inter.lat;
+          lon = inter.lon;
+        } else {
+          console.warn(`No intersection found for roads "${road1}" and "${road2}"`);
+        }
+      } catch (err) {
+        console.error('Intersection lookup failed', err);
+      }
+    }
+  }
+
+  if (lat === undefined || lon === undefined) {
+    try {
+      const roadQuery = `[out:json];way["highway"](around:${radius},${station.lat},${station.lon});out geom;`;
+      const roadResp = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(roadQuery));
+      const roadData = await roadResp.json();
+      if (Array.isArray(roadData.elements) && roadData.elements.length) {
+        const way = roadData.elements[Math.floor(Math.random() * roadData.elements.length)];
+        const geom = Array.isArray(way.geometry) ? way.geometry : [];
+        if (geom.length) {
+          const pt = geom[Math.floor(Math.random() * geom.length)];
+          lat = pt.lat;
+          lon = pt.lon;
+        }
+      }
+    } catch (err) {
+      console.error('Road lookup failed', err);
+    }
+  }
+
+  if (lat === undefined || lon === undefined) {
+    lat = station.lat;
+    lon = station.lon;
+  }
+
+  const missionData = {
+    type: template?.name,
+    lat,
+    lon,
+    required_units: template?.required_units,
+    required_training: template?.required_training || [],
+    equipment_required: template?.equipment_required || [],
+    patients: instantiatePatients(template?.patients),
+    prisoners: instantiatePrisoners(template?.prisoners),
+    modifiers: template?.modifiers || [],
+    penalty_options: template?.penalty_options || [],
+    penalties: [],
+    timing: template?.timing ?? 10
+  };
+
+  try {
+    const res = await fetch('/api/missions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(missionData)
+    });
+    if (!res.ok) {
+      const message = await res.text().catch(() => res.statusText);
+      throw new Error(message || `HTTP ${res.status}`);
+    }
+  } catch (err) {
+    throw new Error(err?.message || 'Failed to create call.');
+  }
+
+  playSound('/audio/newalert.mp3');
+  await loadData();
+  return true;
+}
+
+function setCallStatus(message, tone = 'info', { temporary = false } = {}) {
+  if (!callStatusEl) return;
+  callStatusEl.textContent = message || '';
+  callStatusEl.dataset.tone = tone;
+  if (temporary) {
+    if (callStatusResetTimer) clearTimeout(callStatusResetTimer);
+    callStatusResetTimer = setTimeout(() => {
+      callStatusResetTimer = null;
+      callStatusEl.textContent = callStatusIdleMessage || '';
+      callStatusEl.dataset.tone = callStatusIdleTone || 'info';
+    }, 4000);
+  } else {
+    if (callStatusResetTimer) {
+      clearTimeout(callStatusResetTimer);
+      callStatusResetTimer = null;
+    }
+    callStatusIdleMessage = message || '';
+    callStatusIdleTone = tone || 'info';
+  }
+}
+
+async function performGenerateMission() {
+  if (generateMissionInProgress) return false;
+  generateMissionInProgress = true;
+  if (generateMissionButton) generateMissionButton.disabled = true;
+  setCallStatus('Generating call…', 'info', { temporary: true });
+  try {
+    const created = await generateMission();
+    if (created) {
+      setCallStatus('Call generated.', 'success', { temporary: true });
+    } else {
+      setCallStatus('No valid location found for call.', 'info', { temporary: true });
+    }
+    return created;
+  } catch (err) {
+    console.error('Failed to generate call', err);
+    const message = err?.message || 'Failed to generate call.';
+    setCallStatus(message, 'error', { temporary: true });
+    return false;
+  } finally {
+    if (generateMissionButton) generateMissionButton.disabled = false;
+    generateMissionInProgress = false;
+  }
+}
+
+function scheduleMissionGeneration() {
+  if (!missionGenRange) return;
+  const [min, max] = missionGenRange;
+  const delay = (Math.floor(Math.random() * (max - min + 1)) + min) * 1000;
+  missionGenTimer = setTimeout(async () => {
+    await performGenerateMission();
+    scheduleMissionGeneration();
+  }, delay);
+}
+
+function setMissionGenerationSpeed(range) {
+  if (missionGenTimer) {
+    clearTimeout(missionGenTimer);
+    missionGenTimer = null;
+  }
+  missionGenRange = range;
+  if (range) {
+    scheduleMissionGeneration();
+  }
 }
 
 function expandTrainingListForClass(list, cls) {
@@ -225,6 +513,49 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap contributors'
 }).addTo(map);
 activateTab('mapTab');
+
+generateMissionButton = document.getElementById('generateMission');
+callStatusEl = document.getElementById('mapCallStatus');
+const missionSpeedButtons = Array.from(document.querySelectorAll('#mapTab .mission-speed'));
+
+if (generateMissionButton) {
+  generateMissionButton.addEventListener('click', () => {
+    performGenerateMission();
+  });
+}
+
+missionSpeedButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    missionSpeedButtons.forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    switch (btn.dataset.speed) {
+      case 'pause':
+        setMissionGenerationSpeed(null);
+        setCallStatus('Auto call generation paused.');
+        break;
+      case 'slow':
+        setMissionGenerationSpeed([90, 150]);
+        setCallStatus('Auto call generation: Slow.', 'info');
+        break;
+      case 'medium':
+        setMissionGenerationSpeed([30, 90]);
+        setCallStatus('Auto call generation: Medium.', 'info');
+        break;
+      case 'fast':
+        setMissionGenerationSpeed([10, 30]);
+        setCallStatus('Auto call generation: Fast.', 'info');
+        break;
+      default:
+        setMissionGenerationSpeed(null);
+        setCallStatus('Auto call generation paused.');
+        break;
+    }
+  });
+});
+
+setCallStatus('Auto call generation paused.');
+ensureMissionTemplates().catch(() => {});
+
 
 async function loadData() {
   if (loadInProgress) return;
