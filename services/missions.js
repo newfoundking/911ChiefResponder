@@ -101,7 +101,9 @@ async function handleTransports(unitIds, lat, lon, patients, prisoners) {
   const prisUnits = [];
   for (const r of rows) {
     const ut = unitTypes.find(t => t.type === r.type);
-    const attrs = Array.isArray(ut?.attributes) ? ut.attributes : [];
+    const attrs = (Array.isArray(ut?.attributes) ? ut.attributes : []).map(attr =>
+      typeof attr === 'string' ? attr.toLowerCase() : attr
+    );
     if (attrs.includes('medicaltransport')) medUnits.push(r.id);
     if (attrs.includes('prisonertransport')) prisUnits.push(r.id);
   }
@@ -184,4 +186,5 @@ function resolveMissionById(missionId, cb) {
 module.exports = {
   resolveMissionById,
   getFacilityOccupancy,
+  handleTransports,
 };
