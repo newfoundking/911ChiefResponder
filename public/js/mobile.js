@@ -81,6 +81,18 @@ let mapLayers = [];
 let mapBoundsSet = false;
 let missionTimerInterval = null;
 let loadInProgress = false;
+let stationSortMode = 'name';
+let activeUnitDepartment = 'all';
+let unitSortMode = 'status';
+
+const UNIT_STATUS_ORDER = {
+  on_scene: 0,
+  enroute: 1,
+  returning: 2,
+  transporting: 3,
+  available: 4
+};
+
 
 map = L.map('map').setView([0, 0], 2);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -200,39 +212,31 @@ function renderStations(stations) {
     return;
   }
 
-  const sorted = [...stations].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  sorted.forEach((station) => {
-    const iconUrl = station.icon || stationIcons[station.type] || stationIcons.fire;
-    const iconNode = createImageIcon(iconUrl);
-    const subtitleParts = [];
-    if (station.department) subtitleParts.push(station.department);
-    if (station.type) subtitleParts.push(station.type);
-
-    const meta = [];
-    if (Number.isFinite(station.bay_count)) {
-      meta.push(createMetaText(`${station.bay_count} bays`));
+  const controls = document.createElement('div');
+  controls.className = 'tab-controls';
+  const sortControl = createSegmentedControl(
+    [
+      { value: 'name', label: 'Name' },
+      { value: 'department', label: 'Department' },
+      { value: 'type', label: 'Type' }
+    ],
+    stationSortMode,
+    (value) => {
+      stationSortMode = value;
+      renderStations(latestStations);
     }
-    if (isFiniteLatLon(station.lat, station.lon)) {
-      meta.push(createMetaText(`${Number(station.lat).toFixed(4)}, ${Number(station.lon).toFixed(4)}`));
+  );
+  controls.appendChild(createControlGroup('Group Stations', sortControl));
+  container.appendChild(controls);
+
+  const groups = buildStationGroups(stations, stationSortMode);
+  groups.forEach((group) => {
+    if (group.title) {
+      container.appendChild(createGroupHeader(group.title));
     }
-
-    const sections = [];
-    const facilitySection = createFacilitySection(station, 'card');
-    if (facilitySection) sections.push(facilitySection);
-
-    const units = unitsByStation.get(station.id) || [];
-    const unitRow = createChipRow(units.map((unit) => createChip(unit.name || unit.type || `Unit ${unit.id}`, 'unit')));
-    sections.push(createCardSection('Units', unitRow, 'No units assigned'));
-
-    const card = createCard({
-      iconNode,
-      title: station.name || `Station ${station.id}`,
-      subtitle: subtitleParts.join(' • '),
-      meta,
-      sections
+    group.items.forEach((station) => {
+      container.appendChild(createStationCard(station));
     });
-    card.addEventListener('click', () => showModal(buildStationDetail(station)));
-    container.appendChild(card);
   });
 }
 
@@ -244,45 +248,48 @@ function renderUnits(units) {
     return;
   }
 
-  const order = { on_scene: 0, enroute: 1, available: 2 };
-  const sorted = [...units].sort((a, b) => {
-    const orderDiff = (order[a.status] ?? 3) - (order[b.status] ?? 3);
-    if (orderDiff !== 0) return orderDiff;
-    return (a.name || '').localeCompare(b.name || '');
+  const departmentOptions = buildDepartmentOptions(units);
+  if (activeUnitDepartment !== 'all' && !departmentOptions.some((opt) => opt.value === activeUnitDepartment)) {
+    activeUnitDepartment = 'all';
+  }
+
+  const controls = document.createElement('div');
+  controls.className = 'tab-controls';
+
+  const deptControl = createSegmentedControl(departmentOptions, activeUnitDepartment, (value) => {
+    activeUnitDepartment = value;
+    renderUnits(latestUnits);
   });
+  controls.appendChild(createControlGroup('Department', deptControl));
 
-  sorted.forEach((unit) => {
-    const iconNode = createUnitIconNode(unit);
-    const subtitleParts = [];
-    if (unit.type) subtitleParts.push(unit.type);
-    const station = stationById.get(unit.station_id);
-    if (station?.name) subtitleParts.push(station.name);
-
-    const meta = [createMetaText(formatStatus(unit.status || 'available', unit.responding))];
-    if (Number.isFinite(unit.priority)) {
-      meta.push(createMetaText(`Priority ${unit.priority}`));
+  const sortControl = createSegmentedControl(
+    [
+      { value: 'status', label: 'Status' },
+      { value: 'name', label: 'Name' }
+    ],
+    unitSortMode,
+    (value) => {
+      unitSortMode = value;
+      renderUnits(latestUnits);
     }
-    const personnelCount = Array.isArray(unit.personnel) ? unit.personnel.length : 0;
-    if (personnelCount) {
-      meta.push(createMetaText(`${personnelCount} personnel`));
+  );
+  controls.appendChild(createControlGroup('Sort Units', sortControl));
+
+  container.appendChild(controls);
+
+  const groups = buildUnitGroups(units, activeUnitDepartment, unitSortMode);
+  if (!groups.length) {
+    container.appendChild(createEmptyMessage('No units match the selected filters.'));
+    return;
+  }
+
+  groups.forEach((group) => {
+    if (group.title) {
+      container.appendChild(createGroupHeader(group.title));
     }
-
-    const sections = [];
-    const equipmentRow = createChipRow(
-      (Array.isArray(unit.equipment) ? unit.equipment : [])
-        .map((item) => createChip(formatEquipmentName(item), 'equip'))
-    );
-    if (equipmentRow) sections.push(createCardSection('Equipment', equipmentRow));
-
-    const card = createCard({
-      iconNode,
-      title: unit.name || `Unit ${unit.id}`,
-      subtitle: subtitleParts.join(' • '),
-      meta,
-      sections
+    group.items.forEach((unit) => {
+      container.appendChild(createUnitCard(unit));
     });
-    card.addEventListener('click', () => showModal(buildUnitDetail(unit)));
-    container.appendChild(card);
   });
 }
 
@@ -317,9 +324,10 @@ function renderMap(missions, stations, units) {
   });
 
   units.forEach((unit) => {
-    const station = stationById.get(unit.station_id);
-    if (!station || !isFiniteLatLon(station.lat, station.lon)) return;
-    const marker = L.marker([station.lat, station.lon], { icon: unitIconFor(unit), zIndexOffset: 1000 })
+    if (!shouldDisplayUnitOnMap(unit)) return;
+    const coords = getUnitCoordinates(unit);
+    if (!coords) return;
+    const marker = L.marker([coords.lat, coords.lon], { icon: unitIconFor(unit), zIndexOffset: 1000 })
       .addTo(map)
       .on('click', () => showModal(buildUnitDetail(unit)));
     mapLayers.push(marker);
@@ -332,6 +340,210 @@ function renderMap(missions, stations, units) {
       mapBoundsSet = true;
     }
   }
+}
+
+function buildStationGroups(stations, mode) {
+  if (mode === 'department') {
+    const groups = new Map();
+    stations.forEach((station) => {
+      const key = station?.department || 'No Department';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(station);
+    });
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([title, items]) => ({ title, items: sortStationsByName(items) }));
+  }
+  if (mode === 'type') {
+    const groups = new Map();
+    stations.forEach((station) => {
+      const key = station?.type || 'Other';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(station);
+    });
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([title, items]) => ({ title, items: sortStationsByName(items) }));
+  }
+  return [{ title: null, items: sortStationsByName(stations) }];
+}
+
+function sortStationsByName(stations) {
+  return [...stations].sort((a, b) => (a?.name || '').localeCompare(b?.name || ''));
+}
+
+function createStationCard(station) {
+  const iconUrl = station.icon || stationIcons[station.type] || stationIcons.fire;
+  const iconNode = createImageIcon(iconUrl);
+  const subtitleParts = [];
+  if (station.department) subtitleParts.push(station.department);
+  if (station.type) subtitleParts.push(station.type);
+
+  const meta = [];
+  if (Number.isFinite(station.bay_count)) {
+    meta.push(createMetaText(`${station.bay_count} bays`));
+  }
+  if (isFiniteLatLon(station.lat, station.lon)) {
+    meta.push(createMetaText(`${Number(station.lat).toFixed(4)}, ${Number(station.lon).toFixed(4)}`));
+  }
+
+  const sections = [];
+  const facilitySection = createFacilitySection(station, 'card');
+  if (facilitySection) sections.push(facilitySection);
+
+  const units = unitsByStation.get(station.id) || [];
+  const unitRow = createChipRow(units.map((unit) => createChip(unit.name || unit.type || `Unit ${unit.id}`, 'unit')));
+  sections.push(createCardSection('Units', unitRow, 'No units assigned'));
+
+  const card = createCard({
+    iconNode,
+    title: station.name || `Station ${station.id}`,
+    subtitle: subtitleParts.join(' • '),
+    meta,
+    sections
+  });
+  card.addEventListener('click', () => showModal(buildStationDetail(station)));
+  return card;
+}
+
+function buildDepartmentOptions(units) {
+  const departments = new Map();
+  let hasNoDept = false;
+  units.forEach((unit) => {
+    const station = stationById.get(unit.station_id);
+    const dept = station?.department;
+    if (dept) {
+      departments.set(dept, (departments.get(dept) || 0) + 1);
+    } else {
+      hasNoDept = true;
+    }
+  });
+  const options = [{ value: 'all', label: 'All' }];
+  Array.from(departments.keys())
+    .sort((a, b) => a.localeCompare(b))
+    .forEach((dept) => options.push({ value: dept, label: dept }));
+  if (hasNoDept) {
+    options.push({ value: '__none__', label: 'No Department' });
+  }
+  return options;
+}
+
+function buildUnitGroups(units, departmentFilter, sortMode) {
+  const filtered = units.filter((unit) => {
+    if (departmentFilter === 'all') return true;
+    const station = stationById.get(unit.station_id);
+    const dept = station?.department;
+    if (departmentFilter === '__none__') {
+      return !dept;
+    }
+    return dept === departmentFilter;
+  });
+
+  const groups = new Map();
+  filtered.forEach((unit) => {
+    const station = stationById.get(unit.station_id);
+    const key = station?.id ?? '__unassigned__';
+    if (!groups.has(key)) {
+      groups.set(key, { station, units: [] });
+    }
+    groups.get(key).units.push(unit);
+  });
+
+  return Array.from(groups.values())
+    .sort((a, b) => {
+      const nameA = a.station?.name || 'Unassigned Station';
+      const nameB = b.station?.name || 'Unassigned Station';
+      return nameA.localeCompare(nameB);
+    })
+    .map(({ station, units: stationUnits }) => {
+      const sortedUnits = sortUnitsForDisplay(stationUnits, sortMode);
+      const stationName = station?.name || 'Unassigned Station';
+      const dept = station?.department ? ` • ${station.department}` : '';
+      return {
+        title: `${stationName}${dept}`,
+        items: sortedUnits
+      };
+    });
+}
+
+function sortUnitsForDisplay(units, sortMode) {
+  return [...units].sort((a, b) => {
+    if (sortMode === 'status') {
+      const orderDiff = (UNIT_STATUS_ORDER[a.status] ?? 99) - (UNIT_STATUS_ORDER[b.status] ?? 99);
+      if (orderDiff !== 0) return orderDiff;
+    }
+    return (a.name || '').localeCompare(b.name || '');
+  });
+}
+
+function createUnitCard(unit) {
+  const iconNode = createUnitIconNode(unit);
+  const subtitleParts = [];
+  if (unit.type) subtitleParts.push(unit.type);
+  const station = stationById.get(unit.station_id);
+  if (station?.name) subtitleParts.push(station.name);
+
+  const meta = [createMetaText(formatStatus(unit.status || 'available', unit.responding))];
+  if (Number.isFinite(unit.priority)) {
+    meta.push(createMetaText(`Priority ${unit.priority}`));
+  }
+  const personnelCount = Array.isArray(unit.personnel) ? unit.personnel.length : 0;
+  if (personnelCount) {
+    meta.push(createMetaText(`${personnelCount} personnel`));
+  }
+
+  const sections = [];
+  const equipmentRow = createChipRow(
+    (Array.isArray(unit.equipment) ? unit.equipment : [])
+      .map((item) => createChip(formatEquipmentName(item), 'equip'))
+  );
+  if (equipmentRow) sections.push(createCardSection('Equipment', equipmentRow));
+
+  const card = createCard({
+    iconNode,
+    title: unit.name || `Unit ${unit.id}`,
+    subtitle: subtitleParts.join(' • '),
+    meta,
+    sections
+  });
+  card.addEventListener('click', () => showModal(buildUnitDetail(unit)));
+  return card;
+}
+
+function createControlGroup(label, node) {
+  const wrap = document.createElement('div');
+  wrap.className = 'control-group';
+  const labelEl = document.createElement('span');
+  labelEl.className = 'control-label';
+  labelEl.textContent = label;
+  wrap.appendChild(labelEl);
+  wrap.appendChild(node);
+  return wrap;
+}
+
+function createSegmentedControl(options, activeValue, onChange) {
+  const wrap = document.createElement('div');
+  wrap.className = 'segmented';
+  options.forEach((option) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = option.label;
+    btn.classList.toggle('active', option.value === activeValue);
+    btn.addEventListener('click', () => {
+      if (option.value === activeValue) return;
+      activeValue = option.value;
+      onChange(option.value);
+    });
+    wrap.appendChild(btn);
+  });
+  return wrap;
+}
+
+function createGroupHeader(text) {
+  const header = document.createElement('div');
+  header.className = 'group-header';
+  header.textContent = text;
+  return header;
 }
 
 function fetchJson(url) {
@@ -379,6 +591,26 @@ function makeIcon(url, size) {
     iconAnchor: [size / 2, size],
     className: ''
   });
+}
+
+function shouldDisplayUnitOnMap(unit) {
+  if (!unit) return false;
+  if (unit.responding) return true;
+  const status = String(unit.status || '').toLowerCase();
+  if (!status) return false;
+  return status !== 'available';
+}
+
+function getUnitCoordinates(unit) {
+  if (!unit) return null;
+  if (isFiniteLatLon(unit.lat, unit.lon)) {
+    return { lat: Number(unit.lat), lon: Number(unit.lon) };
+  }
+  const station = stationById.get(unit.station_id);
+  if (station && isFiniteLatLon(station.lat, station.lon)) {
+    return { lat: Number(station.lat), lon: Number(station.lon) };
+  }
+  return null;
 }
 
 function makeTagIcon(tag, unitClass, responding, width = 36, height = 24) {
@@ -680,7 +912,186 @@ function buildMissionDetail(mission) {
   const equipmentList = createListFromArray((Array.isArray(mission.equipment_required) ? mission.equipment_required : []).map(formatEquipmentRequirementText));
   if (equipmentList) detail.appendChild(createDetailSection('Equipment Required', equipmentList));
 
+  const dispatchSection = buildMissionDispatchSection(mission);
+  if (dispatchSection) {
+    detail.appendChild(createDetailSection('Dispatch Units', dispatchSection.node, dispatchSection.fallback));
+  }
+
   return detail;
+}
+
+function buildMissionDispatchSection(mission) {
+  const dispatchable = getDispatchableUnitsForMission(mission);
+  if (!dispatchable.length) {
+    return { node: null, fallback: 'No eligible units available.' };
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'dispatch-section';
+
+  const grouped = new Map();
+  dispatchable.forEach((entry) => {
+    const deptKey = entry.department || 'No Department';
+    if (!grouped.has(deptKey)) grouped.set(deptKey, new Map());
+    const stationKey = entry.station?.id ?? '__unassigned__';
+    if (!grouped.get(deptKey).has(stationKey)) {
+      grouped.get(deptKey).set(stationKey, { station: entry.station, units: [] });
+    }
+    grouped.get(deptKey).get(stationKey).units.push(entry.unit);
+  });
+
+  const departmentEntries = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
+
+  departmentEntries.forEach(([dept, stations]) => {
+    const group = document.createElement('div');
+    group.className = 'dispatch-group';
+    const title = document.createElement('div');
+    title.className = 'dispatch-group__title';
+    title.textContent = dept;
+    group.appendChild(title);
+
+    const stationEntries = Array.from(stations.values()).sort((a, b) => {
+      const nameA = a.station?.name || 'Unassigned Station';
+      const nameB = b.station?.name || 'Unassigned Station';
+      return nameA.localeCompare(nameB);
+    });
+
+    stationEntries.forEach(({ station, units }) => {
+      const stationWrap = document.createElement('div');
+      stationWrap.className = 'dispatch-station';
+      const stationTitle = document.createElement('div');
+      stationTitle.className = 'dispatch-station__title';
+      stationTitle.textContent = station?.name || 'Unassigned Station';
+      stationWrap.appendChild(stationTitle);
+
+      const unitList = document.createElement('div');
+      unitList.className = 'dispatch-unit-list';
+      sortUnitsForDisplay(units, 'name').forEach((unit) => {
+        const label = document.createElement('label');
+        label.className = 'dispatch-unit';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.value = unit.id;
+        label.appendChild(checkbox);
+        const name = document.createElement('span');
+        name.textContent = unit.name || unit.type || `Unit ${unit.id}`;
+        label.appendChild(name);
+        unitList.appendChild(label);
+      });
+      stationWrap.appendChild(unitList);
+      group.appendChild(stationWrap);
+    });
+
+    wrapper.appendChild(group);
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'dispatch-actions';
+
+  const dispatchBtn = document.createElement('button');
+  dispatchBtn.type = 'button';
+  dispatchBtn.textContent = 'Dispatch Selected';
+  actions.appendChild(dispatchBtn);
+
+  const forceLabel = document.createElement('label');
+  forceLabel.style.display = 'inline-flex';
+  forceLabel.style.alignItems = 'center';
+  forceLabel.style.gap = '6px';
+  forceLabel.style.fontSize = '0.85rem';
+  const forceCheckbox = document.createElement('input');
+  forceCheckbox.type = 'checkbox';
+  forceLabel.appendChild(forceCheckbox);
+  const forceText = document.createElement('span');
+  forceText.textContent = 'Force dispatch';
+  forceLabel.appendChild(forceText);
+  actions.appendChild(forceLabel);
+
+  const message = document.createElement('span');
+  message.className = 'dispatch-message';
+  actions.appendChild(message);
+
+  dispatchBtn.addEventListener('click', async () => {
+    const selected = Array.from(wrapper.querySelectorAll('input[type="checkbox"]:checked')).map((input) => Number(input.value));
+    if (!selected.length) {
+      message.textContent = 'Select at least one unit to dispatch.';
+      message.style.color = '#b91c1c';
+      return;
+    }
+    dispatchBtn.disabled = true;
+    message.textContent = 'Dispatching…';
+    message.style.color = '#0f172a';
+    try {
+      await dispatchUnitsForMission(mission, selected, { force: forceCheckbox.checked });
+      message.textContent = `Dispatched ${selected.length} unit${selected.length > 1 ? 's' : ''}.`;
+      message.style.color = '#166534';
+      await loadData();
+      const updated = latestMissions.find((m) => m.id === mission.id) || mission;
+      showModal(buildMissionDetail(updated));
+    } catch (err) {
+      message.textContent = err?.message || 'Dispatch failed.';
+      message.style.color = '#b91c1c';
+    } finally {
+      dispatchBtn.disabled = false;
+    }
+  });
+
+  wrapper.appendChild(actions);
+
+  return { node: wrapper, fallback: null };
+}
+
+function getDispatchableUnitsForMission(mission) {
+  const assignedIds = new Set((missionAssignments.get(mission.id) || []).map((unit) => unit.id));
+  const departments = new Set((Array.isArray(mission.departments) ? mission.departments : []).filter(Boolean));
+  const restrictByDept = departments.size > 0;
+
+  return latestUnits
+    .filter((unit) => {
+      if (assignedIds.has(unit.id)) return false;
+      const status = String(unit.status || '').toLowerCase();
+      if (status !== 'available') return false;
+      const station = stationById.get(unit.station_id);
+      const dept = station?.department;
+      if (restrictByDept) {
+        return dept && departments.has(dept);
+      }
+      return true;
+    })
+    .map((unit) => {
+      const station = stationById.get(unit.station_id);
+      return {
+        unit,
+        station,
+        department: station?.department || 'No Department'
+      };
+    });
+}
+
+async function dispatchUnitsForMission(mission, unitIds, { force = false } = {}) {
+  for (const unitId of unitIds) {
+    const res = await fetch('/api/mission-units', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mission_id: mission.id, unit_id: unitId, force })
+    });
+    if (!res.ok) {
+      throw new Error(await extractErrorMessage(res));
+    }
+  }
+}
+
+async function extractErrorMessage(res) {
+  try {
+    const text = await res.text();
+    if (text) {
+      try {
+        const data = JSON.parse(text);
+        if (data && data.error) return data.error;
+      } catch {}
+      return text;
+    }
+  } catch {}
+  return res.statusText || 'Request failed';
 }
 
 function buildStationDetail(station) {

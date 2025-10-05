@@ -45,6 +45,60 @@
       padding: 0;
     }
 
+    .tab-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .control-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+
+    .segmented {
+      display: inline-flex;
+      background: rgba(148, 163, 184, 0.2);
+      border-radius: 999px;
+      padding: 4px;
+      gap: 4px;
+    }
+
+    .segmented button {
+      border: none;
+      background: transparent;
+      color: #1e293b;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 999px;
+    }
+
+    .segmented button.active {
+      background: #1d4ed8;
+      color: #ffffff;
+      box-shadow: 0 6px 14px rgba(29, 78, 216, 0.25);
+    }
+
+    .group-header {
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #475569;
+      margin: 18px 4px 8px;
+    }
+
     #map {
       height: calc(100vh - 64px);
       width: 100%;
@@ -200,6 +254,87 @@
 
     .chip--dept {
       background: #f1f5f9;
+      color: #0f172a;
+    }
+
+    .dispatch-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .dispatch-group {
+      background: rgba(148, 163, 184, 0.12);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .dispatch-group__title {
+      font-weight: 700;
+      color: #1e293b;
+    }
+
+    .dispatch-station {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .dispatch-station__title {
+      font-weight: 600;
+      color: #334155;
+      font-size: 0.9rem;
+    }
+
+    .dispatch-unit-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .dispatch-unit {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 10px;
+      background: #ffffff;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+      font-size: 0.85rem;
+    }
+
+    .dispatch-unit input[type='checkbox'] {
+      accent-color: #1d4ed8;
+      width: 16px;
+      height: 16px;
+    }
+
+    .dispatch-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .dispatch-actions button {
+      background: #1d4ed8;
+      color: #ffffff;
+      border: none;
+      border-radius: 999px;
+      padding: 8px 18px;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .dispatch-actions button:disabled {
+      opacity: 0.6;
+    }
+
+    .dispatch-message {
+      font-size: 0.85rem;
       color: #0f172a;
     }
 
@@ -490,6 +625,41 @@
       .chip--dept {
         background: rgba(148, 163, 184, 0.25);
         color: #f1f5f9;
+      }
+
+      .control-label,
+      .group-header {
+        color: #cbd5f5;
+      }
+
+      .segmented {
+        background: rgba(148, 163, 184, 0.25);
+      }
+
+      .segmented button {
+        color: #e2e8f0;
+      }
+
+      .segmented button.active {
+        background: #2563eb;
+        box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
+      }
+
+      .dispatch-group {
+        background: rgba(148, 163, 184, 0.15);
+      }
+
+      .dispatch-unit {
+        background: rgba(15, 23, 42, 0.6);
+        color: #e2e8f0;
+      }
+
+      .dispatch-actions button {
+        background: #2563eb;
+      }
+
+      .dispatch-message {
+        color: #e2e8f0;
       }
 
       .section-title,
