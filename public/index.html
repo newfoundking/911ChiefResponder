@@ -187,7 +187,7 @@
                 function setWalletBalanceDisplay(balance){
                   const el = document.getElementById('walletDisplay');
                   if (!el) return;
-                  el.textContent = `Balance: $${balance}`;
+                  el.textContent = `Balance: ${formatCurrency(balance)}`;
                 }
 
                 async function refreshWallet(){

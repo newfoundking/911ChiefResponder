@@ -1,4 +1,4 @@
-import { fetchNoCache, formatTime, playSound, formatStatus } from './common.js';
+import { fetchNoCache, formatTime, playSound, formatStatus, formatCurrency } from './common.js';
 import { getMissions, renderMissionRow } from './missions.js';
 import { getStations, renderStationList } from './stations.js';
 import { editUnit, editPersonnel } from './edit-dialogs.js';
@@ -225,7 +225,7 @@ async function init() {
 async function updateWallet() {
   try {
     const w = await fetchNoCache('/api/wallet').then(r=>r.json());
-    document.getElementById('walletDisplay').textContent = `Balance: $${w.balance}`;
+    document.getElementById('walletDisplay').textContent = `Balance: ${formatCurrency(w.balance)}`;
   } catch {}
 }
 
