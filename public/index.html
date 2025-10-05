@@ -1201,13 +1201,17 @@ async function fetchStations() {
     stationMarkerById.set(st.id, marker);
     let info = '';
     if (st.type === 'hospital') {
-      const occ = Number(st.occupied_beds || 0);
-      const cap = Number(st.bed_capacity || 0);
-      info = `Beds: ${occ}/${cap} (Free: ${cap - occ})`;
+      const cap = Math.max(0, Number(st.bed_capacity || 0));
+      const active = Math.min(cap, Math.max(0, Number(st.occupied_beds || 0)));
+      const waiting = Math.max(0, Number(st.staged_patients || 0));
+      const bedFree = Math.max(0, cap - active);
+      info = `Beds: ${active}/${cap} (Waiting: ${waiting}, Free: ${bedFree})`;
     } else if (st.type === 'jail' || (st.type === 'police' && Number(st.holding_cells) > 0)) {
-      const occ = Number(st.occupied_cells || 0);
-      const cap = Number(st.holding_cells || 0);
-      info = `Cells: ${occ}/${cap} (Free: ${cap - occ})`;
+      const cap = Math.max(0, Number(st.holding_cells || 0));
+      const active = Math.min(cap, Math.max(0, Number(st.occupied_cells || 0)));
+      const waiting = Math.max(0, Number(st.staged_prisoners || 0));
+      const cellFree = Math.max(0, cap - active);
+      info = `Cells: ${active}/${cap} (Waiting: ${waiting}, Free: ${cellFree})`;
       if (st.type === 'police') {
         info += ` | Bays: ${used}/${st.bay_count || 0} (Free: ${free})`;
       }
@@ -1690,8 +1694,10 @@ async function showStationDetails(station) {
   window.currentStation = station;
   if (station.type === 'hospital' || station.type === 'jail') {
     const isHospital = station.type === 'hospital';
-    const occ = isHospital ? Number(station.occupied_beds || 0) : Number(station.occupied_cells || 0);
-    const cap = isHospital ? Number(station.bed_capacity || 0) : Number(station.holding_cells || 0);
+    const unitLabel = isHospital ? 'Beds' : 'Cells';
+    const unitLabelLower = unitLabel.toLowerCase();
+    const unitSingular = isHospital ? 'bed' : 'cell';
+    const entityLabel = isHospital ? 'Patients' : 'Prisoners';
     detail.innerHTML = `
       <div style="text-align:right;">
         <button onclick="document.getElementById('stationDetails').innerHTML = ''" style="background: darkred; color: white;">Close</button>
@@ -1701,7 +1707,19 @@ async function showStationDetails(station) {
       <p>Type: ${station.type}</p>
 
       <p>Department: <span id="station-dept">${station.department || ''}</span> <button id="change-station-dept">Change Department</button></p>
-      <div>${isHospital ? 'Beds' : 'Holding Cells'}: ${occ}/${cap} (Free: ${cap - occ})</div>
+      <div id="facility-summary">
+        <div id="facility-capacity"></div>
+        <div id="facility-processing"></div>
+        <div id="facility-waiting"></div>
+        <div id="facility-total"></div>
+        <div id="facility-next"></div>
+      </div>
+      <div class="facility-purchase" style="margin-top:10px;">
+        <label>Add ${unitLabelLower}:
+          <input id="facility-add-count" type="number" min="1" value="1">
+        </label>
+        <button id="facility-add-btn">${isHospital ? 'Buy Beds' : 'Buy Cells'}</button>
+      </div>
     `;
           const iconBtn = detail.querySelector('#change-station-icon');
       iconBtn?.addEventListener('click', async () => {
@@ -1734,6 +1752,61 @@ async function showStationDetails(station) {
       fetchStations();
       showStationDetails(station);
     });
+    function updateFacilitySummary(data) {
+      const capacity = Math.max(0, Number(isHospital ? data.bed_capacity : data.holding_cells) || 0);
+      const active = Math.min(capacity, Math.max(0, Number(isHospital ? data.occupied_beds : data.occupied_cells) || 0));
+      const waiting = Math.max(0, Number(isHospital ? data.staged_patients : data.staged_prisoners) || 0);
+      const totalCandidate = Number(isHospital ? data.total_patient_transports : data.total_prisoner_transports);
+      const total = Math.max(0, Number.isFinite(totalCandidate) ? totalCandidate : active + waiting);
+      const free = Math.max(0, capacity - active);
+      const rawNext = Number(isHospital ? data.next_free_bed_at : data.next_free_cell_at);
+      const nextAt = Number.isFinite(rawNext) && rawNext > 0 ? rawNext : 0;
+      const capacityEl = detail.querySelector('#facility-capacity');
+      if (capacityEl) capacityEl.textContent = `${unitLabel} Capacity: ${capacity}`;
+      const processingEl = detail.querySelector('#facility-processing');
+      if (processingEl) processingEl.textContent = `${entityLabel} in process: ${active}/${capacity} (Free: ${free})`;
+      const waitingEl = detail.querySelector('#facility-waiting');
+      if (waitingEl) waitingEl.textContent = `${entityLabel} waiting: ${waiting}`;
+      const totalEl = detail.querySelector('#facility-total');
+      if (totalEl) totalEl.textContent = `Total queued: ${total}`;
+      const nextEl = detail.querySelector('#facility-next');
+      if (nextEl) {
+        if (waiting > 0 && nextAt > Date.now()) {
+          const seconds = Math.ceil(Math.max(0, nextAt - Date.now()) / 1000);
+          nextEl.textContent = `Next ${unitSingular} frees in: ${formatEta(seconds)}`;
+        } else if (waiting > 0) {
+          nextEl.textContent = `Next ${unitSingular} frees momentarily`;
+        } else {
+          nextEl.textContent = `Next ${unitSingular}: Available now`;
+        }
+      }
+    }
+
+    updateFacilitySummary(station);
+
+    detail.querySelector('#facility-add-btn')?.addEventListener('click', async () => {
+      const input = detail.querySelector('#facility-add-count');
+      const add = Math.max(1, Number(input?.value || 0));
+      const endpoint = isHospital ? 'beds' : 'holding-cells';
+      const res = await fetch(`/api/stations/${station.id}/${endpoint}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ add })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        notifyError(`Failed: ${data.error || res.statusText}`);
+        return;
+      }
+      notifySuccess(`Added ${data.added} ${unitSingular}${data.added === 1 ? '' : 's'}. Cost: ${data.cost}`);
+      if (input) input.value = '1';
+      refreshWallet();
+      station = await fetchNoCache(`/api/stations/${station.id}`).then(r=>r.json());
+      window.currentStation = station;
+      _stationById.set(station.id, station);
+      updateFacilitySummary(station);
+      fetchStations();
+    });
     return;
   }
   const res = await fetchNoCache(`/api/units?station_id=${station.id}`);
@@ -1749,7 +1822,13 @@ async function showStationDetails(station) {
   }).join('');
   const stationEquip = Array.isArray(station.equipment) ? station.equipment : [];
   const holdingInfo = (station.type === 'police' && Number(station.holding_cells) > 0)
-    ? `<div id="holding-info">Holding Cells: ${Number(station.occupied_cells || 0)}/${Number(station.holding_cells || 0)} (Free: ${Number(station.holding_cells || 0) - Number(station.occupied_cells || 0)})</div>`
+    ? (() => {
+        const total = Math.max(0, Number(station.holding_cells || 0));
+        const active = Math.min(total, Math.max(0, Number(station.occupied_cells || 0)));
+        const waiting = Math.max(0, Number(station.staged_prisoners || 0));
+        const freeCells = Math.max(0, total - active);
+        return `<div id="holding-info">Holding Cells: ${active}/${total} (Waiting: ${waiting}, Free: ${freeCells})</div>`;
+      })()
     : '';
   detail.innerHTML = `
     <div style="text-align:right;">
@@ -1904,7 +1983,13 @@ async function showStationDetails(station) {
           el.textContent = `Bays: ${used}/${s.bay_count} (Free: ${s.bay_count - used})`;
           if (s.type === 'police' && Number(s.holding_cells) > 0) {
             const hc = document.getElementById('holding-info');
-            if (hc) hc.textContent = `Holding Cells: ${Number(s.occupied_cells||0)}/${Number(s.holding_cells||0)} (Free: ${Number(s.holding_cells||0) - Number(s.occupied_cells||0)})`;
+            if (hc) {
+              const total = Math.max(0, Number(s.holding_cells || 0));
+              const active = Math.min(total, Math.max(0, Number(s.occupied_cells || 0)));
+              const waiting = Math.max(0, Number(s.staged_prisoners || 0));
+              const freeCells = Math.max(0, total - active);
+              hc.textContent = `Holding Cells: ${active}/${total} (Waiting: ${waiting}, Free: ${freeCells})`;
+            }
           }
         }
 

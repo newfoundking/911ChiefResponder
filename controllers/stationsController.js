@@ -1,6 +1,7 @@
 const db = require('../db');
 const { findEquipmentCostByName, requireFunds, adjustBalance, getBalance } = require('../wallet');
 const unitTypes = require('../unitTypes');
+const { getFacilityOccupancy } = require('../services/missions');
 let trainingModule = {};
 try { trainingModule = require('../trainings'); } catch { trainingModule = {}; }
 const trainingsByClass = trainingModule.trainingsByClass || {};
@@ -84,6 +85,8 @@ const BAY_BASE_COST = 5000;
 const BAY_EXP_MULTIPLIER = 2.0;
 const HOLDING_CELL_BASE_COST = 2500;
 const HOLDING_CELL_EXP_MULTIPLIER = 1.5;
+const HOSPITAL_BED_BASE_COST = 4000;
+const HOSPITAL_BED_EXP_MULTIPLIER = 1.75;
 const STATION_BUILD_COST = 50000;
 const BASE_PERSON_COST = 100;
 
@@ -97,28 +100,87 @@ function priceHoldingCells(count, isExpansion) {
   return isExpansion ? Math.floor(base * HOLDING_CELL_EXP_MULTIPLIER) : base;
 }
 
+function priceHospitalBeds(count, isExpansion) {
+  const base = HOSPITAL_BED_BASE_COST * count;
+  return isExpansion ? Math.floor(base * HOSPITAL_BED_EXP_MULTIPLIER) : base;
+}
+
+async function hydrateFacilityFields(row) {
+  let equipment;
+  try { equipment = JSON.parse(row.equipment || '[]'); }
+  catch { equipment = []; }
+
+  const station = { ...row, equipment };
+
+  if (row.type === 'hospital') {
+    const capacity = Math.max(0, Number(row.bed_capacity || 0));
+    if (capacity > 0) {
+      const occ = await getFacilityOccupancy(row.id, 'patient');
+      const total = Math.max(0, Number(occ?.count || 0));
+      const active = Math.min(total, capacity);
+      const waiting = Math.max(0, total - capacity);
+      station.occupied_beds = active;
+      station.total_patient_transports = total;
+      station.staged_patients = waiting;
+      station.next_free_bed_at = occ?.nextFree || null;
+    } else {
+      station.occupied_beds = 0;
+      station.total_patient_transports = 0;
+      station.staged_patients = 0;
+      station.next_free_bed_at = null;
+    }
+  } else if (row.type === 'jail' || (row.type === 'police' && Number(row.holding_cells) > 0)) {
+    const capacity = Math.max(0, Number(row.holding_cells || 0));
+    if (capacity > 0) {
+      const occ = await getFacilityOccupancy(row.id, 'prisoner');
+      const total = Math.max(0, Number(occ?.count || 0));
+      const active = Math.min(total, capacity);
+      const waiting = Math.max(0, total - capacity);
+      station.occupied_cells = active;
+      station.total_prisoner_transports = total;
+      station.staged_prisoners = waiting;
+      station.next_free_cell_at = occ?.nextFree || null;
+    } else {
+      station.occupied_cells = 0;
+      station.total_prisoner_transports = 0;
+      station.staged_prisoners = 0;
+      station.next_free_cell_at = null;
+    }
+  } else {
+    station.occupied_beds = Number(row.occupied_beds || 0);
+    station.occupied_cells = Number(row.occupied_cells || 0);
+  }
+
+  return station;
+}
+
 // GET /api/stations
-function getStations(req, res) {
-  db.all('SELECT * FROM stations', (err, rows) => {
-    if (err) return res.status(500).send('Error reading stations');
-    const parsed = rows.map(r => {
-      let equipment; try { equipment = JSON.parse(r.equipment || '[]'); } catch { equipment = []; }
-      return { ...r, equipment };
+async function getStations(req, res) {
+  try {
+    const rows = await new Promise((resolve, reject) => {
+      db.all('SELECT * FROM stations', (err, result) => (err ? reject(err) : resolve(result || [])));
     });
-    res.json(parsed);
-  });
+    const enriched = await Promise.all(rows.map(hydrateFacilityFields));
+    res.json(enriched);
+  } catch (e) {
+    res.status(500).send('Error reading stations');
+  }
 }
 
 // GET /api/stations/:id
-function getStation(req, res) {
+async function getStation(req, res) {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid station id' });
-  db.get('SELECT * FROM stations WHERE id=?', [id], (err, row) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const row = await new Promise((resolve, reject) => {
+      db.get('SELECT * FROM stations WHERE id=?', [id], (err, result) => (err ? reject(err) : resolve(result)));
+    });
     if (!row) return res.status(404).json({ error: 'Station not found' });
-    let equipment; try { equipment = JSON.parse(row.equipment || '[]'); } catch { equipment = []; }
-    res.json({ ...row, equipment });
-  });
+    const hydrated = await hydrateFacilityFields(row);
+    res.json(hydrated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 }
 
 // POST /api/stations
@@ -543,7 +605,9 @@ function patchHoldingCells(req, res) {
   db.get(`SELECT holding_cells, type FROM stations WHERE id=?`, [id], async (err, s) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!s) return res.status(404).json({ error: 'Not found' });
-    if (s.type !== 'police') return res.status(400).json({ error: 'Holding cells only on police stations' });
+    if (!['police', 'jail'].includes(s.type)) {
+      return res.status(400).json({ error: 'Holding cells only available on police or jail stations' });
+    }
     const newCount = Number(s.holding_cells || 0) + add;
     const cost = priceHoldingCells(add, true);
     try {
@@ -554,6 +618,34 @@ function patchHoldingCells(req, res) {
         await adjustBalance(-cost);
         const balance = await getBalance();
         res.json({ success: true, station_id: id, added: add, new_holding_cells: newCount, cost, balance });
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+}
+
+// PATCH /api/stations/:id/beds  { add: <int> }
+function patchHospitalBeds(req, res) {
+  const id = Number(req.params.id);
+  const add = Math.max(0, Number(req.body?.add || 0));
+  if (!id || !add) return res.status(400).json({ error: 'Invalid station id/add' });
+  db.get(`SELECT bed_capacity, type FROM stations WHERE id=?`, [id], async (err, s) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!s) return res.status(404).json({ error: 'Not found' });
+    if (s.type !== 'hospital') {
+      return res.status(400).json({ error: 'Beds can only be purchased for hospitals' });
+    }
+    const newCount = Number(s.bed_capacity || 0) + add;
+    const cost = priceHospitalBeds(add, true);
+    try {
+      const ok = await requireFunds(cost);
+      if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: cost });
+      db.run(`UPDATE stations SET bed_capacity=? WHERE id=?`, [newCount, id], async (e2) => {
+        if (e2) return res.status(500).json({ error: e2.message });
+        await adjustBalance(-cost);
+        const balance = await getBalance();
+        res.json({ success: true, station_id: id, added: add, new_bed_capacity: newCount, cost, balance });
       });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -595,5 +687,6 @@ module.exports = {
   patchEquipmentSlots,
   patchDepartment,
   patchHoldingCells,
+  patchHospitalBeds,
   getStationPersonnel,
 };

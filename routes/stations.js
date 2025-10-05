@@ -8,6 +8,7 @@ router.get('/:id', stations.getStation);
 router.post('/', stations.createStation);
 router.patch('/:id/bays', stations.patchBays);
 router.patch('/:id/holding-cells', stations.patchHoldingCells);
+router.patch('/:id/beds', stations.patchHospitalBeds);
 router.patch('/:id/equipment-slots', stations.patchEquipmentSlots);
 router.patch('/:id/department', stations.patchDepartment);
 router.patch('/:id/icon', stations.patchIcon);
