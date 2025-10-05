@@ -1,4 +1,4 @@
-import { fetchNoCache, formatStatus, formatTime } from './common.js';
+import { fetchNoCache, formatStatus, formatTime, haversineKm } from './common.js';
 
 // Tab navigation
 const tabButtons = document.querySelectorAll('.tab-bar button');
@@ -32,6 +32,12 @@ function closeModal() {
 
 function showModal(content) {
   modalContent.innerHTML = '';
+  const closeBtn = document.createElement('button');
+  closeBtn.id = 'modalClose';
+  closeBtn.className = 'modal-close-btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', closeModal);
+  modalContent.appendChild(closeBtn);
   if (content instanceof Node) {
     modalContent.appendChild(content);
   } else if (content !== undefined && content !== null) {
@@ -39,13 +45,8 @@ function showModal(content) {
     wrapper.innerHTML = String(content);
     modalContent.appendChild(wrapper);
   }
-  const closeBtn = document.createElement('button');
-  closeBtn.id = 'modalClose';
-  closeBtn.className = 'modal-close-btn';
-  closeBtn.textContent = 'Close';
-  closeBtn.addEventListener('click', closeModal);
-  modalContent.appendChild(closeBtn);
   modal.style.display = 'flex';
+  modalContent.scrollTop = 0;
   closeBtn.focus();
 }
 
@@ -84,6 +85,131 @@ let loadInProgress = false;
 let stationSortMode = 'name';
 let activeUnitDepartment = 'all';
 let unitSortMode = 'status';
+
+const defaultEquipmentProvider =
+  typeof globalThis !== 'undefined' && typeof globalThis.getDefaultUnitEquipment === 'function'
+    ? globalThis.getDefaultUnitEquipment
+    : typeof window !== 'undefined' && typeof window.getDefaultUnitEquipment === 'function'
+      ? window.getDefaultUnitEquipment
+      : null;
+
+const equipmentKey = (name) => {
+  if (name === null || name === undefined) return '';
+  const trimmed = String(name).trim();
+  return trimmed ? trimmed.toLowerCase() : '';
+};
+
+function gatherEquipmentForUnit(unit) {
+  const counts = new Map();
+  if (!unit) return counts;
+  const eqArr = Array.isArray(unit.equipment) ? unit.equipment : [];
+  for (const eq of eqArr) {
+    const label = typeof eq === 'string' ? eq : eq?.name;
+    const key = equipmentKey(label);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  if (typeof defaultEquipmentProvider === 'function') {
+    const defaults = defaultEquipmentProvider(unit.class, unit.type) || [];
+    for (const provided of defaults) {
+      const key = equipmentKey(provided);
+      if (!key || counts.has(key)) continue;
+      counts.set(key, 1);
+    }
+  }
+  return counts;
+}
+
+function expandTrainingListForClass(list, cls) {
+  if (
+    typeof trainingHelpers !== 'undefined' &&
+    trainingHelpers &&
+    typeof trainingHelpers.expandTrainingList === 'function'
+  ) {
+    return trainingHelpers.expandTrainingList(list, cls) || [];
+  }
+  return Array.isArray(list) ? list : [];
+}
+
+let responseZonesCache = null;
+
+async function missionDepartmentsFor(mission) {
+  if (Array.isArray(mission?.departments) && mission.departments.length) {
+    return mission.departments;
+  }
+  if (!isFiniteLatLon(mission?.lat, mission?.lon)) return [];
+  if (!responseZonesCache) {
+    try {
+      responseZonesCache = await fetchJson('/api/response-zones');
+    } catch {
+      responseZonesCache = [];
+    }
+  }
+  const zones = Array.isArray(responseZonesCache) ? responseZonesCache : [];
+  const set = new Set();
+  zones.forEach((zone) => {
+    if (pointInPolygon(mission.lat, mission.lon, zone?.polygon)) {
+      const departments = Array.isArray(zone?.departments) ? zone.departments : [];
+      departments.forEach((dept) => {
+        if (dept) set.add(dept);
+      });
+    }
+  });
+  return Array.from(set);
+}
+
+function pointInPolygon(lat, lon, polygon) {
+  const pts = Array.isArray(polygon?.coordinates) ? polygon.coordinates : [];
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i][1];
+    const yi = pts[i][0];
+    const xj = pts[j][1];
+    const yj = pts[j][0];
+    const intersect = (yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+async function fetchAvailableUnitsForMission(mission) {
+  const [stations, unitsRaw] = await Promise.all([
+    fetchJson('/api/stations'),
+    fetchJson('/api/units?status=available')
+  ]);
+
+  const stationMap = new Map(stations.map((station) => [station.id, station]));
+  const missionDepts = await missionDepartmentsFor(mission);
+  const restrictByDept = missionDepts.length > 0;
+
+  const units = unitsRaw
+    .filter((unit) => {
+      const station = stationMap.get(unit.station_id);
+      const dept = station?.department;
+      if (restrictByDept) {
+        return dept && missionDepts.includes(dept);
+      }
+      return true;
+    })
+    .map((unit) => {
+      const station = stationMap.get(unit.station_id);
+      const hasCoords =
+        station &&
+        isFiniteLatLon(station.lat, station.lon) &&
+        isFiniteLatLon(mission.lat, mission.lon);
+      const distance = hasCoords
+        ? haversineKm(Number(station.lat), Number(station.lon), Number(mission.lat), Number(mission.lon))
+        : Infinity;
+      return {
+        ...unit,
+        priority: Number(unit.priority) || 1,
+        _distanceKm: distance,
+        station
+      };
+    });
+
+  return { units };
+}
 
 const UNIT_STATUS_ORDER = {
   on_scene: 0,
@@ -929,75 +1055,162 @@ function buildMissionDispatchSection(mission) {
   const wrapper = document.createElement('div');
   wrapper.className = 'dispatch-section';
 
-  const grouped = new Map();
-  dispatchable.forEach((entry) => {
-    const deptKey = entry.department || 'No Department';
-    if (!grouped.has(deptKey)) grouped.set(deptKey, new Map());
-    const stationKey = entry.station?.id ?? '__unassigned__';
-    if (!grouped.get(deptKey).has(stationKey)) {
-      grouped.get(deptKey).set(stationKey, { station: entry.station, units: [] });
+  const buttonGrid = document.createElement('div');
+  buttonGrid.className = 'dispatch-button-grid';
+
+  const panelContainer = document.createElement('div');
+  panelContainer.className = 'dispatch-panel-container hidden';
+
+  const status = document.createElement('div');
+  status.className = 'dispatch-status';
+
+  const setStatus = (message = '', tone = 'info') => {
+    status.textContent = message;
+    status.dataset.tone = tone;
+  };
+
+  const refreshMissionDetail = async () => {
+    await loadData();
+    const updated = latestMissions.find((m) => m.id === mission.id);
+    if (updated) {
+      showModal(buildMissionDetail(updated));
+    } else {
+      closeModal();
     }
-    grouped.get(deptKey).get(stationKey).units.push(entry.unit);
+  };
+
+  const createActionButton = (label) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dispatch-button';
+    btn.textContent = label;
+    return btn;
+  };
+
+  const handleAction = async (btn, fn) => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    try {
+      await fn();
+    } catch (err) {
+      setStatus(err?.message || 'Dispatch failed.', 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  let manualBtn;
+  let unitTypeBtn;
+  let activePanelKey = null;
+
+  const updatePanelState = () => {
+    if (manualBtn) manualBtn.classList.toggle('active', activePanelKey === 'manual');
+    if (unitTypeBtn) unitTypeBtn.classList.toggle('active', activePanelKey === 'unitType');
+    panelContainer.classList.toggle('hidden', activePanelKey === null);
+  };
+
+  const hidePanel = () => {
+    panelContainer.innerHTML = '';
+    activePanelKey = null;
+    updatePanelState();
+  };
+
+  const openPanel = (key, factory) => {
+    if (activePanelKey === key) {
+      hidePanel();
+      return;
+    }
+    panelContainer.innerHTML = '';
+    const node = factory();
+    if (node) {
+      panelContainer.appendChild(node);
+      activePanelKey = key;
+    } else {
+      activePanelKey = null;
+    }
+    updatePanelState();
+  };
+
+  const autoBtn = createActionButton('Auto');
+  autoBtn.addEventListener('click', () =>
+    handleAction(autoBtn, async () => {
+      hidePanel();
+      setStatus('Calculating auto dispatch…', 'info');
+      const count = await autoDispatchMission(mission);
+      setStatus(`Dispatched ${count} unit${count === 1 ? '' : 's'}.`, 'success');
+      await refreshMissionDetail();
+    })
+  );
+  buttonGrid.appendChild(autoBtn);
+
+  const runCardBtn = createActionButton('Run Card');
+  runCardBtn.addEventListener('click', () =>
+    handleAction(runCardBtn, async () => {
+      hidePanel();
+      setStatus('Applying run card…', 'info');
+      const count = await runCardDispatchMission(mission);
+      setStatus(`Dispatched ${count} unit${count === 1 ? '' : 's'}.`, 'success');
+      await refreshMissionDetail();
+    })
+  );
+  buttonGrid.appendChild(runCardBtn);
+
+  manualBtn = createActionButton('Manual');
+  manualBtn.addEventListener('click', () => {
+    setStatus('');
+    openPanel('manual', () =>
+      buildManualDispatchPanel(mission, {
+        setStatus,
+        onComplete: refreshMissionDetail
+      })
+    );
   });
+  buttonGrid.appendChild(manualBtn);
 
-  const departmentEntries = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
-
-  departmentEntries.forEach(([dept, stations]) => {
-    const group = document.createElement('div');
-    group.className = 'dispatch-group';
-    const title = document.createElement('div');
-    title.className = 'dispatch-group__title';
-    title.textContent = dept;
-    group.appendChild(title);
-
-    const stationEntries = Array.from(stations.values()).sort((a, b) => {
-      const nameA = a.station?.name || 'Unassigned Station';
-      const nameB = b.station?.name || 'Unassigned Station';
-      return nameA.localeCompare(nameB);
-    });
-
-    stationEntries.forEach(({ station, units }) => {
-      const stationWrap = document.createElement('div');
-      stationWrap.className = 'dispatch-station';
-      const stationTitle = document.createElement('div');
-      stationTitle.className = 'dispatch-station__title';
-      stationTitle.textContent = station?.name || 'Unassigned Station';
-      stationWrap.appendChild(stationTitle);
-
-      const unitList = document.createElement('div');
-      unitList.className = 'dispatch-unit-list';
-      sortUnitsForDisplay(units, 'name').forEach((unit) => {
-        const label = document.createElement('label');
-        label.className = 'dispatch-unit';
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.value = unit.id;
-        label.appendChild(checkbox);
-        const name = document.createElement('span');
-        name.textContent = unit.name || unit.type || `Unit ${unit.id}`;
-        label.appendChild(name);
-        unitList.appendChild(label);
-      });
-      stationWrap.appendChild(unitList);
-      group.appendChild(stationWrap);
-    });
-
-    wrapper.appendChild(group);
+  unitTypeBtn = createActionButton('Unit Type');
+  unitTypeBtn.addEventListener('click', () => {
+    setStatus('');
+    openPanel('unitType', () =>
+      buildUnitTypeDispatchPanel(mission, {
+        setStatus,
+        onComplete: refreshMissionDetail
+      })
+    );
   });
+  buttonGrid.appendChild(unitTypeBtn);
+
+  wrapper.appendChild(buttonGrid);
+  wrapper.appendChild(panelContainer);
+  wrapper.appendChild(status);
+
+  return { node: wrapper, fallback: null };
+}
+
+function buildManualDispatchPanel(mission, { setStatus, onComplete }) {
+  const container = document.createElement('div');
+  container.className = 'dispatch-panel dispatch-panel--manual';
+
+  const intro = document.createElement('p');
+  intro.className = 'dispatch-panel__intro';
+  intro.textContent = 'Select available units to send to this mission.';
+  container.appendChild(intro);
+
+  const listWrapper = document.createElement('div');
+  listWrapper.className = 'dispatch-panel__list';
+  container.appendChild(listWrapper);
 
   const actions = document.createElement('div');
-  actions.className = 'dispatch-actions';
+  actions.className = 'dispatch-panel__actions';
+  container.appendChild(actions);
 
   const dispatchBtn = document.createElement('button');
   dispatchBtn.type = 'button';
+  dispatchBtn.className = 'dispatch-button dispatch-button--primary';
   dispatchBtn.textContent = 'Dispatch Selected';
   actions.appendChild(dispatchBtn);
 
   const forceLabel = document.createElement('label');
-  forceLabel.style.display = 'inline-flex';
-  forceLabel.style.alignItems = 'center';
-  forceLabel.style.gap = '6px';
-  forceLabel.style.fontSize = '0.85rem';
+  forceLabel.className = 'dispatch-panel__force';
   const forceCheckbox = document.createElement('input');
   forceCheckbox.type = 'checkbox';
   forceLabel.appendChild(forceCheckbox);
@@ -1006,38 +1219,346 @@ function buildMissionDispatchSection(mission) {
   forceLabel.appendChild(forceText);
   actions.appendChild(forceLabel);
 
-  const message = document.createElement('span');
-  message.className = 'dispatch-message';
-  actions.appendChild(message);
+  const renderUnits = async () => {
+    listWrapper.innerHTML = '<div class="dispatch-panel__loading">Loading available units…</div>';
+    dispatchBtn.disabled = true;
+    try {
+      const { units } = await fetchAvailableUnitsForMission(mission);
+      if (!units.length) {
+        listWrapper.innerHTML = '<div class="dispatch-panel__empty">No available units meet the criteria.</div>';
+        return;
+      }
+
+      const groups = new Map();
+      units.forEach((unit) => {
+        const station = unit.station;
+        const deptKey = station?.department || 'No Department';
+        if (!groups.has(deptKey)) groups.set(deptKey, new Map());
+        const stationKey = station?.id ?? '__unassigned__';
+        if (!groups.get(deptKey).has(stationKey)) {
+          groups.get(deptKey).set(stationKey, { station, units: [] });
+        }
+        groups.get(deptKey).get(stationKey).units.push(unit);
+      });
+
+      const departmentEntries = Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+      listWrapper.innerHTML = '';
+
+      departmentEntries.forEach(([dept, stations]) => {
+        const group = document.createElement('div');
+        group.className = 'dispatch-group';
+
+        const title = document.createElement('div');
+        title.className = 'dispatch-group__title';
+        title.textContent = dept;
+        group.appendChild(title);
+
+        const stationEntries = Array.from(stations.values()).sort((a, b) => {
+          const nameA = a.station?.name || 'Unassigned Station';
+          const nameB = b.station?.name || 'Unassigned Station';
+          return nameA.localeCompare(nameB);
+        });
+
+        stationEntries.forEach(({ station, units: stationUnits }) => {
+          const stationWrap = document.createElement('div');
+          stationWrap.className = 'dispatch-station';
+
+          const stationTitle = document.createElement('div');
+          stationTitle.className = 'dispatch-station__title';
+          stationTitle.textContent = station?.name || 'Unassigned Station';
+          stationWrap.appendChild(stationTitle);
+
+          const unitList = document.createElement('div');
+          unitList.className = 'dispatch-unit-list';
+          sortUnitsForDisplay(stationUnits, 'name').forEach((unit) => {
+            const label = document.createElement('label');
+            label.className = 'dispatch-unit';
+
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = unit.id;
+            label.appendChild(checkbox);
+
+            const textWrap = document.createElement('div');
+            textWrap.className = 'dispatch-unit__text';
+            label.appendChild(textWrap);
+
+            const main = document.createElement('span');
+            main.className = 'dispatch-unit__name';
+            main.textContent = unit.name || unit.type || `Unit ${unit.id}`;
+            textWrap.appendChild(main);
+
+            const metaParts = [];
+            if (unit.type) metaParts.push(unit.type);
+            if (Number.isFinite(unit._distanceKm) && unit._distanceKm !== Infinity) {
+              metaParts.push(`${unit._distanceKm.toFixed(1)} km`);
+            }
+            if (metaParts.length) {
+              const meta = document.createElement('span');
+              meta.className = 'dispatch-unit__meta';
+              meta.textContent = metaParts.join(' • ');
+              textWrap.appendChild(meta);
+            }
+
+            unitList.appendChild(label);
+          });
+
+          stationWrap.appendChild(unitList);
+          group.appendChild(stationWrap);
+        });
+
+        listWrapper.appendChild(group);
+      });
+
+      dispatchBtn.disabled = false;
+    } catch (err) {
+      listWrapper.innerHTML = `<div class="dispatch-panel__error">${err?.message || 'Failed to load units.'}</div>`;
+    }
+  };
+
+  renderUnits();
 
   dispatchBtn.addEventListener('click', async () => {
-    const selected = Array.from(wrapper.querySelectorAll('input[type="checkbox"]:checked')).map((input) => Number(input.value));
+    const selected = Array.from(container.querySelectorAll('input[type="checkbox"]:checked')).map((input) => Number(input.value));
     if (!selected.length) {
-      message.textContent = 'Select at least one unit to dispatch.';
-      message.style.color = '#b91c1c';
+      setStatus('Select at least one unit to dispatch.', 'error');
       return;
     }
     dispatchBtn.disabled = true;
-    message.textContent = 'Dispatching…';
-    message.style.color = '#0f172a';
+    setStatus('Dispatching selected units…', 'info');
     try {
       await dispatchUnitsForMission(mission, selected, { force: forceCheckbox.checked });
-      message.textContent = `Dispatched ${selected.length} unit${selected.length > 1 ? 's' : ''}.`;
-      message.style.color = '#166534';
-      await loadData();
-      const updated = latestMissions.find((m) => m.id === mission.id) || mission;
-      showModal(buildMissionDetail(updated));
+      setStatus(`Dispatched ${selected.length} unit${selected.length === 1 ? '' : 's'}.`, 'success');
+      await onComplete();
     } catch (err) {
-      message.textContent = err?.message || 'Dispatch failed.';
-      message.style.color = '#b91c1c';
+      setStatus(err?.message || 'Dispatch failed.', 'error');
     } finally {
       dispatchBtn.disabled = false;
     }
   });
 
-  wrapper.appendChild(actions);
+  return container;
+}
 
-  return { node: wrapper, fallback: null };
+function buildUnitTypeDispatchPanel(mission, { setStatus, onComplete }) {
+  const container = document.createElement('div');
+  container.className = 'dispatch-panel dispatch-panel--types';
+
+  const listWrapper = document.createElement('div');
+  listWrapper.className = 'dispatch-panel__list';
+  container.appendChild(listWrapper);
+
+  const populate = async () => {
+    listWrapper.innerHTML = '<div class="dispatch-panel__loading">Loading unit types…</div>';
+    try {
+      const { units } = await fetchAvailableUnitsForMission(mission);
+      const groups = new Map();
+      units.forEach((unit) => {
+        const typeKey = unit.type || 'Unknown';
+        if (!groups.has(typeKey)) groups.set(typeKey, []);
+        groups.get(typeKey).push(unit);
+      });
+
+      const entries = Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+      if (!entries.length) {
+        listWrapper.innerHTML = '<div class="dispatch-panel__empty">No available units to dispatch by type.</div>';
+        return;
+      }
+
+      listWrapper.innerHTML = '';
+      entries.forEach(([type, list]) => {
+        list.sort((a, b) => {
+          const distDiff = (a._distanceKm ?? Infinity) - (b._distanceKm ?? Infinity);
+          if (distDiff !== 0) return distDiff;
+          const priorityDiff = (a.priority ?? 0) - (b.priority ?? 0);
+          if (priorityDiff !== 0) return priorityDiff;
+          return (a.name || '').localeCompare(b.name || '');
+        });
+
+        const row = document.createElement('div');
+        row.className = 'dispatch-type-row';
+
+        const label = document.createElement('div');
+        label.className = 'dispatch-type-label';
+        label.textContent = `${type} (${list.length})`;
+        row.appendChild(label);
+
+        const sendBtn = document.createElement('button');
+        sendBtn.type = 'button';
+        sendBtn.className = 'dispatch-type-button';
+        sendBtn.textContent = 'Send 1';
+        row.appendChild(sendBtn);
+
+        sendBtn.addEventListener('click', async () => {
+          if (!list.length) {
+            setStatus('No available units of this type.', 'error');
+            return;
+          }
+          const unit = list.shift();
+          sendBtn.disabled = true;
+          setStatus(`Dispatching ${unit.name || unit.type || 'unit'}…`, 'info');
+          try {
+            await dispatchUnitsForMission(mission, [unit.id], { force: true });
+            setStatus(`Dispatched ${unit.name || unit.type || 'unit'}.`, 'success');
+            await onComplete();
+          } catch (err) {
+            setStatus(err?.message || 'Dispatch failed.', 'error');
+          } finally {
+            sendBtn.disabled = false;
+          }
+        });
+
+        listWrapper.appendChild(row);
+      });
+    } catch (err) {
+      listWrapper.innerHTML = `<div class="dispatch-panel__error">${err?.message || 'Failed to load unit types.'}</div>`;
+    }
+  };
+
+  populate();
+
+  return container;
+}
+
+async function autoDispatchMission(mission) {
+  const { units } = await fetchAvailableUnitsForMission(mission);
+  const trainingNeeds = (Array.isArray(mission.required_training) ? mission.required_training : [])
+    .map((req) => ({ name: req.training || req.name || req, qty: Number(req.qty ?? req.quantity ?? req.count ?? 1) }))
+    .filter((item) => item.name);
+  const equipmentNeeds = (Array.isArray(mission.equipment_required) ? mission.equipment_required : [])
+    .map((req) => ({ name: req.name || req.type || req, qty: Number(req.qty ?? req.quantity ?? req.count ?? 1) }))
+    .filter((item) => item.name);
+
+  function trainingCount(unit, name) {
+    const target = String(name || '').trim().toLowerCase();
+    if (!target) return 0;
+    let count = 0;
+    for (const person of Array.isArray(unit.personnel) ? unit.personnel : []) {
+      const list = Array.isArray(person.training) ? person.training : [];
+      const expanded = expandTrainingListForClass(list, unit.class);
+      if (expanded.some((t) => String(t || '').trim().toLowerCase() === target)) count++;
+    }
+    return count;
+  }
+
+  function equipmentCount(unit, name) {
+    const key = equipmentKey(name);
+    if (!key) return 0;
+    const counts = gatherEquipmentForUnit(unit);
+    return counts.get(key) || 0;
+  }
+
+  function applyNeeds(unit) {
+    for (const need of trainingNeeds) {
+      need.qty -= trainingCount(unit, need.name);
+    }
+    for (const need of equipmentNeeds) {
+      need.qty -= equipmentCount(unit, need.name);
+    }
+  }
+
+  const assigned = await fetchJson(`/api/missions/${mission.id}/units`).catch(() => []);
+  const assignedCounts = {};
+  for (const unit of Array.isArray(assigned) ? assigned : []) {
+    if (!['enroute', 'on_scene'].includes(unit?.status)) continue;
+    if (unit?.type) {
+      assignedCounts[unit.type] = (assignedCounts[unit.type] || 0) + 1;
+    }
+    applyNeeds(unit);
+  }
+
+  const selected = [];
+  const selectedIds = new Set();
+
+  const sortUnits = (a, b) => {
+    const distDiff = (a._distanceKm ?? Infinity) - (b._distanceKm ?? Infinity);
+    if (distDiff !== 0) return distDiff;
+    if (a.station_id === b.station_id) {
+      const priorityDiff = (a.priority ?? 0) - (b.priority ?? 0);
+      if (priorityDiff !== 0) return priorityDiff;
+    }
+    return (a.name || '').localeCompare(b.name || '');
+  };
+
+  function unitMatchesNeed(unit) {
+    return trainingNeeds.some((need) => need.qty > 0 && trainingCount(unit, need.name) > 0) ||
+      equipmentNeeds.some((need) => need.qty > 0 && equipmentCount(unit, need.name) > 0);
+  }
+
+  function unitMatchesAllNeeds(unit) {
+    return trainingNeeds.every((need) => need.qty <= 0 || trainingCount(unit, need.name) > 0) &&
+      equipmentNeeds.every((need) => need.qty <= 0 || equipmentCount(unit, need.name) > 0);
+  }
+
+  function selectUnit(unit) {
+    if (!unit || selectedIds.has(unit.id)) return;
+    selectedIds.add(unit.id);
+    selected.push(unit);
+    applyNeeds(unit);
+  }
+
+  const requirements = Array.isArray(mission.required_units) ? mission.required_units : [];
+  for (const req of requirements) {
+    const types = Array.isArray(req.types) ? req.types.filter(Boolean) : [];
+    if (!types.length && req.type) types.push(req.type);
+    const needTotal = Number(req.quantity ?? req.count ?? req.qty ?? 1) || 1;
+    let remaining = needTotal - types.reduce((sum, type) => sum + (assignedCounts[type] || 0), 0);
+    remaining = Math.max(0, remaining);
+    for (let i = 0; i < remaining; i++) {
+      const candidates = units
+        .filter((unit) => !selectedIds.has(unit.id) && types.includes(unit.type))
+        .sort(sortUnits);
+      if (!candidates.length) break;
+      const chosen = candidates.find(unitMatchesAllNeeds) || candidates.find(unitMatchesNeed) || candidates[0];
+      selectUnit(chosen);
+    }
+  }
+
+  for (const need of trainingNeeds) {
+    while (need.qty > 0) {
+      const candidates = units
+        .filter((unit) => !selectedIds.has(unit.id) && trainingCount(unit, need.name) > 0)
+        .sort(sortUnits);
+      if (!candidates.length) break;
+      selectUnit(candidates[0]);
+    }
+  }
+
+  for (const need of equipmentNeeds) {
+    while (need.qty > 0) {
+      const candidates = units
+        .filter((unit) => !selectedIds.has(unit.id) && equipmentCount(unit, need.name) > 0)
+        .sort(sortUnits);
+      if (!candidates.length) break;
+      selectUnit(candidates[0]);
+    }
+  }
+
+  if (!selected.length) {
+    throw new Error('No additional units available for dispatch.');
+  }
+
+  await dispatchUnitsForMission(mission, selected.map((unit) => unit.id));
+  return selected.length;
+}
+
+async function runCardDispatchMission(mission) {
+  if (!mission?.type) {
+    throw new Error('Mission type unavailable for run card dispatch.');
+  }
+  const res = await fetchNoCache(`/api/run-cards/${encodeURIComponent(mission.type)}`);
+  if (!res.ok) {
+    const message = await res.text().catch(() => 'No run card for this mission.');
+    throw new Error(message || 'No run card for this mission.');
+  }
+  const card = await res.json();
+  const rcMission = {
+    ...mission,
+    required_units: card?.units || [],
+    required_training: card?.training || [],
+    equipment_required: card?.equipment || []
+  };
+  return autoDispatchMission(rcMission);
 }
 
 function getDispatchableUnitsForMission(mission) {
