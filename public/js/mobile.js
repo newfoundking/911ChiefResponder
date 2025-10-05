@@ -636,16 +636,6 @@ function createAssignedChip(unit) {
   const status = formatStatus(unit.status || 'enroute', unit.responding);
   return createChip(`${label} • ${status}`, 'unit');
 }
-function pickUnitIconUrl(unit) {
-  if (!unit) return null;
-  const sanitizedType = (unit.type || '').replace(/\s+/g, '');
-  const baseIcon = sanitizedType ? `/images/${sanitizedType}.png` : null;
-  const respDefault = sanitizedType ? `/images/${sanitizedType}-responding.png` : null;
-  const normal = unit.icon || baseIcon || stationIcons[unit.class] || stationIcons.fire;
-  const responding = unit.responding_icon || respDefault || normal;
-  return unit.responding ? responding : normal;
-}
-
 function buildMissionDetail(mission) {
   const assigned = missionAssignments.get(mission.id) || [];
   const detail = document.createElement('div');
