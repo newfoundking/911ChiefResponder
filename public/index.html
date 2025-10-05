@@ -17,7 +17,9 @@
         <style>
                 html, body { height: 100%; margin: 0; overflow: hidden; }
                 body { display: flex; height: 100vh; font-family: sans-serif; }
-                #sidebar { max-width: 30%; width: 100%; overflow-y: auto; padding: 10px; box-sizing: border-box; }
+                #sidebar { max-width: 30%; width: 100%; padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }
+                .sidebar-fixed { flex: 0 0 auto; background: #fff; z-index: 1; }
+                .sidebar-lists { flex: 1 1 auto; overflow-y: auto; }
                 #map { flex: 1; position: relative; }
                 .map-search {
                         position: absolute;
@@ -91,6 +93,8 @@
                 .mission-speed.active { background: #aaa; font-weight: bold; }
                 .tab-content { display: none; }
                 .tab-content.active { display: block; }
+                .tab-controls { display: none; margin-top: 1em; }
+                .tab-controls.active { display: block; }
                 #stationDetails { max-width: 30%; overflow-y: auto; }
                 .popup { position: fixed; top: 10%; left: 30%; width: 40%; background: white; border: 2px solid black; padding: 20px; z-index: 9999; max-height: 80%; overflow-y: auto; }
                 .hidden { display: none; }
@@ -169,56 +173,66 @@
 <body>
 
 <div id="sidebar">
-        <h2>Chief Responder</h2>
-        <button id="openCad" onclick="location.href='cad.html'" style="margin-bottom:1em;">Open CAD</button>
-	<div style="display: flex; gap: 1em; margin-bottom: 1em;">
-                <button class="tab-button active" data-tab="missions">Missions</button>
-                <button class="tab-button" data-tab="stations">Stations</button>
-                <button class="tab-button" data-tab="zones">Zones</button>
-                <button class="tab-button" data-tab="units">Units</button>
-	</div>
-	<div id="walletDisplay">Balance: $0</div>
-	<script>
-	async function refreshWallet(){
-	  const w = await fetch('/api/wallet').then(r=>r.json());
-	  document.getElementById('walletDisplay').textContent = `Balance: $${w.balance}`;
-	}
-	setInterval(refreshWallet, 5000);
-	refreshWallet();
-        </script>
-        <div id="tab-missions" class="tab-content active">
-                <div id="missionSpeedControls" style="margin-bottom:1em;">
-                        <button class="mission-speed active" data-speed="pause">Pause</button>
-                        <button class="mission-speed" data-speed="slow">Slow</button>
-                        <button class="mission-speed" data-speed="medium">Medium</button>
-                        <button class="mission-speed" data-speed="fast">Fast</button>
+        <div class="sidebar-fixed">
+                <h2>Chief Responder</h2>
+                <button id="openCad" onclick="location.href='cad.html'" style="margin-bottom:1em;">Open CAD</button>
+                <div style="display: flex; gap: 1em; margin-bottom: 1em;">
+                        <button class="tab-button active" data-tab="missions">Missions</button>
+                        <button class="tab-button" data-tab="stations">Stations</button>
+                        <button class="tab-button" data-tab="zones">Zones</button>
+                        <button class="tab-button" data-tab="units">Units</button>
                 </div>
-                <button id="generateMission">Generate Mission</button>
-                <button id="startPatrols">Start Patrols</button>
-                <button id="clearMissions" style="background: darkred; color: white; margin-top: 1em;">DEBUG CLEAR ALL CALLS</button>
-                <button id="deleteAllStations">DEBUG DELETE ALL STATIONS</button>
-                <div id="missionList"></div>
+                <div id="walletDisplay">Balance: $0</div>
+                <script>
+                async function refreshWallet(){
+                  const w = await fetch('/api/wallet').then(r=>r.json());
+                  document.getElementById('walletDisplay').textContent = `Balance: $${w.balance}`;
+                }
+                setInterval(refreshWallet, 5000);
+                refreshWallet();
+                </script>
+                <div class="tab-controls active" data-tab="missions">
+                        <div id="missionSpeedControls" style="margin-bottom:1em;">
+                                <button class="mission-speed active" data-speed="pause">Pause</button>
+                                <button class="mission-speed" data-speed="slow">Slow</button>
+                                <button class="mission-speed" data-speed="medium">Medium</button>
+                                <button class="mission-speed" data-speed="fast">Fast</button>
+                        </div>
+                        <button id="generateMission">Generate Mission</button>
+                        <button id="startPatrols">Start Patrols</button>
+                        <button id="clearMissions" style="background: darkred; color: white; margin-top: 1em;">DEBUG CLEAR ALL CALLS</button>
+                </div>
+                <div class="tab-controls" data-tab="stations">
+                        <button id="buildStation" style="margin-bottom: 1em;">Build New Station</button>
+                </div>
+                <div class="tab-controls" data-tab="zones">
+                        <button id="addZoneBtn">Add Zone</button>
+                        <button id="saveZoneEditBtn" style="display:none;">Save Zone</button>
+                </div>
+                <div class="tab-controls" data-tab="units">
+                        <div style="margin-bottom:0.5em; display:flex; gap:0.5em; flex-wrap:wrap;">
+                                <input type="text" id="unitFilter" placeholder="Filter units..." style="flex:1; min-width:120px;" />
+                                <select id="unitSort">
+                                  <option value="status">Status</option>
+                                  <option value="name">Name</option>
+                                  <option value="priority">Priority</option>
+                                </select>
+                        </div>
+                </div>
         </div>
-
-        <div id="tab-stations" class="tab-content">
-          <button id="buildStation" style="margin-bottom: 1em;">Build New Station</button>
-          <div id="stationList"></div>
-        </div>
-        <div id="tab-zones" class="tab-content">
-          <button id="addZoneBtn">Add Zone</button>
-          <button id="saveZoneEditBtn" style="display:none;">Save Zone</button>
-          <div id="zoneList"></div>
-        </div>
-        <div id="tab-units" class="tab-content">
-          <div style="margin-bottom:0.5em; display:flex; gap:0.5em; flex-wrap:wrap;">
-            <input type="text" id="unitFilter" placeholder="Filter units..." style="flex:1; min-width:120px;" />
-            <select id="unitSort">
-              <option value="status">Status</option>
-              <option value="name">Name</option>
-              <option value="priority">Priority</option>
-            </select>
-          </div>
-          <div id="unitList"></div>
+        <div class="sidebar-lists">
+                <div id="tab-missions" class="tab-content active">
+                        <div id="missionList"></div>
+                </div>
+                <div id="tab-stations" class="tab-content">
+                        <div id="stationList"></div>
+                </div>
+                <div id="tab-zones" class="tab-content">
+                        <div id="zoneList"></div>
+                </div>
+                <div id="tab-units" class="tab-content">
+                        <div id="unitList"></div>
+                </div>
         </div>
 </div>
 
@@ -588,13 +602,6 @@ function deptClassFor(type){
   }
 }
 
-document.getElementById("deleteAllStations").addEventListener("click", async () => {
-  if (!await showConfirmModal("Are you sure you want to delete ALL stations? This will also orphan units!")) return;
-  await fetch("/api/stations", { method: "DELETE" });
-  fetchStations();
-  notifySuccess("All stations deleted.");
-});
-
 function getTrainingsForClass(cls) {
   const key = String(cls || '').trim().toLowerCase();
   if (typeof trainingsByClass !== 'undefined' && trainingsByClass && trainingsByClass[key]) {
@@ -608,8 +615,10 @@ document.querySelectorAll(".tab-button").forEach(button => {
   button.addEventListener("click", () => {
     document.querySelectorAll(".tab-button").forEach(b => b.classList.remove("active"));
     document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+    document.querySelectorAll(".tab-controls").forEach(c => c.classList.remove("active"));
     button.classList.add("active");
     document.getElementById(`tab-${button.dataset.tab}`).classList.add("active");
+    document.querySelector(`.tab-controls[data-tab="${button.dataset.tab}"]`)?.classList.add("active");
     if (button.dataset.tab === 'zones') {
       map.addLayer(zoneLayerGroup);
     } else {
