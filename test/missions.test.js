@@ -171,6 +171,9 @@ test('PUT /api/missions/:id resolves missions and releases resources', async () 
   assert.equal(res.body?.freed, 2);
   assert.equal(res.body?.reward, 1000);
   assert.equal(res.body?.balance, 1500);
+  assert.equal(res.body?.patientTransports, 0);
+  assert.equal(res.body?.prisonerTransports, 0);
+  assert.equal(res.body?.transportReward, 0);
 
   const unitRows = await all(`SELECT status, responding FROM units ORDER BY id`);
   for (const row of unitRows) {
@@ -191,6 +194,79 @@ test('PUT /api/missions/:id resolves missions and releases resources', async () 
   assert.equal(missionClocks.has(missionId), false);
 });
 
+test('PUT /api/missions/:id includes transport summary when transports occur', async () => {
+  const missionId = 2;
+  const now = Date.now();
+
+  await run(
+    `INSERT INTO missions (id, type, status, lat, lon, patients, prisoners, penalties, resolve_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    [
+      missionId,
+      'Transport Mission',
+      'active',
+      40.0,
+      -75.0,
+      JSON.stringify([{ count: 1 }]),
+      JSON.stringify([{ transport: 1 }]),
+      JSON.stringify([]),
+      now + 60000,
+    ]
+  );
+
+  await run(`INSERT INTO mission_templates (name, rewards) VALUES (?, ?)`, ['Transport Mission', 200]);
+
+  await run(`INSERT INTO units (id, type, status, responding) VALUES (?,?,?,?)`, [201, 'Ambulance', 'on_scene', 1]);
+  await run(`INSERT INTO units (id, type, status, responding) VALUES (?,?,?,?)`, [202, 'Patrol Car', 'on_scene', 1]);
+
+  await run(`INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)`, [missionId, 201]);
+  await run(`INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)`, [missionId, 202]);
+
+  await run(`INSERT INTO unit_travel (unit_id, mission_id) VALUES (?, ?)`, [201, missionId]);
+  await run(`INSERT INTO unit_travel (unit_id, mission_id) VALUES (?, ?)`, [202, missionId]);
+
+  await run(`INSERT INTO wallet (id, balance) VALUES (1, 0)`);
+
+  await run(
+    `INSERT INTO stations (id, lat, lon, bed_capacity, holding_cells, type) VALUES (?,?,?,?,?,?)`,
+    [401, 40.0, -75.0, 5, 0, 'hospital']
+  );
+  await run(
+    `INSERT INTO stations (id, lat, lon, bed_capacity, holding_cells, type) VALUES (?,?,?,?,?,?)`,
+    [402, 40.0, -75.0, 0, 5, 'police']
+  );
+
+  missionClocks.set(missionId, {
+    endAt: now + 60000,
+    startedAt: now,
+    baseDuration: 60000,
+  });
+
+  const req = { params: { id: String(missionId) } };
+  const res = createMockRes();
+
+  await missionsController.updateMission(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.body?.ok, 'response should include ok flag');
+  assert.equal(res.body?.freed, 2);
+  assert.equal(res.body?.reward, 200);
+  assert.equal(res.body?.patientTransports, 1);
+  assert.equal(res.body?.prisonerTransports, 1);
+  assert.equal(res.body?.transportReward, 1000);
+  assert.equal(res.body?.balance, 1200);
+
+  const walletRow = await get(`SELECT balance FROM wallet WHERE id=1`);
+  assert.equal(walletRow.balance, 1200);
+
+  const loads = await all(`SELECT type FROM facility_load ORDER BY type`);
+  assert.deepEqual(
+    loads.map(l => l.type),
+    ['patient', 'prisoner']
+  );
+
+  assert.equal(missionClocks.has(missionId), false);
+});
+
 test('handleTransports counts prisoner transports regardless of attribute case', async () => {
   await run(`INSERT INTO units (id, type, status, responding) VALUES (?,?,?,?)`, [201, 'Patrol Car', 'on_scene', 1]);
   await run(`INSERT INTO wallet (id, balance) VALUES (1, 0)`);
@@ -199,7 +275,7 @@ test('handleTransports counts prisoner transports regardless of attribute case',
     [301, 40.0, -75.0, 0, 3, 'police']
   );
 
-  await handleTransports([201], 40.0, -75.0, [], [{ transport: 1 }]);
+  const summary = await handleTransports([201], 40.0, -75.0, [], [{ transport: 1 }]);
 
   const loads = await all(`SELECT type FROM facility_load`);
   assert.equal(loads.length, 1);
@@ -207,4 +283,9 @@ test('handleTransports counts prisoner transports regardless of attribute case',
 
   const walletRow = await get(`SELECT balance FROM wallet WHERE id=1`);
   assert.equal(walletRow.balance, 500);
+  assert.deepEqual(summary, {
+    patientTransports: 0,
+    prisonerTransports: 1,
+    transportReward: 500,
+  });
 });
