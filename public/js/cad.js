@@ -128,9 +128,9 @@ const stationIcons = {
   fire: makeIcon('/fire.png', 24),
   police: makeIcon('/police.png', 24),
   ambulance: makeIcon('/star.png', 24),
-  sar: makeIcon('/sar.png', 24),  
-  hospital: makeIcon('/star.png', 24),
-  jail: makeIcon('/police.png', 24)
+  sar: makeIcon('/sar.png', 24),
+  hospital: makeIcon('/images/hospital.png', 24),
+  jail: makeIcon('/images/prison.png', 24)
 };
 
 const missionIcons = {
