@@ -26,6 +26,12 @@ export function formatTime(seconds) {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
+// Helper to format numeric values as USD currency strings
+export function formatCurrency(amount) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' })
+    .format(Number(amount) || 0);
+}
+
 // Map internal unit statuses to human readable status codes
 export function formatStatus(status, responding = false) {
   switch (status) {
@@ -116,6 +122,7 @@ export function showConfirmModal(message) {
 window.fetchNoCache = fetchNoCache;
 window.haversineKm = haversineKm;
 window.formatTime = formatTime;
+window.formatCurrency = formatCurrency;
 window.formatStatus = formatStatus;
 window.playSound = playSound;
 window.showConfirmModal = showConfirmModal;
