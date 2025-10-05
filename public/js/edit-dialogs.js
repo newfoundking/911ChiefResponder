@@ -138,6 +138,20 @@ export function openUnitModal(unit) {
   const currentName = unit?.name || '';
   const currentTag = unit?.tag || '';
   const currentPrio = Number(unit?.priority) || 1;
+  const computeDefaultSeats = () => {
+    const fromUnit = Number(unit?.default_capacity);
+    if (Number.isFinite(fromUnit) && fromUnit > 0) return fromUnit;
+    if (typeof window !== 'undefined' && typeof window.defaultSeatCapacity === 'function') {
+      return Number(window.defaultSeatCapacity(unit?.class, unit?.type)) || 0;
+    }
+    return 0;
+  };
+  const defaultSeats = computeDefaultSeats();
+  const seatDisplay = (() => {
+    if (!defaultSeats) return '';
+    const value = unit?.seat_override != null ? Number(unit.seat_override) || defaultSeats : Number(unit?.seat_capacity) || defaultSeats;
+    return String(Math.max(1, Math.min(defaultSeats, value)));
+  })();
   content.innerHTML = `
     <div style="display:flex; flex-direction:column; gap:10px;">
       <label>
@@ -152,11 +166,32 @@ export function openUnitModal(unit) {
         <div>Priority (1-5)</div>
         <input id="edit-unit-priority" type="number" min="1" max="5" value="${currentPrio}" />
       </label>
+      <label>
+        <div>Seats${defaultSeats ? ` (max ${defaultSeats})` : ''}</div>
+        <input id="edit-unit-seats" type="number" ${defaultSeats ? `min="1" max="${defaultSeats}" value="${seatDisplay}"` : 'disabled placeholder="N/A"'} style="width:100%;" ${defaultSeats ? `placeholder="${defaultSeats}"` : ''} />
+      </label>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
         <button id="edit-unit-cancel" type="button">Cancel</button>
         <button id="edit-unit-save" type="button" style="background:#0b5; color:#fff;">Save</button>
       </div>
     </div>`;
+  const seatInput = content.querySelector('#edit-unit-seats');
+  if (seatInput && defaultSeats) {
+    seatInput.addEventListener('blur', () => {
+      const raw = seatInput.value.trim();
+      if (!raw) {
+        seatInput.value = '';
+        return;
+      }
+      let value = Math.floor(Number(raw));
+      if (!Number.isFinite(value)) {
+        seatInput.value = String(defaultSeats);
+        return;
+      }
+      value = Math.max(1, Math.min(defaultSeats, value));
+      seatInput.value = String(value);
+    });
+  }
   content.querySelector('#edit-unit-cancel').onclick = () => { modal.style.display = 'none'; };
   content.querySelector('#edit-unit-save').onclick = async () => {
     const nameEl = content.querySelector('#edit-unit-name');
@@ -166,6 +201,22 @@ export function openUnitModal(unit) {
     if (!Number.isFinite(priority)) priority = 1;
     priority = Math.min(5, Math.max(1, priority));
     const payload = { name, tag, priority };
+    if (seatInput && !seatInput.disabled) {
+      const raw = seatInput.value.trim();
+      if (!raw) {
+        payload.seats = null;
+      } else {
+        let value = Math.floor(Number(raw));
+        if (Number.isFinite(value)) {
+          if (defaultSeats > 0) {
+            value = Math.max(1, Math.min(defaultSeats, value));
+          } else {
+            value = Math.max(0, value);
+          }
+          payload.seats = value;
+        }
+      }
+    }
     const urlBase = `/api/units/${unit.id}`;
     const attempts = [
       { method:'PATCH', url:urlBase, body:payload },

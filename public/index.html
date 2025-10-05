@@ -358,6 +358,58 @@ const TRAVEL_SPEED = unitTypes.reduce((acc, u) => {
   return acc;
 }, {});
 
+function findUnitDefinitionByType(unitClass, unitType) {
+  const cls = String(unitClass || '').toLowerCase();
+  const type = String(unitType || '').toLowerCase();
+  return (unitTypes || []).find(
+    (u) => String(u.class || '').toLowerCase() === cls && String(u.type || '').toLowerCase() === type
+  ) || null;
+}
+
+function defaultSeatCapacity(unitClass, unitType) {
+  const def = findUnitDefinitionByType(unitClass, unitType);
+  return Number(def?.capacity || 0) || 0;
+}
+if (typeof window !== 'undefined') {
+  window.defaultSeatCapacity = defaultSeatCapacity;
+}
+
+function normalizeUnitRecord(unit) {
+  const base = unit || {};
+  const priority = Number(base.priority) || 1;
+  const defaultCap = Number(base.default_capacity ?? defaultSeatCapacity(base.class, base.type)) || 0;
+  let seatOverride = base.seat_override;
+  if (seatOverride !== null && seatOverride !== undefined) {
+    seatOverride = Number(seatOverride);
+    if (!Number.isFinite(seatOverride)) seatOverride = null;
+  } else {
+    seatOverride = null;
+  }
+  let seatCapacity;
+  if (base.seat_capacity !== undefined && base.seat_capacity !== null) {
+    seatCapacity = Number(base.seat_capacity);
+  }
+  if (!Number.isFinite(seatCapacity)) {
+    seatCapacity = seatOverride != null ? seatOverride : defaultCap;
+  }
+  if (defaultCap > 0) {
+    seatCapacity = Math.max(1, Math.min(defaultCap, seatCapacity || defaultCap));
+    if (seatOverride != null) {
+      seatOverride = Math.max(1, Math.min(defaultCap, seatOverride));
+      if (seatOverride === defaultCap) seatOverride = null;
+    }
+  } else {
+    seatCapacity = Math.max(0, seatCapacity || 0);
+  }
+  return {
+    ...base,
+    priority,
+    seat_override: seatOverride,
+    seat_capacity: seatCapacity,
+    default_capacity: defaultCap,
+  };
+}
+
 function haversineKm(aLat, aLon, bLat, bLon) {
   const R = 6371;
   const dLat = (bLat - aLat) * Math.PI/180;
@@ -731,7 +783,7 @@ function cacheStations(stations){
   _stationById = new Map(stations.map(s => [s.id, { ...s, department: s.department ?? null }]));
 }
 function cacheUnits(units){
-  _unitById = new Map(units.map(u => [u.id, { ...u, priority: Number(u.priority) || 1 }]));
+  _unitById = new Map(units.map(u => [u.id, normalizeUnitRecord(u)]));
   if (document.getElementById('tab-units')?.classList.contains('active')) {
     renderUnitList();
   }
@@ -1402,7 +1454,7 @@ async function refreshAssignedUnitsUI(missionId) {
       const travels = travelRes ? await travelRes.json() : [];
       travelMap = new Map(travels.map(t => [t.unit_id, t]));
     } catch {}
-    (assigned||[]).forEach(u => _unitById.set(u.id, { ...u, priority: Number(u.priority) || 1 }));
+    (assigned||[]).forEach(u => _unitById.set(u.id, normalizeUnitRecord(u)));
     if (!Array.isArray(assigned) || !assigned.length) {
       div.innerHTML = '<em>No units assigned yet.</em>';
       return [];
@@ -1810,7 +1862,7 @@ async function showStationDetails(station) {
     return;
   }
   const res = await fetchNoCache(`/api/units?station_id=${station.id}`);
-  const units = (await res.json()).map(u=>({ ...u, priority: Number(u.priority) || 1 }));
+  const units = (await res.json()).map(normalizeUnitRecord);
   units.forEach(u => _unitById.set(u.id, u));
   const unitOptions = unitTypes.filter(u=>u.class===station.type).map(u=>`<option value="${u.type}">${u.type}</option>`).join('');
   const usedBays = units.length;
@@ -1843,6 +1895,7 @@ async function showStationDetails(station) {
     <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
     <input id="unit-tag" placeholder="Tag" />
     <input id="unit-priority" type="number" min="1" max="5" value="1" style="width:60px;" />
+    <input id="unit-seats" type="number" min="1" style="width:80px;" placeholder="Seats" />
     <button id="create-unit">Create Unit</button>
     <h3>Add Personnel</h3>
     <input id="personnel-name" placeholder="Name (e.g., John Doe)" />
@@ -2074,8 +2127,23 @@ async function showStationDetails(station) {
     const name = document.getElementById('unit-name').value;
     const tag = document.getElementById('unit-tag').value;
     const priority = Number(document.getElementById('unit-priority').value) || 1;
+    const seatField = document.getElementById('unit-seats');
+    const seatRaw = seatField ? seatField.value.trim() : '';
+    const defaultSeats = defaultSeatCapacity(station.type, type);
+    let seats = null;
+    if (seatRaw) {
+      let value = Math.floor(Number(seatRaw));
+      if (Number.isFinite(value)) {
+        if (defaultSeats > 0) {
+          value = Math.max(1, Math.min(defaultSeats, value));
+          if (value !== defaultSeats) seats = value;
+        } else {
+          seats = Math.max(0, value);
+        }
+      }
+    }
     if (!type || !name) return notifyError("Missing name or type");
-    await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:station.type,type,name,tag,priority})});
+    await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:station.type,type,name,tag,priority,seats})});
     showStationDetails(station);
   });
   document.getElementById('create-personnel').addEventListener('click', async ()=>{
@@ -2148,6 +2216,18 @@ function openStationBuilderModal(initial = {}) {
       tag: typeof u?.tag === 'string' ? u.tag : '',
       priority: Math.min(5, Math.max(1, Number(u?.priority ?? 1) || 1)),
       equipment: Array.isArray(u?.equipment) ? u.equipment.slice() : [],
+      seats: (() => {
+        const def = (unitTypes || []).find((d) => String(d.class || '').toLowerCase() === state.type && d.type === u?.type);
+        const defaultCap = Number(def?.capacity || 0) || 0;
+        const raw = u?.seat_override ?? u?.seats ?? u?.seat_capacity;
+        if (!Number.isFinite(Number(raw))) return null;
+        let value = Math.floor(Number(raw));
+        if (defaultCap > 0) {
+          value = Math.max(1, Math.min(defaultCap, value));
+          return value === defaultCap ? null : value;
+        }
+        return Math.max(0, value);
+      })(),
     }));
     state.personnel = state.personnel.map(p => ({
       name: typeof p?.name === 'string' ? p.name : '',
@@ -2609,6 +2689,7 @@ function openStationBuilderModal(initial = {}) {
             if (slots && unit.equipment.length > slots) {
               unit.equipment = unit.equipment.slice(0, slots);
             }
+            unit.seats = null;
             hideError();
             renderUnits();
             updateCostSummary();
@@ -2637,6 +2718,60 @@ function openStationBuilderModal(initial = {}) {
           return input;
         })());
 
+        const seatField = makeInputGroup('Seats', (() => {
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.className = 'station-builder-input';
+          const seatDef = defs.find((d) => d.type === unit.type);
+          const defCap = Number(seatDef?.capacity || 0) || 0;
+          if (defCap > 0) {
+            input.min = '1';
+            input.max = String(defCap);
+            const current = unit.seats != null ? unit.seats : defCap;
+            input.value = String(current);
+            input.placeholder = String(defCap);
+            input.title = `Enter between 1 and ${defCap}. Leave blank to use default (${defCap}).`;
+            input.addEventListener('input', () => {
+              const raw = input.value.trim();
+              if (!raw) {
+                unit.seats = null;
+                return;
+              }
+              let value = Math.floor(Number(raw));
+              if (!Number.isFinite(value)) {
+                unit.seats = null;
+                input.value = '';
+                return;
+              }
+              value = Math.max(1, Math.min(defCap, value));
+              unit.seats = value === defCap ? null : value;
+              input.value = String(value);
+            });
+            input.addEventListener('blur', () => {
+              const raw = input.value.trim();
+              if (!raw) {
+                unit.seats = null;
+                input.value = '';
+                return;
+              }
+              let value = Math.floor(Number(raw));
+              if (!Number.isFinite(value)) {
+                unit.seats = null;
+                input.value = '';
+                return;
+              }
+              value = Math.max(1, Math.min(defCap, value));
+              unit.seats = value === defCap ? null : value;
+              input.value = String(value);
+            });
+          } else {
+            input.value = '';
+            input.placeholder = 'N/A';
+            input.disabled = true;
+          }
+          return input;
+        })());
+
         const equipField = document.createElement('div');
         equipField.className = 'station-builder-checkboxes';
         const equipLabel = document.createElement('div');
@@ -2644,7 +2779,7 @@ function openStationBuilderModal(initial = {}) {
         const slots = Number(def?.equipmentSlots || 0);
         equipLabel.textContent = slots ? `Equipment (${slots} slots)` : 'Equipment';
         equipLabel.style.fontWeight = 'bold';
-        wrapper.append(nameField, typeField, tagField, priorityField, equipLabel);
+        wrapper.append(nameField, typeField, tagField, priorityField, seatField, equipLabel);
         const opts = equipmentOptions();
         unit.equipment = unit.equipment.filter((name) => opts.some((opt) => opt.name === name));
         opts.forEach((opt) => {
@@ -2906,6 +3041,22 @@ function openStationBuilderModal(initial = {}) {
           if (!slots && unit.equipment.length) {
             throw new Error(`Unit ${idx + 1} cannot carry equipment.`);
           }
+          let seats = null;
+          const defaultCap = Number(def?.capacity || 0) || 0;
+          if (defaultCap > 0) {
+            if (unit.seats != null) {
+              let value = Math.floor(Number(unit.seats));
+              if (Number.isFinite(value)) {
+                value = Math.max(1, Math.min(defaultCap, value));
+                seats = value === defaultCap ? null : value;
+              }
+            }
+          } else if (unit.seats != null) {
+            let value = Math.floor(Number(unit.seats));
+            if (Number.isFinite(value)) {
+              seats = Math.max(0, value);
+            }
+          }
           return {
             name,
             type: def.type,
@@ -2913,6 +3064,7 @@ function openStationBuilderModal(initial = {}) {
             tag: unit.tag ? unit.tag.trim() : '',
             priority: Math.min(5, Math.max(1, Number(unit.priority) || 1)),
             equipment: unit.equipment.slice(),
+            seats,
           };
         });
 
@@ -2974,7 +3126,7 @@ function openStationBuilderModal(initial = {}) {
 
     addUnitBtn.addEventListener('click', () => {
       const defs = allowedUnitTypes();
-      state.units.push({ name: '', type: defs[0]?.type || '', tag: '', priority: 1, equipment: [] });
+      state.units.push({ name: '', type: defs[0]?.type || '', tag: '', priority: 1, equipment: [], seats: null });
       renderUnits();
       renderPersonnel();
       updateCostSummary();
@@ -3297,6 +3449,46 @@ async function openAssignModal(unitId, stationId) {
     <br><br>
     <button id="assignPersonnelConfirm">Assign</button>
   `;
+  const unitTypeSelect = detail.querySelector('#unit-type');
+  const unitSeatInput = detail.querySelector('#unit-seats');
+  const updateSeatField = (forceDefault = false) => {
+    if (!unitSeatInput || !unitTypeSelect) return;
+    const def = findUnitDefinitionByType(station.type, unitTypeSelect.value);
+    const defaultSeats = Number(def?.capacity || 0) || 0;
+    if (!defaultSeats) {
+      unitSeatInput.value = '';
+      unitSeatInput.placeholder = 'N/A';
+      unitSeatInput.disabled = true;
+      unitSeatInput.title = 'This unit type cannot carry personnel.';
+      return;
+    }
+    unitSeatInput.disabled = false;
+    unitSeatInput.min = '1';
+    unitSeatInput.max = String(defaultSeats);
+    unitSeatInput.placeholder = String(defaultSeats);
+    unitSeatInput.title = `Enter between 1 and ${defaultSeats}. Leave blank to use default (${defaultSeats}).`;
+    const raw = unitSeatInput.value.trim();
+    if (!raw) {
+      if (forceDefault) {
+        unitSeatInput.value = String(defaultSeats);
+      } else {
+        unitSeatInput.value = '';
+      }
+      return;
+    }
+    let value = Math.floor(Number(raw));
+    if (!Number.isFinite(value)) {
+      unitSeatInput.value = String(defaultSeats);
+      return;
+    }
+    value = Math.max(1, Math.min(defaultSeats, value));
+    unitSeatInput.value = String(value);
+  };
+  if (unitSeatInput && unitTypeSelect) {
+    updateSeatField(true);
+    unitTypeSelect.addEventListener('change', () => updateSeatField(true));
+    unitSeatInput.addEventListener('blur', () => updateSeatField(false));
+  }
 
   document.getElementById("assignPersonnelConfirm").onclick = async () => {
     const select = document.getElementById("assign-personnel-select");
@@ -3381,6 +3573,11 @@ async function showUnitDetails(unitId) {
     ? `<select id="unit-equip-select">${availableEq.map(n=>`<option value="${n}">${n}</option>`).join('')}</select>
        <button id="assign-equip-btn">Assign</button>`
     : '<p><em>No equipment in station storage.</em></p>';
+  const defaultSeats = Number(unit?.default_capacity ?? defaultSeatCapacity(unit?.class, unit?.type)) || 0;
+  const activeSeats = Number(unit?.seat_capacity ?? (defaultSeats || 0)) || 0;
+  const seatDetails = defaultSeats
+    ? `${Math.max(1, Math.min(defaultSeats, activeSeats || defaultSeats))}${activeSeats !== defaultSeats ? ` (Max ${defaultSeats})` : ''}`
+    : 'N/A';
 
   const personnelHtml = assigned.length
     ? `<ul>${assigned.map(p => `
@@ -3402,6 +3599,7 @@ async function showUnitDetails(unitId) {
   content.innerHTML = `
     <p><strong>Name:</strong> ${unit?.name || 'Unknown'} <button id="edit-unit-btn">Edit</button></p>
     <p><strong>Priority:</strong> ${unit?.priority ?? 1}</p>
+    <p><strong>Seats:</strong> ${seatDetails}</p>
     <p><strong>Station:</strong> ${station?.name || 'Unknown'}</p>
     <p><strong>Vehicle Class:</strong> ${unit?.class || 'Unknown'} (${unit?.type || ''})</p>
     ${missionHtml}
