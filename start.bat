@@ -1,0 +1,1 @@
+powershell -command "& cd a:\911ChiefResponder; npm start"
