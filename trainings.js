@@ -27,6 +27,19 @@ const trainingsByClass = {
     { name: "team lead", cost: 900 },
     { name: "incident command", cost: 1000 }
   ],
+  fire_rescue: [
+    { name: "firefighter", cost: 500 },
+    { name: "paramedic", cost: 800 },
+    { name: "hazmat", cost: 900 },
+    { name: "chief officer", cost: 1200 },
+    { name: "drone pilot", cost: 600 },
+    { name: "water rescue", cost: 700 },
+    { name: "high angle rescue", cost: 900 },
+    { name: "incident command", cost: 1000 },
+    { name: "EMR", cost: 400 },
+    { name: "critical care", cost: 1200 },
+    { name: "team lead", cost: 900 }
+  ],
   sar: [
     { name: "searcher", cost: 500 },
     { name: "team leader", cost: 900 },
@@ -43,6 +56,7 @@ const trainingDefaults = {
   fire: ["firefighter"],
   police: ["police officer"],
   ambulance: ["EMR"],
+  fire_rescue: ["firefighter", "EMR"],
   sar: ["searcher"],
 };
 
@@ -59,6 +73,12 @@ const trainingEquivalencies = {
     "critical care": ["paramedic", "EMR"],
     "paramedic": ["EMR"],
     "incident command": ["team lead"],
+  },
+  fire_rescue: {
+    "chief officer": ["incident command", "firefighter"],
+    "incident command": ["firefighter", "team lead"],
+    "critical care": ["paramedic", "EMR"],
+    "paramedic": ["EMR"],
   },
   sar: {
     "search manager": ["team leader", "searcher"],

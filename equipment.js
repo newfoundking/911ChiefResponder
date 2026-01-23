@@ -14,6 +14,14 @@ const equipment = {
     { name: "Defibrillator", cost: 1200 },
     { name: "Ventilator", cost: 3500 }
   ],
+  fire_rescue: [
+    { name: "Ladder", cost: 3000 },
+    { name: "Rescue Gear", cost: 2000 },
+    { name: "Foam System", cost: 2500 },
+    { name: "Med stuff", cost: 1000 },
+    { name: "Defibrillator", cost: 1200 },
+    { name: "Ventilator", cost: 3500 }
+  ],
   sar: [
     { name: "Drone", cost: 5000 }
   ]

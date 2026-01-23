@@ -89,6 +89,9 @@ const HOLDING_CELL_EXP_MULTIPLIER = 1.5;
 const HOSPITAL_BED_BASE_COST = 4000;
 const HOSPITAL_BED_EXP_MULTIPLIER = 1.75;
 const STATION_BUILD_COST = 50000;
+const STATION_CLASS_MULTIPLIERS = {
+  fire_rescue: 1.5,
+};
 const BASE_PERSON_COST = 100;
 
 function priceBays(count, isExpansion) {
@@ -201,7 +204,7 @@ async function createStation(req, res) {
       return res.status(400).json({ error: 'name, type, lat and lon are required' });
     }
 
-    const allowedTypes = new Set(['fire', 'police', 'ambulance', 'sar', 'hospital', 'jail']);
+    const allowedTypes = new Set(['fire', 'police', 'ambulance', 'sar', 'hospital', 'jail', 'fire_rescue']);
     if (!allowedTypes.has(type)) {
       return res.status(400).json({ error: 'Unsupported station type' });
     }
@@ -348,11 +351,13 @@ async function createStation(req, res) {
       0
     );
 
-    const stationCost =
+    const baseStationCost =
       STATION_BUILD_COST +
       priceBays(bays, false) +
       (equipmentSlots * EQUIPMENT_SLOT_COST) +
       (holdingCells > 0 ? priceHoldingCells(holdingCells, false) : 0);
+    const multiplier = Number(STATION_CLASS_MULTIPLIERS[type] || 1);
+    const stationCost = Math.round(baseStationCost * multiplier);
 
     const totalCost = stationCost + unitCostTotal + unitEquipmentCostTotal + stationEquipmentCostTotal + personnelCostTotal;
 

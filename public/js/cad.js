@@ -126,6 +126,7 @@ function makeIcon(url, size) {
 
 const stationIcons = {
   fire: makeIcon('/fire.png', 24),
+  fire_rescue: makeIcon('/fire.png', 24),
   police: makeIcon('/police.png', 24),
   ambulance: makeIcon('/star.png', 24),
   sar: makeIcon('/sar.png', 24),
