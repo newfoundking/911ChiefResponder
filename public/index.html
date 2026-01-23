@@ -281,6 +281,7 @@
         <label for="stationType">Type:</label>
         <select id="stationType" style="width: 100%;">
                 <option value="fire">Fire</option>
+                <option value="fire_rescue">Fire Rescue</option>
                 <option value="police">Police</option>
                 <option value="ambulance">Ambulance</option>
                 <option value="sar">SAR</option>
@@ -372,6 +373,21 @@ function defaultSeatCapacity(unitClass, unitType) {
 }
 if (typeof window !== 'undefined') {
   window.defaultSeatCapacity = defaultSeatCapacity;
+}
+
+const FIRE_RESCUE_CLASSES = ['fire', 'ambulance'];
+function stationUnitClasses(stationType) {
+  return stationType === 'fire_rescue' ? FIRE_RESCUE_CLASSES.slice() : [stationType];
+}
+function stationUnitTypes(stationType, unitClass = null) {
+  const classes = unitClass ? [unitClass] : stationUnitClasses(stationType);
+  return (unitTypes || []).filter((u) => classes.includes(String(u.class || '').toLowerCase()));
+}
+function formatStationTypeLabel(value) {
+  return String(value || '')
+    .split('_')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function normalizeUnitRecord(unit) {
@@ -543,7 +559,7 @@ const missionIcons = {
   partial: makeIcon("/warning2.png", 30),
   complete: makeIcon("/warning3.png", 30)
 };
-const stationIcons = { fire: "/fire.png", police: "/police.png", ambulance: "/star.png", sar: "/sar.png", hospital: "/images/hospital.png", jail: "/images/prison.png" };
+const stationIcons = { fire: "/fire.png", fire_rescue: "/fire.png", police: "/police.png", ambulance: "/star.png", sar: "/sar.png", hospital: "/images/hospital.png", jail: "/images/prison.png" };
 
 let missionMarkers = [];
 let stationMarkers = [];
@@ -1864,7 +1880,12 @@ async function showStationDetails(station) {
   const res = await fetchNoCache(`/api/units?station_id=${station.id}`);
   const units = (await res.json()).map(normalizeUnitRecord);
   units.forEach(u => _unitById.set(u.id, u));
-  const unitOptions = unitTypes.filter(u=>u.class===station.type).map(u=>`<option value="${u.type}">${u.type}</option>`).join('');
+  const unitClassOptions = stationUnitClasses(station.type);
+  const allowMultipleUnitClasses = unitClassOptions.length > 1;
+  const unitOptions = stationUnitTypes(
+    station.type,
+    allowMultipleUnitClasses ? unitClassOptions[0] : station.type
+  ).map(u=>`<option value="${u.type}">${u.type}</option>`).join('');
   const usedBays = units.length;
   const freeBays = (station.bay_count || 0) - usedBays;
   const equipOptions = (equipment[station.type] || []).map(e=>{
@@ -1888,9 +1909,14 @@ async function showStationDetails(station) {
     </div>
     <h2>${station.name}</h2>
         <button id="change-station-icon">Change Icon</button>
-    <p>Type: ${station.type}</p>
+    <p>Type: ${formatStationTypeLabel(station.type)}</p>
     <p>Department: <span id="station-dept">${station.department || ''}</span> <button id="change-station-dept">Change Department</button> <button id="manage-station-ranks">Manage Ranks</button></p>
     <h3>Create Unit</h3>
+    ${
+      allowMultipleUnitClasses
+        ? `<select id="unit-class">${unitClassOptions.map(c=>`<option value="${c}">${formatStationTypeLabel(c)}</option>`).join('')}</select>`
+        : ''
+    }
     <select id="unit-type">${unitOptions}</select>
     <input id="unit-name" placeholder="Unit name (e.g., Ladder 1)" />
     <input id="unit-tag" placeholder="Tag" />
@@ -1951,6 +1977,63 @@ async function showStationDetails(station) {
     }
   } catch {}
   const rankSelectEl = document.getElementById('personnel-rank');
+  const unitClassSelect = document.getElementById('unit-class');
+  const unitTypeSelect = document.getElementById('unit-type');
+  const unitSeatInput = document.getElementById('unit-seats');
+
+  function refreshUnitTypeOptions(classValue) {
+    if (!unitTypeSelect) return;
+    const types = stationUnitTypes(station.type, classValue || station.type);
+    unitTypeSelect.innerHTML = types.map(u => `<option value="${u.type}">${u.type}</option>`).join('');
+  }
+
+  function updateSeatFieldForUnit(forceDefault = false) {
+    if (!unitSeatInput || !unitTypeSelect) return;
+    const selectedClass = unitClassSelect ? unitClassSelect.value : station.type;
+    const def = findUnitDefinitionByType(selectedClass, unitTypeSelect.value);
+    const defaultSeats = Number(def?.capacity || 0) || 0;
+    if (!defaultSeats) {
+      unitSeatInput.value = '';
+      unitSeatInput.placeholder = 'N/A';
+      unitSeatInput.disabled = true;
+      unitSeatInput.title = 'This unit type cannot carry personnel.';
+      return;
+    }
+    unitSeatInput.disabled = false;
+    unitSeatInput.min = '1';
+    unitSeatInput.max = String(defaultSeats);
+    unitSeatInput.placeholder = String(defaultSeats);
+    unitSeatInput.title = `Enter between 1 and ${defaultSeats}. Leave blank to use default (${defaultSeats}).`;
+    const raw = unitSeatInput.value.trim();
+    if (!raw) {
+      if (forceDefault) {
+        unitSeatInput.value = String(defaultSeats);
+      } else {
+        unitSeatInput.value = '';
+      }
+      return;
+    }
+    let value = Math.floor(Number(raw));
+    if (!Number.isFinite(value)) {
+      unitSeatInput.value = String(defaultSeats);
+      return;
+    }
+    value = Math.max(1, Math.min(defaultSeats, value));
+    unitSeatInput.value = String(value);
+  }
+
+  if (unitClassSelect) {
+    refreshUnitTypeOptions(unitClassSelect.value);
+    unitClassSelect.addEventListener('change', () => {
+      refreshUnitTypeOptions(unitClassSelect.value);
+      updateSeatFieldForUnit(true);
+    });
+  }
+  if (unitTypeSelect && unitSeatInput) {
+    updateSeatFieldForUnit(true);
+    unitTypeSelect.addEventListener('change', () => updateSeatFieldForUnit(true));
+    unitSeatInput.addEventListener('blur', () => updateSeatFieldForUnit(false));
+  }
 
   function populateRankSelect(selectEl, ranks, currentValue = '') {
     if (!selectEl) return;
@@ -2124,12 +2207,13 @@ async function showStationDetails(station) {
         });
   document.getElementById('create-unit').addEventListener('click', async ()=>{
     const type = document.getElementById('unit-type').value;
+    const unitClass = document.getElementById('unit-class')?.value || station.type;
     const name = document.getElementById('unit-name').value;
     const tag = document.getElementById('unit-tag').value;
     const priority = Number(document.getElementById('unit-priority').value) || 1;
     const seatField = document.getElementById('unit-seats');
     const seatRaw = seatField ? seatField.value.trim() : '';
-    const defaultSeats = defaultSeatCapacity(station.type, type);
+    const defaultSeats = defaultSeatCapacity(unitClass, type);
     let seats = null;
     if (seatRaw) {
       let value = Math.floor(Number(seatRaw));
@@ -2143,7 +2227,7 @@ async function showStationDetails(station) {
       }
     }
     if (!type || !name) return notifyError("Missing name or type");
-    await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:station.type,type,name,tag,priority,seats})});
+    await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id:station.id,class:unitClass,type,name,tag,priority,seats})});
     showStationDetails(station);
   });
   document.getElementById('create-personnel').addEventListener('click', async ()=>{
@@ -2178,7 +2262,7 @@ async function showStationDetails(station) {
 }
 
 function openStationBuilderModal(initial = {}) {
-  const allowedTypes = ['fire', 'police', 'ambulance', 'sar', 'hospital', 'jail'];
+  const allowedTypes = ['fire', 'police', 'ambulance', 'sar', 'hospital', 'jail', 'fire_rescue'];
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -2210,25 +2294,32 @@ function openStationBuilderModal(initial = {}) {
       units: Array.isArray(initial.units) ? initial.units.slice() : [],
       personnel: Array.isArray(initial.personnel) ? initial.personnel.slice() : [],
     };
-    state.units = state.units.map(u => ({
-      name: typeof u?.name === 'string' ? u.name : '',
-      type: typeof u?.type === 'string' ? u.type : '',
-      tag: typeof u?.tag === 'string' ? u.tag : '',
-      priority: Math.min(5, Math.max(1, Number(u?.priority ?? 1) || 1)),
-      equipment: Array.isArray(u?.equipment) ? u.equipment.slice() : [],
-      seats: (() => {
-        const def = (unitTypes || []).find((d) => String(d.class || '').toLowerCase() === state.type && d.type === u?.type);
-        const defaultCap = Number(def?.capacity || 0) || 0;
-        const raw = u?.seat_override ?? u?.seats ?? u?.seat_capacity;
-        if (!Number.isFinite(Number(raw))) return null;
-        let value = Math.floor(Number(raw));
-        if (defaultCap > 0) {
-          value = Math.max(1, Math.min(defaultCap, value));
-          return value === defaultCap ? null : value;
-        }
-        return Math.max(0, value);
-      })(),
-    }));
+    state.units = state.units.map(u => {
+      const classOptions = stationUnitClasses(state.type);
+      const unitClass = classOptions.includes(String(u?.class || '').toLowerCase())
+        ? String(u.class).toLowerCase()
+        : classOptions[0];
+      return {
+        name: typeof u?.name === 'string' ? u.name : '',
+        type: typeof u?.type === 'string' ? u.type : '',
+        class: unitClass,
+        tag: typeof u?.tag === 'string' ? u.tag : '',
+        priority: Math.min(5, Math.max(1, Number(u?.priority ?? 1) || 1)),
+        equipment: Array.isArray(u?.equipment) ? u.equipment.slice() : [],
+        seats: (() => {
+          const def = (unitTypes || []).find((d) => String(d.class || '').toLowerCase() === unitClass && d.type === u?.type);
+          const defaultCap = Number(def?.capacity || 0) || 0;
+          const raw = u?.seat_override ?? u?.seats ?? u?.seat_capacity;
+          if (!Number.isFinite(Number(raw))) return null;
+          let value = Math.floor(Number(raw));
+          if (defaultCap > 0) {
+            value = Math.max(1, Math.min(defaultCap, value));
+            return value === defaultCap ? null : value;
+          }
+          return Math.max(0, value);
+        })(),
+      };
+    });
     state.personnel = state.personnel.map(p => ({
       name: typeof p?.name === 'string' ? p.name : '',
       rank: cleanRankValue(p?.rank) || '',
@@ -2280,7 +2371,15 @@ function openStationBuilderModal(initial = {}) {
     unitsTitle.textContent = 'Units';
     const addUnitBtn = document.createElement('button');
     addUnitBtn.textContent = 'Add Unit';
-    unitsHeader.append(unitsTitle, addUnitBtn);
+    const addUnitCountInput = document.createElement('input');
+    addUnitCountInput.type = 'number';
+    addUnitCountInput.min = '1';
+    addUnitCountInput.value = '1';
+    addUnitCountInput.className = 'station-builder-input';
+    addUnitCountInput.style.width = '70px';
+    const addUnitBatchBtn = document.createElement('button');
+    addUnitBatchBtn.textContent = 'Add Units';
+    unitsHeader.append(unitsTitle, addUnitBtn, addUnitCountInput, addUnitBatchBtn);
     unitsSection.appendChild(unitsHeader);
     const unitsContainer = document.createElement('div');
     unitsContainer.className = 'station-builder-list';
@@ -2294,7 +2393,15 @@ function openStationBuilderModal(initial = {}) {
     personnelTitle.textContent = 'Personnel';
     const addPersonBtn = document.createElement('button');
     addPersonBtn.textContent = 'Add Personnel';
-    personnelHeader.append(personnelTitle, addPersonBtn);
+    const addPersonCountInput = document.createElement('input');
+    addPersonCountInput.type = 'number';
+    addPersonCountInput.min = '1';
+    addPersonCountInput.value = '1';
+    addPersonCountInput.className = 'station-builder-input';
+    addPersonCountInput.style.width = '70px';
+    const addPersonBatchBtn = document.createElement('button');
+    addPersonBatchBtn.textContent = 'Add Multiple';
+    personnelHeader.append(personnelTitle, addPersonBtn, addPersonCountInput, addPersonBatchBtn);
     personnelSection.appendChild(personnelHeader);
     const personnelContainer = document.createElement('div');
     personnelContainer.className = 'station-builder-list';
@@ -2371,7 +2478,7 @@ function openStationBuilderModal(initial = {}) {
     allowedTypes.forEach((t) => {
       const opt = document.createElement('option');
       opt.value = t;
-      opt.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+      opt.textContent = formatStationTypeLabel(t);
       typeSelect.appendChild(opt);
     });
     typeSelect.value = state.type;
@@ -2515,8 +2622,9 @@ function openStationBuilderModal(initial = {}) {
         .filter((name) => name && validNames.has(name.toLowerCase()));
     }
 
-    function allowedUnitTypes() {
-      return (unitTypes || []).filter((u) => String(u.class || '').toLowerCase() === state.type);
+    function allowedUnitTypes(unitClass = null) {
+      const classes = unitClass ? [unitClass] : stationUnitClasses(state.type);
+      return (unitTypes || []).filter((u) => classes.includes(String(u.class || '').toLowerCase()));
     }
 
     function findEquipmentCost(name) {
@@ -2560,11 +2668,16 @@ function openStationBuilderModal(initial = {}) {
       const eqNames = new Set(equipmentOptions().map((e) => e.name));
       state.storageEquipment = state.storageEquipment.filter((name) => eqNames.has(name));
 
-      const unitDefs = allowedUnitTypes();
-      if (!unitDefs.length) {
+      const classOptions = stationUnitClasses(state.type);
+      const baseDefs = allowedUnitTypes();
+      if (!baseDefs.length) {
         state.units = [];
       } else {
         state.units.forEach((unit) => {
+          if (!classOptions.includes(unit.class)) {
+            unit.class = classOptions[0] || state.type;
+          }
+          const unitDefs = allowedUnitTypes(unit.class);
           if (!unitDefs.find((def) => def.type === unit.type)) {
             unit.type = unitDefs[0]?.type || '';
           }
@@ -2630,362 +2743,436 @@ function openStationBuilderModal(initial = {}) {
       });
     }
 
-    function renderUnits() {
-      unitsContainer.innerHTML = '';
-      if (!state.units.length) {
-        const empty = document.createElement('div');
-        empty.className = 'station-builder-empty';
-        empty.textContent = 'No units selected.';
-        unitsContainer.appendChild(empty);
-        baysInput.min = '0';
-        return;
-      }
-      const defs = allowedUnitTypes();
-      baysInput.min = String(state.units.length);
-      state.units.forEach((unit, idx) => {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'station-builder-unit';
-        const header = document.createElement('div');
-        header.className = 'station-builder-header';
-        header.textContent = `Unit ${idx + 1}`;
-        const removeBtn = document.createElement('button');
-        removeBtn.textContent = 'Remove';
-        removeBtn.addEventListener('click', () => {
-          state.units.splice(idx, 1);
-          sanitizeAssignments();
-          renderUnits();
-          renderPersonnel();
-          updateCostSummary();
-        });
-        header.appendChild(removeBtn);
-        wrapper.appendChild(header);
-
-        const nameField = makeInputGroup('Name', (() => {
-          const input = document.createElement('input');
-          input.className = 'station-builder-input';
-          input.value = unit.name;
-          input.addEventListener('input', () => { unit.name = input.value; hideError(); });
-          return input;
-        })());
-
-        const typeField = makeInputGroup('Type', (() => {
-          const select = document.createElement('select');
-          select.className = 'station-builder-select';
-          defs.forEach((def) => {
-            const opt = document.createElement('option');
-            opt.value = def.type;
-            opt.textContent = def.type;
-            select.appendChild(opt);
-          });
-          if (!defs.find((def) => def.type === unit.type)) {
-            unit.type = defs[0]?.type || '';
+    function preserveFocusAndScroll(container, renderFn) {
+      const active = document.activeElement;
+      const focusKey = active?.dataset?.focusKey;
+      const selectionStart = active?.selectionStart;
+      const selectionEnd = active?.selectionEnd;
+      const scrollTop = container.scrollTop;
+      renderFn();
+      container.scrollTop = scrollTop;
+      if (focusKey) {
+        const next = container.querySelector(`[data-focus-key="${focusKey}"]`);
+        if (next) {
+          next.focus();
+          if (typeof selectionStart === 'number' && typeof next.setSelectionRange === 'function') {
+            next.setSelectionRange(selectionStart, selectionEnd ?? selectionStart);
           }
-          select.value = unit.type;
-          select.addEventListener('change', () => {
-            unit.type = select.value;
-            const def = defs.find((d) => d.type === unit.type);
-            const slots = Number(def?.equipmentSlots || 0);
-            if (!slots) unit.equipment = [];
-            if (slots && unit.equipment.length > slots) {
-              unit.equipment = unit.equipment.slice(0, slots);
-            }
-            unit.seats = null;
-            hideError();
-            renderUnits();
-            updateCostSummary();
-          });
-          return select;
-        })());
-
-        const tagField = makeInputGroup('Tag', (() => {
-          const input = document.createElement('input');
-          input.className = 'station-builder-input';
-          input.value = unit.tag;
-          input.addEventListener('input', () => { unit.tag = input.value; });
-          return input;
-        })());
-
-        const priorityField = makeInputGroup('Priority', (() => {
-          const input = document.createElement('input');
-          input.type = 'number';
-          input.min = '1';
-          input.max = '5';
-          input.value = unit.priority;
-          input.className = 'station-builder-input';
-          input.addEventListener('input', () => {
-            unit.priority = Math.min(5, Math.max(1, Number(input.value) || 1));
-          });
-          return input;
-        })());
-
-        const seatField = makeInputGroup('Seats', (() => {
-          const input = document.createElement('input');
-          input.type = 'number';
-          input.className = 'station-builder-input';
-          const seatDef = defs.find((d) => d.type === unit.type);
-          const defCap = Number(seatDef?.capacity || 0) || 0;
-          if (defCap > 0) {
-            input.min = '1';
-            input.max = String(defCap);
-            const current = unit.seats != null ? unit.seats : defCap;
-            input.value = String(current);
-            input.placeholder = String(defCap);
-            input.title = `Enter between 1 and ${defCap}. Leave blank to use default (${defCap}).`;
-            input.addEventListener('input', () => {
-              const raw = input.value.trim();
-              if (!raw) {
-                unit.seats = null;
-                return;
-              }
-              let value = Math.floor(Number(raw));
-              if (!Number.isFinite(value)) {
-                unit.seats = null;
-                input.value = '';
-                return;
-              }
-              value = Math.max(1, Math.min(defCap, value));
-              unit.seats = value === defCap ? null : value;
-              input.value = String(value);
-            });
-            input.addEventListener('blur', () => {
-              const raw = input.value.trim();
-              if (!raw) {
-                unit.seats = null;
-                input.value = '';
-                return;
-              }
-              let value = Math.floor(Number(raw));
-              if (!Number.isFinite(value)) {
-                unit.seats = null;
-                input.value = '';
-                return;
-              }
-              value = Math.max(1, Math.min(defCap, value));
-              unit.seats = value === defCap ? null : value;
-              input.value = String(value);
-            });
-          } else {
-            input.value = '';
-            input.placeholder = 'N/A';
-            input.disabled = true;
-          }
-          return input;
-        })());
-
-        const equipField = document.createElement('div');
-        equipField.className = 'station-builder-checkboxes';
-        const equipLabel = document.createElement('div');
-        const def = defs.find((d) => d.type === unit.type);
-        const slots = Number(def?.equipmentSlots || 0);
-        equipLabel.textContent = slots ? `Equipment (${slots} slots)` : 'Equipment';
-        equipLabel.style.fontWeight = 'bold';
-        wrapper.append(nameField, typeField, tagField, priorityField, seatField, equipLabel);
-        const opts = equipmentOptions();
-        unit.equipment = unit.equipment.filter((name) => opts.some((opt) => opt.name === name));
-        opts.forEach((opt) => {
-          const label = document.createElement('label');
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.checked = unit.equipment.includes(opt.name);
-          checkbox.addEventListener('change', () => {
-            if (checkbox.checked) {
-              if (slots && unit.equipment.length >= slots) {
-                checkbox.checked = false;
-                showError(`Unit ${idx + 1} has no free equipment slots.`);
-                return;
-              }
-              if (!unit.equipment.includes(opt.name)) unit.equipment.push(opt.name);
-            } else {
-              unit.equipment = unit.equipment.filter((name) => name !== opt.name);
-            }
-            hideError();
-            updateCostSummary();
-          });
-          const span = document.createElement('span');
-          span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
-          label.append(checkbox, span);
-          equipField.appendChild(label);
-        });
-        if (!opts.length) {
-          const emptyEquip = document.createElement('div');
-          emptyEquip.className = 'station-builder-empty';
-          emptyEquip.textContent = 'No equipment available for this class.';
-          equipField.appendChild(emptyEquip);
         }
-        wrapper.appendChild(equipField);
-        unitsContainer.appendChild(wrapper);
+      }
+    }
+
+    function renderUnits() {
+      preserveFocusAndScroll(unitsContainer, () => {
+        unitsContainer.innerHTML = '';
+        if (!state.units.length) {
+          const empty = document.createElement('div');
+          empty.className = 'station-builder-empty';
+          empty.textContent = 'No units selected.';
+          unitsContainer.appendChild(empty);
+          baysInput.min = '0';
+          return;
+        }
+        const classOptions = stationUnitClasses(state.type);
+        const showClass = classOptions.length > 1;
+        baysInput.min = String(state.units.length);
+        state.units.forEach((unit, idx) => {
+          const unitDefs = allowedUnitTypes(unit.class);
+          const wrapper = document.createElement('div');
+          wrapper.className = 'station-builder-unit';
+          const header = document.createElement('div');
+          header.className = 'station-builder-header';
+          header.textContent = `Unit ${idx + 1}`;
+          const removeBtn = document.createElement('button');
+          removeBtn.textContent = 'Remove';
+          removeBtn.addEventListener('click', () => {
+            state.units.splice(idx, 1);
+            sanitizeAssignments();
+            renderUnits();
+            renderPersonnel();
+            updateCostSummary();
+          });
+          header.appendChild(removeBtn);
+          wrapper.appendChild(header);
+
+          const nameField = makeInputGroup('Name', (() => {
+            const input = document.createElement('input');
+            input.className = 'station-builder-input';
+            input.value = unit.name;
+            input.dataset.focusKey = `unit-${idx}-name`;
+            input.addEventListener('input', () => { unit.name = input.value; hideError(); });
+            return input;
+          })());
+
+          const classField = showClass
+            ? makeInputGroup('Class', (() => {
+                const select = document.createElement('select');
+                select.className = 'station-builder-select';
+                select.dataset.focusKey = `unit-${idx}-class`;
+                classOptions.forEach((cls) => {
+                  const opt = document.createElement('option');
+                  opt.value = cls;
+                  opt.textContent = formatStationTypeLabel(cls);
+                  select.appendChild(opt);
+                });
+                if (!classOptions.includes(unit.class)) {
+                  unit.class = classOptions[0] || state.type;
+                }
+                select.value = unit.class;
+                select.addEventListener('change', () => {
+                  unit.class = select.value;
+                  const defs = allowedUnitTypes(unit.class);
+                  unit.type = defs[0]?.type || '';
+                  unit.equipment = [];
+                  unit.seats = null;
+                  hideError();
+                  renderUnits();
+                  updateCostSummary();
+                });
+                return select;
+              })())
+            : null;
+
+          const typeField = makeInputGroup('Type', (() => {
+            const select = document.createElement('select');
+            select.className = 'station-builder-select';
+            select.dataset.focusKey = `unit-${idx}-type`;
+            unitDefs.forEach((def) => {
+              const opt = document.createElement('option');
+              opt.value = def.type;
+              opt.textContent = def.type;
+              select.appendChild(opt);
+            });
+            if (!unitDefs.find((def) => def.type === unit.type)) {
+              unit.type = unitDefs[0]?.type || '';
+            }
+            select.value = unit.type;
+            select.addEventListener('change', () => {
+              unit.type = select.value;
+              const def = unitDefs.find((d) => d.type === unit.type);
+              const slots = Number(def?.equipmentSlots || 0);
+              if (!slots) unit.equipment = [];
+              if (slots && unit.equipment.length > slots) {
+                unit.equipment = unit.equipment.slice(0, slots);
+              }
+              unit.seats = null;
+              hideError();
+              renderUnits();
+              updateCostSummary();
+            });
+            return select;
+          })());
+
+          const tagField = makeInputGroup('Tag', (() => {
+            const input = document.createElement('input');
+            input.className = 'station-builder-input';
+            input.value = unit.tag;
+            input.dataset.focusKey = `unit-${idx}-tag`;
+            input.addEventListener('input', () => { unit.tag = input.value; });
+            return input;
+          })());
+
+          const priorityField = makeInputGroup('Priority', (() => {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.min = '1';
+            input.max = '5';
+            input.value = unit.priority;
+            input.className = 'station-builder-input';
+            input.dataset.focusKey = `unit-${idx}-priority`;
+            input.addEventListener('input', () => {
+              unit.priority = Math.min(5, Math.max(1, Number(input.value) || 1));
+            });
+            return input;
+          })());
+
+          const seatField = makeInputGroup('Seats', (() => {
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.className = 'station-builder-input';
+            input.dataset.focusKey = `unit-${idx}-seats`;
+            const seatDef = unitDefs.find((d) => d.type === unit.type);
+            const defCap = Number(seatDef?.capacity || 0) || 0;
+            if (defCap > 0) {
+              input.min = '1';
+              input.max = String(defCap);
+              const current = unit.seats != null ? unit.seats : defCap;
+              input.value = String(current);
+              input.placeholder = String(defCap);
+              input.title = `Enter between 1 and ${defCap}. Leave blank to use default (${defCap}).`;
+              input.addEventListener('input', () => {
+                const raw = input.value.trim();
+                if (!raw) {
+                  unit.seats = null;
+                  return;
+                }
+                let value = Math.floor(Number(raw));
+                if (!Number.isFinite(value)) {
+                  unit.seats = null;
+                  input.value = '';
+                  return;
+                }
+                value = Math.max(1, Math.min(defCap, value));
+                unit.seats = value === defCap ? null : value;
+                input.value = String(value);
+              });
+              input.addEventListener('blur', () => {
+                const raw = input.value.trim();
+                if (!raw) {
+                  unit.seats = null;
+                  input.value = '';
+                  return;
+                }
+                let value = Math.floor(Number(raw));
+                if (!Number.isFinite(value)) {
+                  unit.seats = null;
+                  input.value = '';
+                  return;
+                }
+                value = Math.max(1, Math.min(defCap, value));
+                unit.seats = value === defCap ? null : value;
+                input.value = String(value);
+              });
+            } else {
+              input.value = '';
+              input.placeholder = 'N/A';
+              input.disabled = true;
+            }
+            return input;
+          })());
+
+          const equipField = document.createElement('div');
+          equipField.className = 'station-builder-checkboxes';
+          const equipLabel = document.createElement('div');
+          const def = unitDefs.find((d) => d.type === unit.type);
+          const slots = Number(def?.equipmentSlots || 0);
+          equipLabel.textContent = slots ? `Equipment (${slots} slots)` : 'Equipment';
+          equipLabel.style.fontWeight = 'bold';
+          wrapper.append(
+            nameField,
+            ...(classField ? [classField] : []),
+            typeField,
+            tagField,
+            priorityField,
+            seatField,
+            equipLabel
+          );
+          const opts = equipmentOptions();
+          unit.equipment = unit.equipment.filter((name) => opts.some((opt) => opt.name === name));
+          opts.forEach((opt) => {
+            const label = document.createElement('label');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = unit.equipment.includes(opt.name);
+            checkbox.dataset.focusKey = `unit-${idx}-equipment-${opt.name}`;
+            checkbox.addEventListener('change', () => {
+              if (checkbox.checked) {
+                if (slots && unit.equipment.length >= slots) {
+                  checkbox.checked = false;
+                  showError(`Unit ${idx + 1} has no free equipment slots.`);
+                  return;
+                }
+                if (!unit.equipment.includes(opt.name)) unit.equipment.push(opt.name);
+              } else {
+                unit.equipment = unit.equipment.filter((name) => name !== opt.name);
+              }
+              hideError();
+              updateCostSummary();
+            });
+            const span = document.createElement('span');
+            span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+            label.append(checkbox, span);
+            equipField.appendChild(label);
+          });
+          if (!opts.length) {
+            const emptyEquip = document.createElement('div');
+            emptyEquip.className = 'station-builder-empty';
+            emptyEquip.textContent = 'No equipment available for this class.';
+            equipField.appendChild(emptyEquip);
+          }
+          wrapper.appendChild(equipField);
+          unitsContainer.appendChild(wrapper);
+        });
       });
     }
 
     function renderPersonnel() {
-      personnelContainer.innerHTML = '';
-      if (!state.personnel.length) {
-        const empty = document.createElement('div');
-        empty.className = 'station-builder-empty';
-        empty.textContent = 'No personnel selected.';
-        personnelContainer.appendChild(empty);
-        return;
-      }
-      const trainings = trainingOptions();
-      state.personnel.forEach((person, idx) => {
-        if (!Array.isArray(person.training)) person.training = [];
-        const wrapper = document.createElement('div');
-        wrapper.className = 'station-builder-person';
-        const header = document.createElement('div');
-        header.className = 'station-builder-header';
-        header.textContent = `Personnel ${idx + 1}`;
-        const removeBtn = document.createElement('button');
-        removeBtn.textContent = 'Remove';
-        removeBtn.addEventListener('click', () => {
-          state.personnel.splice(idx, 1);
-          renderPersonnel();
-          updateCostSummary();
-        });
-        header.appendChild(removeBtn);
-        wrapper.appendChild(header);
-
-        const nameField = makeInputGroup('Name', (() => {
-          const input = document.createElement('input');
-          input.className = 'station-builder-input';
-          input.value = person.name;
-          input.addEventListener('input', () => { person.name = input.value; hideError(); });
-          return input;
-        })());
-
-        const rankField = makeInputGroup('Rank', (() => {
-          const select = document.createElement('select');
-          select.className = 'station-builder-select';
-          const applyOptions = (selectedValue = '') => {
-            const safe = Array.isArray(currentRankOptions) ? currentRankOptions : [];
-            const seen = new Set();
-            select.innerHTML = '';
-            const blank = document.createElement('option');
-            blank.value = '';
-            blank.textContent = '';
-            select.appendChild(blank);
-            safe.forEach((opt) => {
-              const value = cleanRankValue(opt);
-              if (!value) return;
-              const key = value.toLowerCase();
-              if (seen.has(key)) return;
-              seen.add(key);
-              const option = document.createElement('option');
-              option.value = value;
-              option.textContent = value;
-              select.appendChild(option);
-            });
-            const current = cleanRankValue(selectedValue || person.rank);
-            if (current && !seen.has(current.toLowerCase())) {
-              const option = document.createElement('option');
-              option.value = current;
-              option.textContent = current;
-              select.appendChild(option);
-            }
-            select.value = current || '';
-          };
-          applyOptions(person.rank || '');
-          select.addEventListener('change', () => {
-            const val = cleanRankValue(select.value);
-            person.rank = val || '';
-            hideError();
-          });
-          return select;
-        })());
-
-        const assignField = makeInputGroup('Assign to Unit', (() => {
-          const select = document.createElement('select');
-          select.className = 'station-builder-select';
-          const none = document.createElement('option');
-          none.value = '';
-          none.textContent = 'Unassigned';
-          select.appendChild(none);
-          state.units.forEach((unit, unitIdx) => {
-            const opt = document.createElement('option');
-            const label = unit.name ? `${unit.name}` : `Unit ${unitIdx + 1}`;
-            opt.value = String(unitIdx);
-            opt.textContent = label;
-            select.appendChild(opt);
-          });
-          if (person.assignedUnit != null && person.assignedUnit < state.units.length) {
-            select.value = String(person.assignedUnit);
-          } else {
-            select.value = '';
-            person.assignedUnit = null;
-          }
-          select.addEventListener('change', () => {
-            person.assignedUnit = select.value === '' ? null : Number(select.value);
-            hideError();
-          });
-          return select;
-        })());
-
-        const trainingField = document.createElement('div');
-        trainingField.className = 'station-builder-checkboxes';
-        const label = document.createElement('div');
-        label.textContent = 'Training';
-        label.style.fontWeight = 'bold';
-        wrapper.append(nameField, rankField, assignField, label);
-        const trainingSet = new Set((person.training || []).map((name) => String(name || '').toLowerCase()));
-        trainings.forEach((opt) => {
-          const tLabel = document.createElement('label');
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.checked = trainingSet.has(opt.name.toLowerCase());
-          checkbox.addEventListener('change', () => {
-            const name = opt.name;
-            const targetKey = name.toLowerCase();
-            if (checkbox.checked) {
-              const combined = Array.isArray(person.training) ? person.training.slice() : [];
-              if (!combined.some((item) => String(item || '').toLowerCase() === targetKey)) {
-                combined.push(name);
-              }
-              const collapsed = collapseTrainingListForState(combined);
-              person.training = expandTrainingListForState(collapsed);
-            } else {
-              let current = Array.isArray(person.training) ? person.training.slice() : [];
-              current = current.filter((item) => String(item || '').toLowerCase() !== targetKey);
-              let collapsed = collapseTrainingListForState(current);
-              collapsed = collapsed.filter((item) => String(item || '').toLowerCase() !== targetKey);
-              const toRemove = new Set();
-              collapsed.forEach((item) => {
-                const expandedSingle = expandTrainingListForState([item]);
-                if (expandedSingle.some((t) => String(t || '').toLowerCase() === targetKey)) {
-                  toRemove.add(String(item || '').toLowerCase());
-                }
-              });
-              if (toRemove.size) {
-                collapsed = collapsed.filter((item) => !toRemove.has(String(item || '').toLowerCase()));
-              }
-              person.training = expandTrainingListForState(collapsed);
-            }
-            hideError();
+      preserveFocusAndScroll(personnelContainer, () => {
+        personnelContainer.innerHTML = '';
+        if (!state.personnel.length) {
+          const empty = document.createElement('div');
+          empty.className = 'station-builder-empty';
+          empty.textContent = 'No personnel selected.';
+          personnelContainer.appendChild(empty);
+          return;
+        }
+        const trainings = trainingOptions();
+        state.personnel.forEach((person, idx) => {
+          if (!Array.isArray(person.training)) person.training = [];
+          const wrapper = document.createElement('div');
+          wrapper.className = 'station-builder-person';
+          const header = document.createElement('div');
+          header.className = 'station-builder-header';
+          header.textContent = `Personnel ${idx + 1}`;
+          const removeBtn = document.createElement('button');
+          removeBtn.textContent = 'Remove';
+          removeBtn.addEventListener('click', () => {
+            state.personnel.splice(idx, 1);
             renderPersonnel();
             updateCostSummary();
           });
-          const span = document.createElement('span');
-          span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
-          tLabel.append(checkbox, span);
-          trainingField.appendChild(tLabel);
+          header.appendChild(removeBtn);
+          wrapper.appendChild(header);
+
+          const nameField = makeInputGroup('Name', (() => {
+            const input = document.createElement('input');
+            input.className = 'station-builder-input';
+            input.value = person.name;
+            input.dataset.focusKey = `person-${idx}-name`;
+            input.addEventListener('input', () => { person.name = input.value; hideError(); });
+            return input;
+          })());
+
+          const rankField = makeInputGroup('Rank', (() => {
+            const select = document.createElement('select');
+            select.className = 'station-builder-select';
+            select.dataset.focusKey = `person-${idx}-rank`;
+            const applyOptions = (selectedValue = '') => {
+              const safe = Array.isArray(currentRankOptions) ? currentRankOptions : [];
+              const seen = new Set();
+              select.innerHTML = '';
+              const blank = document.createElement('option');
+              blank.value = '';
+              blank.textContent = '';
+              select.appendChild(blank);
+              safe.forEach((opt) => {
+                const value = cleanRankValue(opt);
+                if (!value) return;
+                const key = value.toLowerCase();
+                if (seen.has(key)) return;
+                seen.add(key);
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                select.appendChild(option);
+              });
+              const current = cleanRankValue(selectedValue || person.rank);
+              if (current && !seen.has(current.toLowerCase())) {
+                const option = document.createElement('option');
+                option.value = current;
+                option.textContent = current;
+                select.appendChild(option);
+              }
+              select.value = current || '';
+            };
+            applyOptions(person.rank || '');
+            select.addEventListener('change', () => {
+              const val = cleanRankValue(select.value);
+              person.rank = val || '';
+              hideError();
+            });
+            return select;
+          })());
+
+          const assignField = makeInputGroup('Assign to Unit', (() => {
+            const select = document.createElement('select');
+            select.className = 'station-builder-select';
+            select.dataset.focusKey = `person-${idx}-assign`;
+            const none = document.createElement('option');
+            none.value = '';
+            none.textContent = 'Unassigned';
+            select.appendChild(none);
+            state.units.forEach((unit, unitIdx) => {
+              const opt = document.createElement('option');
+              const label = unit.name ? `${unit.name}` : `Unit ${unitIdx + 1}`;
+              opt.value = String(unitIdx);
+              opt.textContent = label;
+              select.appendChild(opt);
+            });
+            if (person.assignedUnit != null && person.assignedUnit < state.units.length) {
+              select.value = String(person.assignedUnit);
+            } else {
+              select.value = '';
+              person.assignedUnit = null;
+            }
+            select.addEventListener('change', () => {
+              person.assignedUnit = select.value === '' ? null : Number(select.value);
+              hideError();
+            });
+            return select;
+          })());
+
+          const trainingField = document.createElement('div');
+          trainingField.className = 'station-builder-checkboxes';
+          const label = document.createElement('div');
+          label.textContent = 'Training';
+          label.style.fontWeight = 'bold';
+          wrapper.append(nameField, rankField, assignField, label);
+          const trainingSet = new Set((person.training || []).map((name) => String(name || '').toLowerCase()));
+          trainings.forEach((opt) => {
+            const tLabel = document.createElement('label');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = trainingSet.has(opt.name.toLowerCase());
+            checkbox.dataset.focusKey = `person-${idx}-training-${opt.name}`;
+            checkbox.addEventListener('change', () => {
+              const name = opt.name;
+              const targetKey = name.toLowerCase();
+              if (checkbox.checked) {
+                const combined = Array.isArray(person.training) ? person.training.slice() : [];
+                if (!combined.some((item) => String(item || '').toLowerCase() === targetKey)) {
+                  combined.push(name);
+                }
+                const collapsed = collapseTrainingListForState(combined);
+                person.training = expandTrainingListForState(collapsed);
+              } else {
+                let current = Array.isArray(person.training) ? person.training.slice() : [];
+                current = current.filter((item) => String(item || '').toLowerCase() !== targetKey);
+                let collapsed = collapseTrainingListForState(current);
+                collapsed = collapsed.filter((item) => String(item || '').toLowerCase() !== targetKey);
+                const toRemove = new Set();
+                collapsed.forEach((item) => {
+                  const expandedSingle = expandTrainingListForState([item]);
+                  if (expandedSingle.some((t) => String(t || '').toLowerCase() === targetKey)) {
+                    toRemove.add(String(item || '').toLowerCase());
+                  }
+                });
+                if (toRemove.size) {
+                  collapsed = collapsed.filter((item) => !toRemove.has(String(item || '').toLowerCase()));
+                }
+                person.training = expandTrainingListForState(collapsed);
+              }
+              hideError();
+              renderPersonnel();
+              updateCostSummary();
+            });
+            const span = document.createElement('span');
+            span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+            tLabel.append(checkbox, span);
+            trainingField.appendChild(tLabel);
+          });
+          if (!trainings.length) {
+            const emptyTrain = document.createElement('div');
+            emptyTrain.className = 'station-builder-empty';
+            emptyTrain.textContent = 'No training available for this class.';
+            trainingField.appendChild(emptyTrain);
+          }
+          wrapper.appendChild(trainingField);
+          personnelContainer.appendChild(wrapper);
         });
-        if (!trainings.length) {
-          const emptyTrain = document.createElement('div');
-          emptyTrain.className = 'station-builder-empty';
-          emptyTrain.textContent = 'No training available for this class.';
-          trainingField.appendChild(emptyTrain);
-        }
-        wrapper.appendChild(trainingField);
-        personnelContainer.appendChild(wrapper);
       });
     }
 
     function calculateCostBreakdown() {
-      const stationCost =
+      const baseStationCost =
         BUILD_COST +
         BAY_COST * (Number(state.bays) || 0) +
         EQUIP_SLOT_COST * (Number(state.equipment_slots) || 0) +
         (['police', 'jail'].includes(state.type) ? HOLDING_COST * (Number(state.holding_cells) || 0) : 0);
+      const stationMultiplier = state.type === 'fire_rescue' ? 1.5 : 1;
+      const stationCost = Math.round(baseStationCost * stationMultiplier);
       const unitCost = state.units.reduce((sum, unit) => {
-        const def = allowedUnitTypes().find((d) => d.type === unit.type);
+        const def = findUnitDefinitionByType(unit.class, unit.type);
         return sum + (Number(def?.cost) || 0);
       }, 0);
       const stationEquipCost = state.storageEquipment.reduce((sum, item) => sum + findEquipmentCost(item), 0);
@@ -3032,7 +3219,7 @@ function openStationBuilderModal(initial = {}) {
           const name = unit.name.trim();
           if (!name) throw new Error(`Unit ${idx + 1} requires a name.`);
           if (!unit.type) throw new Error(`Unit ${idx + 1} requires a type.`);
-          const def = allowedUnitTypes().find((d) => d.type === unit.type);
+          const def = allowedUnitTypes(unit.class).find((d) => d.type === unit.type);
           if (!def) throw new Error(`Unit ${idx + 1} type is invalid.`);
           const slots = Number(def?.equipmentSlots || 0);
           if (slots && unit.equipment.length > slots) {
@@ -3124,12 +3311,30 @@ function openStationBuilderModal(initial = {}) {
       close(payload);
     });
 
-    addUnitBtn.addEventListener('click', () => {
-      const defs = allowedUnitTypes();
-      state.units.push({ name: '', type: defs[0]?.type || '', tag: '', priority: 1, equipment: [], seats: null });
+    function addUnits(count = 1) {
+      const total = Math.max(1, Math.floor(Number(count) || 1));
+      for (let i = 0; i < total; i += 1) {
+        const classOptions = stationUnitClasses(state.type);
+        const unitClass = classOptions[0] || state.type;
+        const defs = allowedUnitTypes(unitClass);
+        state.units.push({
+          name: '',
+          type: defs[0]?.type || '',
+          class: unitClass,
+          tag: '',
+          priority: 1,
+          equipment: [],
+          seats: null,
+        });
+      }
       renderUnits();
       renderPersonnel();
       updateCostSummary();
+    }
+
+    addUnitBtn.addEventListener('click', () => addUnits(1));
+    addUnitBatchBtn.addEventListener('click', () => {
+      addUnits(addUnitCountInput.value);
     });
 
     async function fetchRandomPersonName() {
@@ -3144,16 +3349,24 @@ function openStationBuilderModal(initial = {}) {
       return '';
     }
 
-    addPersonBtn.addEventListener('click', async () => {
+    async function addPersonnel(count = 1) {
+      const total = Math.max(1, Math.floor(Number(count) || 1));
       const options = trainingOptions();
       const defaults = getDefaultTrainingsForState(options);
       const expandedDefaults = expandTrainingListForState(defaults);
-      const person = { name: '', rank: '', training: expandedDefaults.slice(), assignedUnit: null };
-      const randomName = await fetchRandomPersonName();
-      if (randomName) person.name = randomName;
-      state.personnel.push(person);
+      for (let i = 0; i < total; i += 1) {
+        const person = { name: '', rank: '', training: expandedDefaults.slice(), assignedUnit: null };
+        const randomName = await fetchRandomPersonName();
+        if (randomName) person.name = randomName;
+        state.personnel.push(person);
+      }
       renderPersonnel();
       updateCostSummary();
+    }
+
+    addPersonBtn.addEventListener('click', async () => addPersonnel(1));
+    addPersonBatchBtn.addEventListener('click', async () => {
+      await addPersonnel(addPersonCountInput.value);
     });
 
     typeSelect.addEventListener('change', () => {
@@ -3450,10 +3663,12 @@ async function openAssignModal(unitId, stationId) {
     <button id="assignPersonnelConfirm">Assign</button>
   `;
   const unitTypeSelect = detail.querySelector('#unit-type');
+  const unitClassSelect = detail.querySelector('#unit-class');
   const unitSeatInput = detail.querySelector('#unit-seats');
   const updateSeatField = (forceDefault = false) => {
     if (!unitSeatInput || !unitTypeSelect) return;
-    const def = findUnitDefinitionByType(station.type, unitTypeSelect.value);
+    const selectedClass = unitClassSelect ? unitClassSelect.value : station.type;
+    const def = findUnitDefinitionByType(selectedClass, unitTypeSelect.value);
     const defaultSeats = Number(def?.capacity || 0) || 0;
     if (!defaultSeats) {
       unitSeatInput.value = '';
@@ -3486,6 +3701,7 @@ async function openAssignModal(unitId, stationId) {
   };
   if (unitSeatInput && unitTypeSelect) {
     updateSeatField(true);
+    unitClassSelect?.addEventListener('change', () => updateSeatField(true));
     unitTypeSelect.addEventListener('change', () => updateSeatField(true));
     unitSeatInput.addEventListener('blur', () => updateSeatField(false));
   }

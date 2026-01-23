@@ -64,6 +64,7 @@ document.addEventListener('keydown', (event) => {
 
 const stationIcons = {
   fire: '/fire.png',
+  fire_rescue: '/fire.png',
   police: '/police.png',
   ambulance: '/star.png',
   sar: '/sar.png',
