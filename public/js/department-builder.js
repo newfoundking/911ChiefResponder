@@ -6,6 +6,76 @@ const deptNameInput = document.getElementById('departmentName');
 const deptRanksInput = document.getElementById('departmentRanks');
 const statusMessage = document.getElementById('statusMessage');
 
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function uniqueValues(values) {
+  const seen = new Set();
+  const result = [];
+  values.forEach((value) => {
+    const trimmed = normalizeText(value);
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(trimmed);
+  });
+  return result;
+}
+
+function getDepartmentRankOptions() {
+  if (!deptRanksInput) return [];
+  const raw = deptRanksInput.value || '';
+  return uniqueValues(raw.split(','));
+}
+
+async function fetchRandomPersonName() {
+  try {
+    const rnd = await fetch('/api/random-name').then((res) => res.json());
+    if (rnd?.first && rnd?.last) {
+      return `${rnd.first} ${rnd.last}`;
+    }
+  } catch {
+    // ignore failures and fall back to empty string
+  }
+  return '';
+}
+
+function buildRankSelectOptions(ranks, selected) {
+  const normalizedRanks = uniqueValues(ranks);
+  const selectedRank = normalizeText(selected);
+  if (selectedRank && !normalizedRanks.some((rank) => rank.toLowerCase() === selectedRank.toLowerCase())) {
+    normalizedRanks.unshift(selectedRank);
+  }
+  const options = ['<option value=""></option>'];
+  normalizedRanks.forEach((rank) => {
+    options.push(`<option value="${rank}" ${rank === selectedRank ? 'selected' : ''}>${rank}</option>`);
+  });
+  return options.join('');
+}
+
+function expandTrainingListForStation(list, stationType) {
+  if (typeof trainingHelpers !== 'undefined' && trainingHelpers && typeof trainingHelpers.expandTrainingList === 'function') {
+    return trainingHelpers.expandTrainingList(list, stationType) || [];
+  }
+  return uniqueValues(list);
+}
+
+function getDefaultTrainingsForStation(stationType, options) {
+  const opts = Array.isArray(options) ? options : [];
+  const validNames = new Set(opts.map((opt) => normalizeText(opt)).filter(Boolean).map((name) => name.toLowerCase()));
+  if (typeof trainingHelpers !== 'undefined' && trainingHelpers && typeof trainingHelpers.getTrainingDefaults === 'function') {
+    const defaults = trainingHelpers.getTrainingDefaults(stationType) || [];
+    return defaults.filter((name) => validNames.has(normalizeText(name).toLowerCase()));
+  }
+  const key = normalizeText(stationType).toLowerCase();
+  const defaults = (typeof trainingDefaults !== 'undefined' && trainingDefaults && trainingDefaults[key]) || [];
+  const arr = Array.isArray(defaults) ? defaults : [defaults];
+  return arr
+    .map((name) => normalizeText(name))
+    .filter((name) => name && validNames.has(name.toLowerCase()));
+}
 const stationTemplate = () => ({
   name: '',
   type: 'fire',
@@ -35,6 +105,17 @@ const personTemplate = () => ({
   assigned_unit: '',
 });
 
+function createPersonForStation(stationType) {
+  const trainingOptions = getTrainingOptions(stationType);
+  const defaults = getDefaultTrainingsForStation(stationType, trainingOptions);
+  return {
+    name: '',
+    rank: '',
+    training: expandTrainingListForStation(defaults, stationType),
+    assigned_unit: '',
+  };
+}
+
 const state = {
   stations: [stationTemplate()],
 };
@@ -57,11 +138,16 @@ function getEquipmentOptions(stationType) {
 }
 
 function getUnitOptions(stationType) {
-  return (Array.isArray(unitTypes) ? unitTypes : []).filter((u) => u.class === stationType);
+  const classes = stationType === 'fire_rescue' ? ['fire', 'ambulance'] : [stationType];
+  const classSet = new Set(classes.map((value) => String(value || '').toLowerCase()));
+  return (Array.isArray(unitTypes) ? unitTypes : []).filter((u) => classSet.has(String(u.class || '').toLowerCase()));
 }
 
 function getTrainingOptions(stationType) {
-  return (trainingsByClass?.[stationType] || []).map((t) => (typeof t === 'string' ? t : t.name));
+  const list = typeof trainingHelpers !== 'undefined' && trainingHelpers && typeof trainingHelpers.getTrainingsForClass === 'function'
+    ? trainingHelpers.getTrainingsForClass(stationType) || []
+    : (trainingsByClass?.[stationType] || []);
+  return list.map((t) => (typeof t === 'string' ? t : t.name)).filter(Boolean);
 }
 
 function ensureUnitDefaults(station) {
@@ -73,11 +159,31 @@ function ensureUnitDefaults(station) {
   });
 }
 
+function preserveFocusAndScroll(container, renderFn) {
+  const active = document.activeElement;
+  const focusKey = active?.dataset?.focusKey;
+  const selectionStart = active?.selectionStart;
+  const selectionEnd = active?.selectionEnd;
+  const scrollTop = container.scrollTop;
+  renderFn();
+  container.scrollTop = scrollTop;
+  if (focusKey) {
+    const next = container.querySelector(`[data-focus-key="${focusKey}"]`);
+    if (next) {
+      next.focus();
+      if (typeof selectionStart === 'number' && typeof next.setSelectionRange === 'function') {
+        next.setSelectionRange(selectionStart, selectionEnd ?? selectionStart);
+      }
+    }
+  }
+}
+
 function renderStationCard(station, index) {
   ensureUnitDefaults(station);
   const unitOptions = getUnitOptions(station.type);
   const trainingOptions = getTrainingOptions(station.type);
   const equipOptions = getEquipmentOptions(station.type);
+  const departmentRanks = getDepartmentRankOptions();
   const unitSelectOptions = (selected) =>
     unitOptions
       .map((opt) => `<option value="${opt.type}" ${opt.type === selected ? 'selected' : ''}>${opt.type}</option>`)
@@ -99,12 +205,13 @@ function renderStationCard(station, index) {
       <div class="grid">
         <label>
           Name
-          <input type="text" data-field="name" value="${station.name}" placeholder="Station name" />
+          <input type="text" data-field="name" data-focus-key="station-${index}-name" value="${station.name}" placeholder="Station name" />
         </label>
         <label>
           Type
-          <select data-field="type">
+          <select data-field="type" data-focus-key="station-${index}-type">
             <option value="fire" ${station.type === 'fire' ? 'selected' : ''}>Fire</option>
+            <option value="fire_rescue" ${station.type === 'fire_rescue' ? 'selected' : ''}>Fire Rescue</option>
             <option value="police" ${station.type === 'police' ? 'selected' : ''}>Police</option>
             <option value="ambulance" ${station.type === 'ambulance' ? 'selected' : ''}>Ambulance</option>
             <option value="sar" ${station.type === 'sar' ? 'selected' : ''}>SAR</option>
@@ -114,27 +221,27 @@ function renderStationCard(station, index) {
         </label>
         <label>
           Latitude (decimal)
-          <input type="number" step="any" data-field="lat" value="${station.lat}" placeholder="40.7128" />
+          <input type="number" step="any" data-field="lat" data-focus-key="station-${index}-lat" value="${station.lat}" placeholder="40.7128" />
         </label>
         <label>
           Longitude (decimal)
-          <input type="number" step="any" data-field="lon" value="${station.lon}" placeholder="-74.0060" />
+          <input type="number" step="any" data-field="lon" data-focus-key="station-${index}-lon" value="${station.lon}" placeholder="-74.0060" />
         </label>
         <label>
           Bays
-          <input type="number" min="0" data-field="bays" value="${station.bays}" />
+          <input type="number" min="0" data-field="bays" data-focus-key="station-${index}-bays" value="${station.bays}" />
         </label>
         <label>
           Equipment Slots
-          <input type="number" min="0" data-field="equipment_slots" value="${station.equipment_slots}" />
+          <input type="number" min="0" data-field="equipment_slots" data-focus-key="station-${index}-equipment-slots" value="${station.equipment_slots}" />
         </label>
         <label>
           Holding Cells
-          <input type="number" min="0" data-field="holding_cells" value="${station.holding_cells}" />
+          <input type="number" min="0" data-field="holding_cells" data-focus-key="station-${index}-holding-cells" value="${station.holding_cells}" />
         </label>
         <label>
           Hospital Beds
-          <input type="number" min="0" data-field="bed_capacity" value="${station.bed_capacity}" />
+          <input type="number" min="0" data-field="bed_capacity" data-focus-key="station-${index}-bed-capacity" value="${station.bed_capacity}" />
         </label>
       </div>
 
@@ -142,7 +249,7 @@ function renderStationCard(station, index) {
       <div class="pill-list">
         ${equipOptions.length ? equipOptions.map((name) => `
           <label class="pill">
-            <input type="checkbox" class="equipment-checkbox" data-equipment-name="${name}" ${station.equipment.includes(name) ? 'checked' : ''} />
+            <input type="checkbox" class="equipment-checkbox" data-focus-key="station-${index}-equipment-${name}" data-equipment-name="${name}" ${station.equipment.includes(name) ? 'checked' : ''} />
             ${name}
           </label>`).join('') : '<em>No equipment defined for this class.</em>'}
       </div>
@@ -161,28 +268,28 @@ function renderStationCard(station, index) {
             <div class="grid">
               <label>
                 Name
-                <input type="text" data-field="unit-name" value="${unit.name}" placeholder="Engine 1" />
+                <input type="text" data-field="unit-name" data-focus-key="station-${index}-unit-${unitIndex}-name" value="${unit.name}" placeholder="Engine 1" />
               </label>
               <label>
                 Type
-                <select data-field="unit-type">
+                <select data-field="unit-type" data-focus-key="station-${index}-unit-${unitIndex}-type">
                   ${unitSelectOptions(unit.type)}
                 </select>
               </label>
               <label>
                 Tag
-                <input type="text" data-field="unit-tag" value="${unit.tag}" placeholder="E1" />
+                <input type="text" data-field="unit-tag" data-focus-key="station-${index}-unit-${unitIndex}-tag" value="${unit.tag}" placeholder="E1" />
               </label>
               <label>
                 Priority
-                <input type="number" min="1" max="5" data-field="unit-priority" value="${unit.priority}" />
+                <input type="number" min="1" max="5" data-field="unit-priority" data-focus-key="station-${index}-unit-${unitIndex}-priority" value="${unit.priority}" />
               </label>
             </div>
             <div class="section-title">Unit Equipment</div>
             <div class="pill-list">
               ${equipOptions.length ? equipOptions.map((name) => `
                 <label class="pill">
-                  <input type="checkbox" class="unit-equipment-checkbox" data-equipment-name="${name}" ${unit.equipment.includes(name) ? 'checked' : ''} />
+                  <input type="checkbox" class="unit-equipment-checkbox" data-focus-key="station-${index}-unit-${unitIndex}-equipment-${name}" data-equipment-name="${name}" ${unit.equipment.includes(name) ? 'checked' : ''} />
                   ${name}
                 </label>`).join('') : '<em>No equipment defined for this class.</em>'}
             </div>
@@ -204,15 +311,21 @@ function renderStationCard(station, index) {
             <div class="grid">
               <label>
                 Name
-                <input type="text" data-field="person-name" value="${person.name}" placeholder="Alex Rivera" />
+                <input type="text" data-field="person-name" data-focus-key="station-${index}-person-${personIndex}-name" value="${person.name}" placeholder="Alex Rivera" />
               </label>
               <label>
                 Rank
-                <input type="text" data-field="person-rank" value="${person.rank}" placeholder="Captain" />
+                ${departmentRanks.length ? `
+                  <select data-field="person-rank" data-focus-key="station-${index}-person-${personIndex}-rank">
+                    ${buildRankSelectOptions(departmentRanks, person.rank)}
+                  </select>
+                ` : `
+                  <input type="text" data-field="person-rank" data-focus-key="station-${index}-person-${personIndex}-rank" value="${person.rank}" placeholder="Captain" />
+                `}
               </label>
               <label>
                 Assigned Unit
-                <select data-field="person-assigned-unit">
+                <select data-field="person-assigned-unit" data-focus-key="station-${index}-person-${personIndex}-assigned">
                   ${unitAssignmentOptions(person.assigned_unit)}
                 </select>
               </label>
@@ -221,7 +334,7 @@ function renderStationCard(station, index) {
             <div class="pill-list">
               ${trainingOptions.length ? trainingOptions.map((name) => `
                 <label class="pill">
-                  <input type="checkbox" class="training-checkbox" data-training-name="${name}" ${person.training.includes(name) ? 'checked' : ''} />
+                  <input type="checkbox" class="training-checkbox" data-focus-key="station-${index}-person-${personIndex}-training-${name}" data-training-name="${name}" ${person.training.includes(name) ? 'checked' : ''} />
                   ${name}
                 </label>`).join('') : '<em>No training list available.</em>'}
             </div>
@@ -233,7 +346,9 @@ function renderStationCard(station, index) {
 }
 
 function render() {
-  stationListEl.innerHTML = state.stations.map(renderStationCard).join('');
+  preserveFocusAndScroll(stationListEl, () => {
+    stationListEl.innerHTML = state.stations.map(renderStationCard).join('');
+  });
 }
 
 function parseNumber(value, fallback = 0) {
@@ -241,7 +356,7 @@ function parseNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
-stationListEl.addEventListener('click', (event) => {
+stationListEl.addEventListener('click', async (event) => {
   const stationCard = event.target.closest('[data-station-index]');
   if (!stationCard) return;
   const stationIndex = Number(stationCard.dataset.stationIndex);
@@ -271,7 +386,10 @@ stationListEl.addEventListener('click', (event) => {
     }
   }
   if (action === 'add-person') {
-    station.personnel.push(personTemplate());
+    const person = createPersonForStation(station.type);
+    const randomName = await fetchRandomPersonName();
+    if (randomName) person.name = randomName;
+    station.personnel.push(person);
   }
   if (action === 'remove-person') {
     const personCard = event.target.closest('[data-person-index]');
@@ -368,6 +486,13 @@ addStationBtn.addEventListener('click', () => {
   clearStatus();
   render();
 });
+
+if (deptRanksInput) {
+  deptRanksInput.addEventListener('input', () => {
+    clearStatus();
+    render();
+  });
+}
 
 resetBtn.addEventListener('click', () => {
   state.stations = [stationTemplate()];
