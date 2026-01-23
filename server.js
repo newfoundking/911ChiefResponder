@@ -110,6 +110,7 @@ const stationsController = require('./controllers/stationsController');
 app.use('/api/missions', missionsRoutes);
 app.use('/api/stations', stationsRoutes);
 app.use('/api/units', unitsRoutes);
+app.post('/api/departments/bulk', stationsController.createDepartmentBulk);
 
 // Route proxy endpoint to avoid client-side CORS issues.  Attempts OSRM first
 // (with snapped coordinates), then falls back to GraphHopper/OpenRouteService.
