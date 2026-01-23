@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Department Builder</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: #f5f6f8;
+        color: #1f2937;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 24px;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 1.8rem;
+      }
+      .panel {
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+        margin-bottom: 20px;
+      }
+      .panel h2 {
+        margin-top: 0;
+        font-size: 1.3rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 0.9rem;
+      }
+      input,
+      select,
+      textarea {
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid #d1d5db;
+        font-size: 0.95rem;
+      }
+      textarea {
+        min-height: 80px;
+      }
+      button {
+        border: none;
+        border-radius: 8px;
+        padding: 10px 14px;
+        background: #2563eb;
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #e2e8f0;
+        color: #1f2937;
+      }
+      button.ghost {
+        background: transparent;
+        color: #2563eb;
+      }
+      .station-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 16px;
+        background: #f8fafc;
+      }
+      .station-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+      .station-header h3 {
+        margin: 0;
+      }
+      .section-title {
+        margin: 16px 0 8px;
+        font-weight: 600;
+      }
+      .pill-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .pill {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 0.85rem;
+      }
+      .inline-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .unit-card,
+      .person-card {
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 12px;
+        background: #ffffff;
+        margin-bottom: 10px;
+      }
+      .status {
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: #eff6ff;
+        border: 1px solid #bfdbfe;
+        margin-top: 12px;
+        display: none;
+      }
+      .status.error {
+        background: #fef2f2;
+        border-color: #fecaca;
+        color: #991b1b;
+      }
+      .status.success {
+        background: #ecfdf5;
+        border-color: #a7f3d0;
+        color: #065f46;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Department Builder</h1>
+        <p>Create a full department, multiple stations, vehicles, and personnel in one workflow.</p>
+      </div>
+    </header>
+
+    <section class="panel">
+      <h2>Department Details</h2>
+      <div class="grid">
+        <label>
+          Department Name
+          <input id="departmentName" type="text" placeholder="e.g. Metro Fire" />
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Department Ranks</h2>
+      <div class="grid">
+        <label>
+          Ranks (comma-separated)
+          <textarea id="departmentRanks" placeholder="Chief, Captain, Lieutenant"></textarea>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="inline-actions" style="justify-content: space-between;">
+        <h2 style="margin: 0;">Stations</h2>
+        <button id="addStation" class="secondary">Add Station</button>
+      </div>
+      <div id="stationList"></div>
+    </section>
+
+    <section class="panel">
+      <div class="inline-actions">
+        <button id="submitDepartment">Create Department</button>
+        <button id="resetForm" class="secondary">Reset Form</button>
+      </div>
+      <div id="statusMessage" class="status"></div>
+    </section>
+
+    <script src="/config/unitTypes.js"></script>
+    <script src="/config/trainings.js"></script>
+    <script src="/config/equipment.js"></script>
+    <script src="/js/department-builder.js"></script>
+  </body>
+</html>

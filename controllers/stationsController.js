@@ -63,6 +63,13 @@ function normalizeRank(value) {
   return str.length ? str : null;
 }
 
+function createError(status, message, extra = {}) {
+  const err = new Error(message);
+  err.status = status;
+  err.extra = extra;
+  return err;
+}
+
 function runAsync(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function (err) {
@@ -90,6 +97,263 @@ const HOSPITAL_BED_BASE_COST = 4000;
 const HOSPITAL_BED_EXP_MULTIPLIER = 1.75;
 const STATION_BUILD_COST = 50000;
 const BASE_PERSON_COST = 100;
+
+function buildStationPlan(body = {}) {
+  const name = String(body.name || '').trim();
+  const type = String(body.type || '').toLowerCase();
+  const lat = Number(body.lat);
+  const lon = Number(body.lon);
+  const departmentRaw = body.department;
+  const department = departmentRaw != null && String(departmentRaw).trim().length
+    ? String(departmentRaw).trim()
+    : null;
+
+  if (!name || !type || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+    throw createError(400, 'name, type, lat and lon are required');
+  }
+
+  const allowedTypes = new Set(['fire', 'police', 'ambulance', 'sar', 'hospital', 'jail']);
+  if (!allowedTypes.has(type)) {
+    throw createError(400, 'Unsupported station type');
+  }
+
+  let bays = Math.max(0, Number(body.bays ?? body.bay_count ?? 0));
+  let equipmentSlots = Math.max(0, Number(body.equipment_slots ?? 0));
+  let holdingCells = Math.max(0, Number(body.holding_cells ?? 0));
+  let bedCapacity = Math.max(0, Number(body.bed_capacity ?? 0));
+
+  if (!['police', 'jail'].includes(type)) holdingCells = 0;
+  if (type !== 'hospital') bedCapacity = 0;
+
+  const stationEquipment = Array.isArray(body.equipment)
+    ? body.equipment
+        .map((item) => String(item || '').trim())
+        .filter((item) => item.length)
+    : [];
+
+  const unitsInput = Array.isArray(body.units) ? body.units : [];
+  const personnelInput = Array.isArray(body.personnel) ? body.personnel : [];
+
+  if (equipmentSlots > 0 && stationEquipment.length > equipmentSlots) {
+    throw createError(400, 'Not enough equipment slots for selected equipment');
+  }
+  if (equipmentSlots === 0 && stationEquipment.length > 0) {
+    throw createError(400, 'Equipment slots must be purchased for stored equipment');
+  }
+
+  const unitsNormalized = [];
+  const unitPersonnelBuckets = [];
+  let unitCostTotal = 0;
+  let unitEquipmentCostTotal = 0;
+  let personnelCostTotal = 0;
+
+  for (let idx = 0; idx < unitsInput.length; idx += 1) {
+    const unitRaw = unitsInput[idx];
+    const unitName = String(unitRaw?.name || '').trim();
+    const unitType = String(unitRaw?.type || '').trim();
+    const unitClass = String(unitRaw?.class || type).toLowerCase();
+    const tag = unitRaw?.tag != null ? String(unitRaw.tag).trim() : null;
+    let priority = Number(unitRaw?.priority ?? 1);
+    if (!Number.isFinite(priority)) priority = 1;
+    priority = Math.min(5, Math.max(1, priority));
+
+    if (!unitName || !unitType) {
+      throw createError(400, `Unit #${idx + 1} is missing a name or type`);
+    }
+
+    const unitDef = findUnitDefinition(unitClass, unitType);
+    if (!unitDef) {
+      throw createError(400, `Unit type ${unitType} (${unitClass}) is not allowed`);
+    }
+
+    const seatInfo = getSeatInfo(unitDef.class, unitDef.type, unitRaw?.seats ?? unitRaw?.seat_override ?? unitRaw?.seat_capacity);
+    const seatCapacity = Number(seatInfo.seatCapacity || 0);
+
+    const equipmentList = Array.isArray(unitRaw?.equipment)
+      ? unitRaw.equipment
+          .map((item) => String(item || '').trim())
+          .filter((item) => item.length)
+      : [];
+    if (Number(unitDef.equipmentSlots || 0) && equipmentList.length > Number(unitDef.equipmentSlots)) {
+      throw createError(
+        400,
+        `Unit ${unitName} exceeds equipment slots (${equipmentList.length}/${unitDef.equipmentSlots})`
+      );
+    }
+    if (!Number(unitDef.equipmentSlots || 0) && equipmentList.length) {
+      throw createError(400, `Unit ${unitName} cannot carry equipment`);
+    }
+
+    unitCostTotal += Number(unitDef.cost) || 0;
+    equipmentList.forEach((item) => {
+      unitEquipmentCostTotal += findEquipmentCostByName(item) || 0;
+    });
+
+    const normalized = {
+      name: unitName,
+      type: unitDef.type,
+      class: unitDef.class,
+      tag,
+      priority,
+      equipment: equipmentList,
+      seat_override: seatInfo.seatOverride,
+      seat_capacity: seatCapacity,
+      default_capacity: seatInfo.defaultCapacity,
+    };
+    unitsNormalized.push(normalized);
+    unitPersonnelBuckets.push([]);
+
+    if (Array.isArray(unitRaw?.personnel)) {
+      for (const personRaw of unitRaw.personnel) {
+        const pname = String(personRaw?.name || '').trim();
+        if (!pname) continue;
+        const trainingRaw = normalizeTrainingList(personRaw?.training);
+        const training = collapseTrainingList(trainingRaw, type);
+        const rank = normalizeRank(personRaw?.rank);
+        const trainingCost = training.reduce((sum, t) => sum + (findTrainingCostByName(t) || 0), 0);
+        personnelCostTotal += BASE_PERSON_COST + trainingCost;
+        if (seatCapacity && unitPersonnelBuckets[idx].length >= seatCapacity) {
+          throw createError(400, `Unit ${unitName} exceeds seat capacity (${seatCapacity})`);
+        }
+        unitPersonnelBuckets[idx].push({ name: pname, rank, training });
+      }
+    }
+  }
+
+  if (bays < unitsNormalized.length) {
+    throw createError(400, 'Not enough bays for the selected units', { required_bays: unitsNormalized.length });
+  }
+
+  const stationPersonnel = [];
+
+  for (let idx = 0; idx < personnelInput.length; idx += 1) {
+    const personRaw = personnelInput[idx];
+    const pname = String(personRaw?.name || '').trim();
+    if (!pname) continue;
+    const trainingRaw = normalizeTrainingList(personRaw?.training);
+    const training = collapseTrainingList(trainingRaw, type);
+    const rank = normalizeRank(personRaw?.rank);
+    const entry = { name: pname, rank, training };
+    const trainingCost = training.reduce((sum, t) => sum + (findTrainingCostByName(t) || 0), 0);
+    personnelCostTotal += BASE_PERSON_COST + trainingCost;
+
+    const rawAssignment = personRaw?.assigned_unit;
+    const hasAssignment = rawAssignment !== undefined && rawAssignment !== null && String(rawAssignment).trim() !== '';
+    if (hasAssignment) {
+      const assignedIndex = Number(rawAssignment);
+      if (!Number.isInteger(assignedIndex) || assignedIndex < 0 || assignedIndex >= unitPersonnelBuckets.length) {
+        throw createError(400, `Personnel #${idx + 1} has an invalid unit assignment`);
+      }
+      const unitInfo = unitsNormalized[assignedIndex];
+      const capacity = Number(unitInfo?.seat_capacity || 0);
+      if (capacity && unitPersonnelBuckets[assignedIndex].length >= capacity) {
+        throw createError(400, `Unit ${unitInfo?.name || assignedIndex + 1} exceeds seat capacity (${capacity})`);
+      }
+      unitPersonnelBuckets[assignedIndex].push(entry);
+    } else {
+      stationPersonnel.push(entry);
+    }
+  }
+
+  const stationEquipmentCostTotal = stationEquipment.reduce(
+    (sum, item) => sum + (findEquipmentCostByName(item) || 0),
+    0
+  );
+
+  const stationCost =
+    STATION_BUILD_COST +
+    priceBays(bays, false) +
+    (equipmentSlots * EQUIPMENT_SLOT_COST) +
+    (holdingCells > 0 ? priceHoldingCells(holdingCells, false) : 0);
+
+  const totalCost = stationCost + unitCostTotal + unitEquipmentCostTotal + stationEquipmentCostTotal + personnelCostTotal;
+
+  return {
+    name,
+    type,
+    lat,
+    lon,
+    department,
+    bays,
+    equipmentSlots,
+    holdingCells,
+    bedCapacity,
+    stationEquipment,
+    unitsNormalized,
+    unitPersonnelBuckets,
+    stationPersonnel,
+    costBreakdown: {
+      station: stationCost,
+      units: unitCostTotal,
+      unit_equipment: unitEquipmentCostTotal,
+      station_equipment: stationEquipmentCostTotal,
+      personnel: personnelCostTotal,
+      total: totalCost,
+    },
+  };
+}
+
+async function insertStationFromPlan(plan) {
+  const stationRow = await runAsync(
+    `INSERT INTO stations (name, type, lat, lon, department, bay_count, equipment_slots, holding_cells, bed_capacity, equipment)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
+    [
+      plan.name,
+      plan.type,
+      plan.lat,
+      plan.lon,
+      plan.department,
+      plan.bays,
+      plan.equipmentSlots,
+      plan.holdingCells,
+      plan.bedCapacity,
+      JSON.stringify(plan.stationEquipment),
+    ]
+  );
+  const stationId = stationRow.lastID;
+
+  const createdUnits = [];
+  const createdPersonnel = [];
+
+  for (let i = 0; i < plan.unitsNormalized.length; i += 1) {
+    const unit = plan.unitsNormalized[i];
+    const insertUnit = await runAsync(
+      `INSERT INTO units (station_id, class, type, name, tag, priority, status, equipment, seat_override)
+       VALUES (?, ?, ?, ?, ?, ?, 'available', ?, ?)` ,
+      [
+        stationId,
+        unit.class,
+        unit.type,
+        unit.name,
+        unit.tag,
+        unit.priority,
+        JSON.stringify(unit.equipment),
+        unit.seat_override ?? null,
+      ]
+    );
+    const unitId = insertUnit.lastID;
+    createdUnits.push({ id: unitId, ...unit });
+
+    const assigned = plan.unitPersonnelBuckets[i];
+    for (const person of assigned) {
+      const insertPerson = await runAsync(
+        `INSERT INTO personnel (name, rank, station_id, unit_id, training) VALUES (?, ?, ?, ?, ?)` ,
+        [person.name, person.rank ?? null, stationId, unitId, JSON.stringify(person.training)]
+      );
+      createdPersonnel.push({ id: insertPerson.lastID, ...person, unit_id: unitId });
+    }
+  }
+
+  for (const person of plan.stationPersonnel) {
+    const insertPerson = await runAsync(
+      `INSERT INTO personnel (name, rank, station_id, unit_id, training) VALUES (?, ?, ?, NULL, ?)` ,
+      [person.name, person.rank ?? null, stationId, JSON.stringify(person.training)]
+    );
+    createdPersonnel.push({ id: insertPerson.lastID, ...person, unit_id: null });
+  }
+
+  return { stationId, createdUnits, createdPersonnel };
+}
 
 function priceBays(count, isExpansion) {
   const base = BAY_BASE_COST * count;
@@ -187,264 +451,32 @@ async function getStation(req, res) {
 // POST /api/stations
 async function createStation(req, res) {
   try {
-    const body = req.body || {};
-    const name = String(body.name || '').trim();
-    const type = String(body.type || '').toLowerCase();
-    const lat = Number(body.lat);
-    const lon = Number(body.lon);
-    const departmentRaw = body.department;
-    const department = departmentRaw != null && String(departmentRaw).trim().length
-      ? String(departmentRaw).trim()
-      : null;
-
-    if (!name || !type || !Number.isFinite(lat) || !Number.isFinite(lon)) {
-      return res.status(400).json({ error: 'name, type, lat and lon are required' });
-    }
-
-    const allowedTypes = new Set(['fire', 'police', 'ambulance', 'sar', 'hospital', 'jail']);
-    if (!allowedTypes.has(type)) {
-      return res.status(400).json({ error: 'Unsupported station type' });
-    }
-
-    let bays = Math.max(0, Number(body.bays ?? body.bay_count ?? 0));
-    let equipmentSlots = Math.max(0, Number(body.equipment_slots ?? 0));
-    let holdingCells = Math.max(0, Number(body.holding_cells ?? 0));
-    let bedCapacity = Math.max(0, Number(body.bed_capacity ?? 0));
-
-    if (!['police', 'jail'].includes(type)) holdingCells = 0;
-    if (type !== 'hospital') bedCapacity = 0;
-
-    const stationEquipment = Array.isArray(body.equipment)
-      ? body.equipment
-          .map((item) => String(item || '').trim())
-          .filter((item) => item.length)
-      : [];
-
-    const unitsInput = Array.isArray(body.units) ? body.units : [];
-    const personnelInput = Array.isArray(body.personnel) ? body.personnel : [];
-
-    if (equipmentSlots > 0 && stationEquipment.length > equipmentSlots) {
-      return res.status(400).json({ error: 'Not enough equipment slots for selected equipment' });
-    }
-    if (equipmentSlots === 0 && stationEquipment.length > 0) {
-      return res.status(400).json({ error: 'Equipment slots must be purchased for stored equipment' });
-    }
-
-    const unitsNormalized = [];
-    const unitPersonnelBuckets = [];
-    let unitCostTotal = 0;
-    let unitEquipmentCostTotal = 0;
-
-    for (let idx = 0; idx < unitsInput.length; idx += 1) {
-      const unitRaw = unitsInput[idx];
-      const unitName = String(unitRaw?.name || '').trim();
-      const unitType = String(unitRaw?.type || '').trim();
-      const unitClass = String(unitRaw?.class || type).toLowerCase();
-      const tag = unitRaw?.tag != null ? String(unitRaw.tag).trim() : null;
-      let priority = Number(unitRaw?.priority ?? 1);
-      if (!Number.isFinite(priority)) priority = 1;
-      priority = Math.min(5, Math.max(1, priority));
-
-      if (!unitName || !unitType) {
-        return res.status(400).json({ error: `Unit #${idx + 1} is missing a name or type` });
-      }
-
-      const unitDef = findUnitDefinition(unitClass, unitType);
-      if (!unitDef) {
-        return res.status(400).json({ error: `Unit type ${unitType} (${unitClass}) is not allowed` });
-      }
-
-      const seatInfo = getSeatInfo(unitDef.class, unitDef.type, unitRaw?.seats ?? unitRaw?.seat_override ?? unitRaw?.seat_capacity);
-      const seatCapacity = Number(seatInfo.seatCapacity || 0);
-
-      const equipmentList = Array.isArray(unitRaw?.equipment)
-        ? unitRaw.equipment
-            .map((item) => String(item || '').trim())
-            .filter((item) => item.length)
-        : [];
-      if (Number(unitDef.equipmentSlots || 0) && equipmentList.length > Number(unitDef.equipmentSlots)) {
-        return res.status(400).json({
-          error: `Unit ${unitName} exceeds equipment slots (${equipmentList.length}/${unitDef.equipmentSlots})`,
-        });
-      }
-      if (!Number(unitDef.equipmentSlots || 0) && equipmentList.length) {
-        return res.status(400).json({ error: `Unit ${unitName} cannot carry equipment` });
-      }
-
-      unitCostTotal += Number(unitDef.cost) || 0;
-      equipmentList.forEach((item) => {
-        unitEquipmentCostTotal += findEquipmentCostByName(item) || 0;
-      });
-
-      const normalized = {
-        name: unitName,
-        type: unitDef.type,
-        class: unitDef.class,
-        tag,
-        priority,
-        equipment: equipmentList,
-        seat_override: seatInfo.seatOverride,
-        seat_capacity: seatCapacity,
-        default_capacity: seatInfo.defaultCapacity,
-      };
-      unitsNormalized.push(normalized);
-      unitPersonnelBuckets.push([]);
-
-      if (Array.isArray(unitRaw?.personnel)) {
-        for (const personRaw of unitRaw.personnel) {
-          const pname = String(personRaw?.name || '').trim();
-          if (!pname) return;
-          const trainingRaw = normalizeTrainingList(personRaw?.training);
-          const training = collapseTrainingList(trainingRaw, type);
-          const rank = normalizeRank(personRaw?.rank);
-          const trainingCost = training.reduce((sum, t) => sum + (findTrainingCostByName(t) || 0), 0);
-          personnelCostTotal += BASE_PERSON_COST + trainingCost;
-          if (seatCapacity && unitPersonnelBuckets[idx].length >= seatCapacity) {
-            return res.status(400).json({ error: `Unit ${unitName} exceeds seat capacity (${seatCapacity})` });
-          }
-          unitPersonnelBuckets[idx].push({ name: pname, rank, training });
-        }
-      }
-    }
-
-    if (bays < unitsNormalized.length) {
-      return res.status(400).json({ error: 'Not enough bays for the selected units', required_bays: unitsNormalized.length });
-    }
-
-    const stationPersonnel = [];
-    let personnelCostTotal = 0;
-
-    for (let idx = 0; idx < personnelInput.length; idx += 1) {
-      const personRaw = personnelInput[idx];
-      const pname = String(personRaw?.name || '').trim();
-      if (!pname) continue;
-      const trainingRaw = normalizeTrainingList(personRaw?.training);
-      const training = collapseTrainingList(trainingRaw, type);
-      const rank = normalizeRank(personRaw?.rank);
-      const entry = { name: pname, rank, training };
-      const trainingCost = training.reduce((sum, t) => sum + (findTrainingCostByName(t) || 0), 0);
-      personnelCostTotal += BASE_PERSON_COST + trainingCost;
-
-      const rawAssignment = personRaw?.assigned_unit;
-      const hasAssignment = rawAssignment !== undefined && rawAssignment !== null && String(rawAssignment).trim() !== '';
-      if (hasAssignment) {
-        const assignedIndex = Number(rawAssignment);
-        if (!Number.isInteger(assignedIndex) || assignedIndex < 0 || assignedIndex >= unitPersonnelBuckets.length) {
-          return res.status(400).json({ error: `Personnel #${idx + 1} has an invalid unit assignment` });
-        }
-        const unitInfo = unitsNormalized[assignedIndex];
-        const capacity = Number(unitInfo?.seat_capacity || 0);
-        if (capacity && unitPersonnelBuckets[assignedIndex].length >= capacity) {
-          return res.status(400).json({ error: `Unit ${unitInfo?.name || assignedIndex + 1} exceeds seat capacity (${capacity})` });
-        }
-        unitPersonnelBuckets[assignedIndex].push(entry);
-      } else {
-        stationPersonnel.push(entry);
-      }
-    }
-
-    const stationEquipmentCostTotal = stationEquipment.reduce(
-      (sum, item) => sum + (findEquipmentCostByName(item) || 0),
-      0
-    );
-
-    const stationCost =
-      STATION_BUILD_COST +
-      priceBays(bays, false) +
-      (equipmentSlots * EQUIPMENT_SLOT_COST) +
-      (holdingCells > 0 ? priceHoldingCells(holdingCells, false) : 0);
-
-    const totalCost = stationCost + unitCostTotal + unitEquipmentCostTotal + stationEquipmentCostTotal + personnelCostTotal;
-
-    const funds = await requireFunds(totalCost);
+    const plan = buildStationPlan(req.body || {});
+    const funds = await requireFunds(plan.costBreakdown.total);
     if (!funds.ok) {
-      return res.status(409).json({ error: 'Insufficient funds', balance: funds.balance, needed: totalCost });
+      return res.status(409).json({ error: 'Insufficient funds', balance: funds.balance, needed: plan.costBreakdown.total });
     }
 
     await runAsync('BEGIN IMMEDIATE TRANSACTION');
     try {
-      const stationRow = await runAsync(
-        `INSERT INTO stations (name, type, lat, lon, department, bay_count, equipment_slots, holding_cells, bed_capacity, equipment)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)` ,
-        [
-          name,
-          type,
-          lat,
-          lon,
-          department,
-          bays,
-          equipmentSlots,
-          holdingCells,
-          bedCapacity,
-          JSON.stringify(stationEquipment),
-        ]
-      );
-      const stationId = stationRow.lastID;
-
-      const createdUnits = [];
-      const createdPersonnel = [];
-
-      for (let i = 0; i < unitsNormalized.length; i += 1) {
-        const unit = unitsNormalized[i];
-        const insertUnit = await runAsync(
-          `INSERT INTO units (station_id, class, type, name, tag, priority, status, equipment, seat_override)
-           VALUES (?, ?, ?, ?, ?, ?, 'available', ?, ?)` ,
-          [
-            stationId,
-            unit.class,
-            unit.type,
-            unit.name,
-            unit.tag,
-            unit.priority,
-            JSON.stringify(unit.equipment),
-            unit.seat_override ?? null,
-          ]
-        );
-        const unitId = insertUnit.lastID;
-        createdUnits.push({ id: unitId, ...unit });
-
-        const assigned = unitPersonnelBuckets[i];
-        for (const person of assigned) {
-          const insertPerson = await runAsync(
-            `INSERT INTO personnel (name, rank, station_id, unit_id, training) VALUES (?, ?, ?, ?, ?)` ,
-            [person.name, person.rank ?? null, stationId, unitId, JSON.stringify(person.training)]
-          );
-          createdPersonnel.push({ id: insertPerson.lastID, ...person, unit_id: unitId });
-        }
-      }
-
-      for (const person of stationPersonnel) {
-        const insertPerson = await runAsync(
-          `INSERT INTO personnel (name, rank, station_id, unit_id, training) VALUES (?, ?, ?, NULL, ?)` ,
-          [person.name, person.rank ?? null, stationId, JSON.stringify(person.training)]
-        );
-        createdPersonnel.push({ id: insertPerson.lastID, ...person, unit_id: null });
-      }
-
-      await adjustBalance(-totalCost);
+      const { stationId, createdUnits, createdPersonnel } = await insertStationFromPlan(plan);
+      await adjustBalance(-plan.costBreakdown.total);
       await runAsync('COMMIT');
       const balance = await getBalance();
 
       return res.json({
         id: stationId,
-        name,
-        type,
-        lat,
-        lon,
-        department,
-        bay_count: bays,
-        equipment_slots: equipmentSlots,
-        holding_cells: holdingCells,
-        bed_capacity: bedCapacity,
-        equipment: stationEquipment,
-        cost_breakdown: {
-          station: stationCost,
-          units: unitCostTotal,
-          unit_equipment: unitEquipmentCostTotal,
-          station_equipment: stationEquipmentCostTotal,
-          personnel: personnelCostTotal,
-          total: totalCost,
-        },
+        name: plan.name,
+        type: plan.type,
+        lat: plan.lat,
+        lon: plan.lon,
+        department: plan.department,
+        bay_count: plan.bays,
+        equipment_slots: plan.equipmentSlots,
+        holding_cells: plan.holdingCells,
+        bed_capacity: plan.bedCapacity,
+        equipment: plan.stationEquipment,
+        cost_breakdown: plan.costBreakdown,
         units: createdUnits,
         personnel: createdPersonnel,
         balance,
@@ -456,7 +488,81 @@ async function createStation(req, res) {
     }
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: err.message || 'Failed to create station' });
+    const status = err.status || 500;
+    const payload = { error: err.message || 'Failed to create station' };
+    if (err.extra && typeof err.extra === 'object') Object.assign(payload, err.extra);
+    return res.status(status).json(payload);
+  }
+}
+
+// POST /api/departments/bulk
+async function createDepartmentBulk(req, res) {
+  const department = String(req.body?.department || '').trim();
+  const stationsInput = Array.isArray(req.body?.stations) ? req.body.stations : [];
+  if (!department) return res.status(400).json({ error: 'department is required' });
+  if (!stationsInput.length) return res.status(400).json({ error: 'At least one station is required' });
+
+  const plans = [];
+  for (let idx = 0; idx < stationsInput.length; idx += 1) {
+    const stationRaw = stationsInput[idx];
+    try {
+      const payload = { ...stationRaw, department };
+      const plan = buildStationPlan(payload);
+      plans.push({ index: idx, plan });
+    } catch (err) {
+      const status = err.status || 500;
+      const payload = { error: err.message || 'Failed to validate station payload', station_index: idx };
+      if (err.extra && typeof err.extra === 'object') Object.assign(payload, err.extra);
+      return res.status(status).json(payload);
+    }
+  }
+
+  const totalCost = plans.reduce((sum, entry) => sum + entry.plan.costBreakdown.total, 0);
+  const funds = await requireFunds(totalCost);
+  if (!funds.ok) {
+    return res.status(409).json({ error: 'Insufficient funds', balance: funds.balance, needed: totalCost });
+  }
+
+  await runAsync('BEGIN IMMEDIATE TRANSACTION');
+  try {
+    const createdStations = [];
+    for (const entry of plans) {
+      const { stationId, createdUnits, createdPersonnel } = await insertStationFromPlan(entry.plan);
+      createdStations.push({
+        id: stationId,
+        name: entry.plan.name,
+        type: entry.plan.type,
+        lat: entry.plan.lat,
+        lon: entry.plan.lon,
+        department: entry.plan.department,
+        bay_count: entry.plan.bays,
+        equipment_slots: entry.plan.equipmentSlots,
+        holding_cells: entry.plan.holdingCells,
+        bed_capacity: entry.plan.bedCapacity,
+        equipment: entry.plan.stationEquipment,
+        cost_breakdown: entry.plan.costBreakdown,
+        units: createdUnits,
+        personnel: createdPersonnel,
+      });
+    }
+
+    await adjustBalance(-totalCost);
+    await runAsync('COMMIT');
+    const balance = await getBalance();
+
+    res.json({
+      department,
+      stations: createdStations,
+      cost_breakdown: {
+        total: totalCost,
+        stations: createdStations.map((st) => st.cost_breakdown),
+      },
+      balance,
+    });
+  } catch (err) {
+    await runAsync('ROLLBACK');
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Failed to create department' });
   }
 }
 
@@ -702,6 +808,7 @@ module.exports = {
   getStations,
   getStation,
   createStation,
+  createDepartmentBulk,
   patchBays,
   patchIcon,
   patchName,
