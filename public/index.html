@@ -2273,6 +2273,7 @@ async function showStationDetails(station) {
         <button id="change-station-icon">Change Icon</button>
     <p>Type: ${formatStationTypeLabel(station.type)}</p>
     <p>Department: <span id="station-dept">${station.department || ''}</span> <button id="change-station-dept">Change Department</button> <button id="manage-station-ranks">Manage Ranks</button></p>
+    <div id="station-upgrade-section"></div>
     <h3>Create Unit</h3>
     ${
       allowMultipleUnitClasses
@@ -2471,6 +2472,65 @@ async function showStationDetails(station) {
                   await refreshRankOptionsForStation();
                 }
           });
+        async function loadStationUpgrades() {
+          const upgradeSection = detail.querySelector('#station-upgrade-section');
+          if (!upgradeSection) return;
+          try {
+            const res = await fetch(`/api/stations/${station.id}/upgrades`, { cache: 'no-store' });
+            const data = await res.json();
+            const options = Array.isArray(data?.options) ? data.options : [];
+            if (!res.ok || !options.length) {
+              upgradeSection.innerHTML = '';
+              return;
+            }
+            upgradeSection.innerHTML = `
+              <h3>Station Upgrades</h3>
+              <label>
+                Upgrade to:
+                <select id="station-upgrade-select">
+                  ${options.map((opt) => `
+                    <option value="${opt.to}" data-cost="${opt.cost}">
+                      ${opt.label || formatStationTypeLabel(opt.to)}
+                    </option>
+                  `).join('')}
+                </select>
+              </label>
+              <button id="station-upgrade-btn">Upgrade</button>
+              <div id="station-upgrade-cost"></div>
+            `;
+            const select = upgradeSection.querySelector('#station-upgrade-select');
+            const costEl = upgradeSection.querySelector('#station-upgrade-cost');
+            const updateCost = () => {
+              const selected = options.find((opt) => opt.to === select.value);
+              if (costEl) {
+                costEl.textContent = selected ? `Cost: $${selected.cost}` : '';
+              }
+            };
+            updateCost();
+            select?.addEventListener('change', updateCost);
+            upgradeSection.querySelector('#station-upgrade-btn')?.addEventListener('click', async () => {
+              const targetType = select?.value;
+              if (!targetType) return;
+              const resUpgrade = await fetch(`/api/stations/${station.id}/upgrade`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: targetType })
+              });
+              const upgradeData = await resUpgrade.json();
+              if (!resUpgrade.ok || !upgradeData.success) {
+                notifyError(`Failed: ${upgradeData.error || resUpgrade.statusText}`);
+                return;
+              }
+              notifySuccess(`Station upgraded to ${formatStationTypeLabel(upgradeData.type)}. Cost: ${upgradeData.cost}`);
+              refreshWallet();
+              await fetchStations();
+              await refreshStationPanelNoCache(station.id);
+            });
+          } catch (err) {
+            console.error(err);
+          }
+        }
+        loadStationUpgrades();
         async function refreshBayInfo(stationId) {
           const [s, us] = await Promise.all([
             fetch(`/api/stations/${stationId}`, { cache: 'no-store' }).then(r=>r.json()),

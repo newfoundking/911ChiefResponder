@@ -4,8 +4,10 @@ const stations = require('../controllers/stationsController');
 
 router.get('/', stations.getStations);
 router.get('/:id/personnel', stations.getStationPersonnel);
+router.get('/:id/upgrades', stations.getStationUpgrades);
 router.get('/:id', stations.getStation);
 router.post('/', stations.createStation);
+router.patch('/:id/upgrade', stations.patchStationUpgrade);
 router.patch('/:id/bays', stations.patchBays);
 router.patch('/:id/holding-cells', stations.patchHoldingCells);
 router.patch('/:id/beds', stations.patchHospitalBeds);
