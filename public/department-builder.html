@@ -116,6 +116,9 @@
         flex-wrap: wrap;
         align-items: center;
       }
+      .inline-actions input[type="number"] {
+        max-width: 120px;
+      }
       .unit-card,
       .person-card {
         border: 1px solid #e2e8f0;
@@ -173,11 +176,11 @@
     </section>
 
     <section class="panel">
-      <div class="inline-actions" style="justify-content: space-between;">
-        <h2 style="margin: 0;">Stations</h2>
+      <h2 style="margin: 0 0 16px;">Stations</h2>
+      <div id="stationList"></div>
+      <div class="inline-actions" style="justify-content: flex-end;">
         <button id="addStation" class="secondary">Add Station</button>
       </div>
-      <div id="stationList"></div>
     </section>
 
     <section class="panel">

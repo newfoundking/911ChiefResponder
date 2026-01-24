@@ -88,6 +88,7 @@ const stationTemplate = () => ({
   equipment: [],
   units: [],
   personnel: [],
+  personnel_add_count: 1,
 });
 
 const unitTemplate = () => ({
@@ -141,6 +142,14 @@ function getUnitOptions(stationType) {
   const classes = stationType === 'fire_rescue' ? ['fire', 'ambulance'] : [stationType];
   const classSet = new Set(classes.map((value) => String(value || '').toLowerCase()));
   return (Array.isArray(unitTypes) ? unitTypes : []).filter((u) => classSet.has(String(u.class || '').toLowerCase()));
+}
+
+function getUnitClassForType(stationType, unitType) {
+  const desiredType = String(unitType || '').toLowerCase();
+  if (!desiredType) return stationType;
+  const options = getUnitOptions(stationType);
+  const match = options.find((opt) => String(opt.type || '').toLowerCase() === desiredType);
+  return String(match?.class || stationType);
 }
 
 function getTrainingOptions(stationType) {
@@ -255,9 +264,6 @@ function renderStationCard(station, index) {
       </div>
 
       <div class="section-title">Units</div>
-      <div class="inline-actions">
-        <button class="secondary" data-action="add-unit">Add Unit</button>
-      </div>
       <div>
         ${station.units.map((unit, unitIndex) => `
           <div class="unit-card" data-unit-index="${unitIndex}">
@@ -296,11 +302,11 @@ function renderStationCard(station, index) {
           </div>
         `).join('')}
       </div>
+      <div class="inline-actions">
+        <button class="secondary" data-action="add-unit">Add Unit</button>
+      </div>
 
       <div class="section-title">Personnel</div>
-      <div class="inline-actions">
-        <button class="secondary" data-action="add-person">Add Personnel</button>
-      </div>
       <div>
         ${station.personnel.map((person, personIndex) => `
           <div class="person-card" data-person-index="${personIndex}">
@@ -341,6 +347,13 @@ function renderStationCard(station, index) {
           </div>
         `).join('')}
       </div>
+      <div class="inline-actions">
+        <label>
+          Add Count
+          <input type="number" min="1" max="50" data-field="personnel-add-count" data-focus-key="station-${index}-personnel-add-count" value="${station.personnel_add_count || 1}" />
+        </label>
+        <button class="secondary" data-action="add-person">Add Personnel</button>
+      </div>
     </div>
   `;
 }
@@ -354,6 +367,27 @@ function render() {
 function parseNumber(value, fallback = 0) {
   const num = Number(value);
   return Number.isFinite(num) ? num : fallback;
+}
+
+function parseCount(value, fallback = 1, max = 50) {
+  const num = Math.floor(Number(value));
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(1, Math.min(max, num));
+}
+
+function refreshUnitAssignmentOptions(stationCard, station) {
+  const selects = stationCard.querySelectorAll('select[data-field="person-assigned-unit"]');
+  if (!selects.length) return;
+  const options = [];
+  options.push(`<option value="">Unassigned</option>`);
+  station.units.forEach((unit, idx) => {
+    options.push(`<option value="${idx}">${unit.name || `Unit ${idx + 1}`}</option>`);
+  });
+  selects.forEach((select) => {
+    const current = select.value;
+    select.innerHTML = options.join('');
+    select.value = current;
+  });
 }
 
 stationListEl.addEventListener('click', async (event) => {
@@ -386,10 +420,15 @@ stationListEl.addEventListener('click', async (event) => {
     }
   }
   if (action === 'add-person') {
-    const person = createPersonForStation(station.type);
-    const randomName = await fetchRandomPersonName();
-    if (randomName) person.name = randomName;
-    station.personnel.push(person);
+    const countInput = stationCard.querySelector('[data-field="personnel-add-count"]');
+    const count = parseCount(countInput?.value, station.personnel_add_count || 1);
+    station.personnel_add_count = count;
+    const people = Array.from({ length: count }, () => createPersonForStation(station.type));
+    const names = await Promise.all(people.map(() => fetchRandomPersonName()));
+    names.forEach((name, idx) => {
+      if (name) people[idx].name = name;
+    });
+    station.personnel.push(...people);
   }
   if (action === 'remove-person') {
     const personCard = event.target.closest('[data-person-index]');
@@ -412,17 +451,23 @@ stationListEl.addEventListener('change', (event) => {
 
   const field = event.target.dataset.field;
   if (field && !event.target.closest('[data-unit-index]') && !event.target.closest('[data-person-index]')) {
+    if (field === 'personnel-add-count') {
+      station.personnel_add_count = parseCount(event.target.value, station.personnel_add_count || 1);
+      return;
+    }
     if (field === 'type') {
       station.type = event.target.value;
       station.equipment = [];
       station.units = [];
       station.personnel = [];
+      station.personnel_add_count = 1;
+      render();
+      return;
     } else if (['bays', 'equipment_slots', 'holding_cells', 'bed_capacity'].includes(field)) {
       station[field] = parseNumber(event.target.value, 0);
     } else {
       station[field] = event.target.value;
     }
-    render();
     return;
   }
 
@@ -456,7 +501,9 @@ stationListEl.addEventListener('change', (event) => {
     if (field === 'unit-type') unit.type = event.target.value;
     if (field === 'unit-tag') unit.tag = event.target.value;
     if (field === 'unit-priority') unit.priority = parseNumber(event.target.value, 1);
-    render();
+    if (field === 'unit-name') {
+      refreshUnitAssignmentOptions(stationCard, station);
+    }
     return;
   }
 
@@ -529,7 +576,7 @@ submitBtn.addEventListener('click', async () => {
     units: station.units.map((unit) => ({
       name: unit.name.trim(),
       type: unit.type,
-      class: station.type,
+      class: getUnitClassForType(station.type, unit.type),
       tag: unit.tag.trim(),
       priority: parseNumber(unit.priority, 1),
       equipment: unit.equipment.slice(),
