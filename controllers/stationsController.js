@@ -154,7 +154,8 @@ function buildStationPlan(body = {}) {
     const unitRaw = unitsInput[idx];
     const unitName = String(unitRaw?.name || '').trim();
     const unitType = String(unitRaw?.type || '').trim();
-    const unitClass = String(unitRaw?.class || type).toLowerCase();
+    const unitClassRaw = String(unitRaw?.class || type).toLowerCase();
+    const candidateClasses = unitClassRaw === 'fire_rescue' ? ['fire', 'ambulance'] : [unitClassRaw];
     const tag = unitRaw?.tag != null ? String(unitRaw.tag).trim() : null;
     let priority = Number(unitRaw?.priority ?? 1);
     if (!Number.isFinite(priority)) priority = 1;
@@ -164,9 +165,11 @@ function buildStationPlan(body = {}) {
       throw createError(400, `Unit #${idx + 1} is missing a name or type`);
     }
 
-    const unitDef = findUnitDefinition(unitClass, unitType);
+    const unitDef = candidateClasses
+      .map((candidate) => findUnitDefinition(candidate, unitType))
+      .find(Boolean);
     if (!unitDef) {
-      throw createError(400, `Unit type ${unitType} (${unitClass}) is not allowed`);
+      throw createError(400, `Unit type ${unitType} (${candidateClasses.join('/')}) is not allowed`);
     }
 
     const seatInfo = getSeatInfo(unitDef.class, unitDef.type, unitRaw?.seats ?? unitRaw?.seat_override ?? unitRaw?.seat_capacity);
