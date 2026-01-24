@@ -3,6 +3,7 @@ const { findEquipmentCostByName, requireFunds, adjustBalance, getBalance } = req
 const { getSeatInfo } = require('../utils');
 const unitTypes = require('../unitTypes');
 const { getFacilityOccupancy } = require('../services/missions');
+const { startPatrol } = require('../services/patrol');
 let trainingModule = {};
 try { trainingModule = require('../trainings'); } catch { trainingModule = {}; }
 const trainingsByClass = trainingModule.trainingsByClass || {};
@@ -212,6 +213,7 @@ function buildStationPlan(body = {}) {
       seat_override: seatInfo.seatOverride,
       seat_capacity: seatCapacity,
       default_capacity: seatInfo.defaultCapacity,
+      patrol: unitRaw?.patrol === true || unitRaw?.patrol === 1,
     };
     unitsNormalized.push(normalized);
     unitPersonnelBuckets.push([]);
@@ -332,9 +334,11 @@ async function insertStationFromPlan(plan) {
 
   for (let i = 0; i < plan.unitsNormalized.length; i += 1) {
     const unit = plan.unitsNormalized[i];
+    const patrol = unit.patrol ? 1 : 0;
+    const patrolUntil = patrol ? Date.now() + 60 * 60 * 1000 : null;
     const insertUnit = await runAsync(
-      `INSERT INTO units (station_id, class, type, name, tag, priority, status, equipment, seat_override)
-       VALUES (?, ?, ?, ?, ?, ?, 'available', ?, ?)` ,
+      `INSERT INTO units (station_id, class, type, name, tag, priority, status, equipment, seat_override, patrol, patrol_until)
+       VALUES (?, ?, ?, ?, ?, ?, 'available', ?, ?, ?, ?)` ,
       [
         stationId,
         unit.class,
@@ -344,10 +348,13 @@ async function insertStationFromPlan(plan) {
         unit.priority,
         JSON.stringify(unit.equipment),
         unit.seat_override ?? null,
+        patrol,
+        patrolUntil,
       ]
     );
     const unitId = insertUnit.lastID;
-    createdUnits.push({ id: unitId, ...unit });
+    createdUnits.push({ id: unitId, ...unit, patrol: Boolean(patrol) });
+    if (patrol) startPatrol(unitId);
 
     const assigned = plan.unitPersonnelBuckets[i];
     for (const person of assigned) {

@@ -2714,13 +2714,13 @@ function openStationBuilderModal(initial = {}) {
       bed_capacity: Math.max(0, Number(initial.bed_capacity ?? 0) || 0),
       storageEquipment: Array.isArray(initial.equipment) ? initial.equipment.slice() : [],
       units: Array.isArray(initial.units) ? initial.units.slice() : [],
-      personnel: Array.isArray(initial.personnel) ? initial.personnel.slice() : [],
     };
     state.units = state.units.map(u => {
       const classOptions = stationUnitClasses(state.type);
       const unitClass = classOptions.includes(String(u?.class || '').toLowerCase())
         ? String(u.class).toLowerCase()
         : classOptions[0];
+      const unitPersonnel = Array.isArray(u?.personnel) ? u.personnel : [];
       return {
         name: typeof u?.name === 'string' ? u.name : '',
         type: typeof u?.type === 'string' ? u.type : '',
@@ -2728,6 +2728,13 @@ function openStationBuilderModal(initial = {}) {
         tag: typeof u?.tag === 'string' ? u.tag : '',
         priority: Math.min(5, Math.max(1, Number(u?.priority ?? 1) || 1)),
         equipment: Array.isArray(u?.equipment) ? u.equipment.slice() : [],
+        patrol: Boolean(u?.patrol),
+        personnel: unitPersonnel.map((person) => ({
+          name: typeof person?.name === 'string' ? person.name : '',
+          rank: cleanRankValue(person?.rank) || '',
+          training: Array.isArray(person?.training) ? person.training.slice() : [],
+        })),
+        personnelAddCount: Math.max(1, Number(u?.personnel_add_count ?? 1) || 1),
         seats: (() => {
           const def = (unitTypes || []).find((d) => String(d.class || '').toLowerCase() === unitClass && d.type === u?.type);
           const defaultCap = Number(def?.capacity || 0) || 0;
@@ -2742,12 +2749,6 @@ function openStationBuilderModal(initial = {}) {
         })(),
       };
     });
-    state.personnel = state.personnel.map(p => ({
-      name: typeof p?.name === 'string' ? p.name : '',
-      rank: cleanRankValue(p?.rank) || '',
-      training: Array.isArray(p?.training) ? p.training.slice() : [],
-      assignedUnit: Number.isInteger(p?.assigned_unit) ? p.assigned_unit : null,
-    }));
 
     const BUILD_COST = 50000;
     const BAY_COST = 5000;
@@ -2764,7 +2765,7 @@ function openStationBuilderModal(initial = {}) {
       const ranks = await fetchDepartmentRanks(dept);
       if (version !== rankOptionsVersion) return;
       currentRankOptions = ranks;
-      renderPersonnel();
+      renderUnits();
     }
 
     const basicSection = document.createElement('div');
@@ -2807,28 +2808,6 @@ function openStationBuilderModal(initial = {}) {
     unitsContainer.className = 'station-builder-list';
     unitsSection.appendChild(unitsContainer);
 
-    const personnelSection = document.createElement('div');
-    personnelSection.className = 'station-builder-section';
-    const personnelHeader = document.createElement('div');
-    personnelHeader.className = 'station-builder-row';
-    const personnelTitle = document.createElement('h3');
-    personnelTitle.textContent = 'Personnel';
-    const addPersonBtn = document.createElement('button');
-    addPersonBtn.textContent = 'Add Personnel';
-    const addPersonCountInput = document.createElement('input');
-    addPersonCountInput.type = 'number';
-    addPersonCountInput.min = '1';
-    addPersonCountInput.value = '1';
-    addPersonCountInput.className = 'station-builder-input';
-    addPersonCountInput.style.width = '70px';
-    const addPersonBatchBtn = document.createElement('button');
-    addPersonBatchBtn.textContent = 'Add Multiple';
-    personnelHeader.append(personnelTitle, addPersonBtn, addPersonCountInput, addPersonBatchBtn);
-    personnelSection.appendChild(personnelHeader);
-    const personnelContainer = document.createElement('div');
-    personnelContainer.className = 'station-builder-list';
-    personnelSection.appendChild(personnelContainer);
-
     const summarySection = document.createElement('div');
     summarySection.className = 'station-builder-section station-builder-summary';
     const summaryTitle = document.createElement('h3');
@@ -2840,7 +2819,6 @@ function openStationBuilderModal(initial = {}) {
     modal.appendChild(basicSection);
     modal.appendChild(equipmentSection);
     modal.appendChild(unitsSection);
-    modal.appendChild(personnelSection);
     modal.appendChild(summarySection);
 
     const actions = document.createElement('div');
@@ -3073,16 +3051,6 @@ function openStationBuilderModal(initial = {}) {
       return 0;
     }
 
-    function sanitizeAssignments() {
-      state.personnel.forEach((p) => {
-        if (p.assignedUnit == null || p.assignedUnit === '') { p.assignedUnit = null; return; }
-        const idx = Number(p.assignedUnit);
-        if (!Number.isInteger(idx) || idx < 0 || idx >= state.units.length) {
-          p.assignedUnit = null;
-        }
-      });
-    }
-
     function sanitizeByType() {
       hideError();
       holdingGroup.style.display = ['police', 'jail'].includes(state.type) ? 'flex' : 'none';
@@ -3115,9 +3083,11 @@ function openStationBuilderModal(initial = {}) {
 
       const availableTrainings = trainingOptions();
       const trainingNames = new Set(availableTrainings.map((t) => t.name));
-      state.personnel.forEach((person) => {
-        const filtered = (Array.isArray(person.training) ? person.training : []).filter((name) => trainingNames.has(name));
-        person.training = expandTrainingListForState(filtered);
+      state.units.forEach((unit) => {
+        unit.personnel.forEach((person) => {
+          const filtered = (Array.isArray(person.training) ? person.training : []).filter((name) => trainingNames.has(name));
+          person.training = expandTrainingListForState(filtered);
+        });
       });
 
       if (!['police', 'jail'].includes(state.type)) {
@@ -3128,7 +3098,6 @@ function openStationBuilderModal(initial = {}) {
         state.bed_capacity = 0;
         bedsInput.value = '0';
       }
-      sanitizeAssignments();
     }
 
     function renderStationEquipment() {
@@ -3209,9 +3178,7 @@ function openStationBuilderModal(initial = {}) {
           removeBtn.textContent = 'Remove';
           removeBtn.addEventListener('click', () => {
             state.units.splice(idx, 1);
-            sanitizeAssignments();
             renderUnits();
-            renderPersonnel();
             updateCostSummary();
           });
           header.appendChild(removeBtn);
@@ -3308,6 +3275,17 @@ function openStationBuilderModal(initial = {}) {
             return input;
           })());
 
+          const patrolField = makeInputGroup('Patrol', (() => {
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.checked = Boolean(unit.patrol);
+            input.dataset.focusKey = `unit-${idx}-patrol`;
+            input.addEventListener('change', () => {
+              unit.patrol = input.checked;
+            });
+            return input;
+          })());
+
           const seatField = makeInputGroup('Seats', (() => {
             const input = document.createElement('input');
             input.type = 'number';
@@ -3376,6 +3354,7 @@ function openStationBuilderModal(initial = {}) {
             typeField,
             tagField,
             priorityField,
+            patrolField,
             seatField,
             equipLabel
           );
@@ -3413,174 +3392,167 @@ function openStationBuilderModal(initial = {}) {
             equipField.appendChild(emptyEquip);
           }
           wrapper.appendChild(equipField);
-          unitsContainer.appendChild(wrapper);
-        });
-      });
-    }
 
-    function renderPersonnel() {
-      preserveFocusAndScroll(personnelContainer, () => {
-        personnelContainer.innerHTML = '';
-        if (!state.personnel.length) {
-          const empty = document.createElement('div');
-          empty.className = 'station-builder-empty';
-          empty.textContent = 'No personnel selected.';
-          personnelContainer.appendChild(empty);
-          return;
-        }
-        const trainings = trainingOptions();
-        state.personnel.forEach((person, idx) => {
-          if (!Array.isArray(person.training)) person.training = [];
-          const wrapper = document.createElement('div');
-          wrapper.className = 'station-builder-person';
-          const header = document.createElement('div');
-          header.className = 'station-builder-header';
-          header.textContent = `Personnel ${idx + 1}`;
-          const removeBtn = document.createElement('button');
-          removeBtn.textContent = 'Remove';
-          removeBtn.addEventListener('click', () => {
-            state.personnel.splice(idx, 1);
-            renderPersonnel();
-            updateCostSummary();
+          if (!Array.isArray(unit.personnel)) unit.personnel = [];
+          const personnelHeader = document.createElement('div');
+          personnelHeader.className = 'station-builder-row';
+          const personnelTitle = document.createElement('h4');
+          personnelTitle.textContent = 'Personnel';
+          const addPersonBtn = document.createElement('button');
+          addPersonBtn.textContent = 'Add Personnel';
+          const addPersonCountInput = document.createElement('input');
+          addPersonCountInput.type = 'number';
+          addPersonCountInput.min = '1';
+          addPersonCountInput.value = String(unit.personnelAddCount || 1);
+          addPersonCountInput.className = 'station-builder-input';
+          addPersonCountInput.style.width = '70px';
+          addPersonCountInput.dataset.focusKey = `unit-${idx}-person-count`;
+          addPersonCountInput.addEventListener('input', () => {
+            unit.personnelAddCount = Math.max(1, Math.floor(Number(addPersonCountInput.value) || 1));
           });
-          header.appendChild(removeBtn);
-          wrapper.appendChild(header);
+          addPersonBtn.addEventListener('click', async () => {
+            await addPersonnelToUnit(unit, idx, unit.personnelAddCount || 1);
+          });
+          personnelHeader.append(personnelTitle, addPersonBtn, addPersonCountInput);
+          wrapper.appendChild(personnelHeader);
 
-          const nameField = makeInputGroup('Name', (() => {
-            const input = document.createElement('input');
-            input.className = 'station-builder-input';
-            input.value = person.name;
-            input.dataset.focusKey = `person-${idx}-name`;
-            input.addEventListener('input', () => { person.name = input.value; hideError(); });
-            return input;
-          })());
-
-          const rankField = makeInputGroup('Rank', (() => {
-            const select = document.createElement('select');
-            select.className = 'station-builder-select';
-            select.dataset.focusKey = `person-${idx}-rank`;
-            const applyOptions = (selectedValue = '') => {
-              const safe = Array.isArray(currentRankOptions) ? currentRankOptions : [];
-              const seen = new Set();
-              select.innerHTML = '';
-              const blank = document.createElement('option');
-              blank.value = '';
-              blank.textContent = '';
-              select.appendChild(blank);
-              safe.forEach((opt) => {
-                const value = cleanRankValue(opt);
-                if (!value) return;
-                const key = value.toLowerCase();
-                if (seen.has(key)) return;
-                seen.add(key);
-                const option = document.createElement('option');
-                option.value = value;
-                option.textContent = value;
-                select.appendChild(option);
+          const personnelList = document.createElement('div');
+          personnelList.className = 'station-builder-list';
+          const trainings = trainingOptions();
+          if (!unit.personnel.length) {
+            const empty = document.createElement('div');
+            empty.className = 'station-builder-empty';
+            empty.textContent = 'No personnel assigned.';
+            personnelList.appendChild(empty);
+          } else {
+            unit.personnel.forEach((person, personIdx) => {
+              if (!Array.isArray(person.training)) person.training = [];
+              const personCard = document.createElement('div');
+              personCard.className = 'station-builder-person';
+              const personHeader = document.createElement('div');
+              personHeader.className = 'station-builder-header';
+              personHeader.textContent = `Personnel ${personIdx + 1}`;
+              const removePersonBtn = document.createElement('button');
+              removePersonBtn.textContent = 'Remove';
+              removePersonBtn.addEventListener('click', () => {
+                unit.personnel.splice(personIdx, 1);
+                renderUnits();
+                updateCostSummary();
               });
-              const current = cleanRankValue(selectedValue || person.rank);
-              if (current && !seen.has(current.toLowerCase())) {
-                const option = document.createElement('option');
-                option.value = current;
-                option.textContent = current;
-                select.appendChild(option);
-              }
-              select.value = current || '';
-            };
-            applyOptions(person.rank || '');
-            select.addEventListener('change', () => {
-              const val = cleanRankValue(select.value);
-              person.rank = val || '';
-              hideError();
-            });
-            return select;
-          })());
+              personHeader.appendChild(removePersonBtn);
+              personCard.appendChild(personHeader);
 
-          const assignField = makeInputGroup('Assign to Unit', (() => {
-            const select = document.createElement('select');
-            select.className = 'station-builder-select';
-            select.dataset.focusKey = `person-${idx}-assign`;
-            const none = document.createElement('option');
-            none.value = '';
-            none.textContent = 'Unassigned';
-            select.appendChild(none);
-            state.units.forEach((unit, unitIdx) => {
-              const opt = document.createElement('option');
-              const label = unit.name ? `${unit.name}` : `Unit ${unitIdx + 1}`;
-              opt.value = String(unitIdx);
-              opt.textContent = label;
-              select.appendChild(opt);
-            });
-            if (person.assignedUnit != null && person.assignedUnit < state.units.length) {
-              select.value = String(person.assignedUnit);
-            } else {
-              select.value = '';
-              person.assignedUnit = null;
-            }
-            select.addEventListener('change', () => {
-              person.assignedUnit = select.value === '' ? null : Number(select.value);
-              hideError();
-            });
-            return select;
-          })());
+              const nameField = makeInputGroup('Name', (() => {
+                const input = document.createElement('input');
+                input.className = 'station-builder-input';
+                input.value = person.name;
+                input.dataset.focusKey = `unit-${idx}-person-${personIdx}-name`;
+                input.addEventListener('input', () => { person.name = input.value; hideError(); });
+                return input;
+              })());
 
-          const trainingField = document.createElement('div');
-          trainingField.className = 'station-builder-checkboxes';
-          const label = document.createElement('div');
-          label.textContent = 'Training';
-          label.style.fontWeight = 'bold';
-          wrapper.append(nameField, rankField, assignField, label);
-          const trainingSet = new Set((person.training || []).map((name) => String(name || '').toLowerCase()));
-          trainings.forEach((opt) => {
-            const tLabel = document.createElement('label');
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.checked = trainingSet.has(opt.name.toLowerCase());
-            checkbox.dataset.focusKey = `person-${idx}-training-${opt.name}`;
-            checkbox.addEventListener('change', () => {
-              const name = opt.name;
-              const targetKey = name.toLowerCase();
-              if (checkbox.checked) {
-                const combined = Array.isArray(person.training) ? person.training.slice() : [];
-                if (!combined.some((item) => String(item || '').toLowerCase() === targetKey)) {
-                  combined.push(name);
-                }
-                const collapsed = collapseTrainingListForState(combined);
-                person.training = expandTrainingListForState(collapsed);
-              } else {
-                let current = Array.isArray(person.training) ? person.training.slice() : [];
-                current = current.filter((item) => String(item || '').toLowerCase() !== targetKey);
-                let collapsed = collapseTrainingListForState(current);
-                collapsed = collapsed.filter((item) => String(item || '').toLowerCase() !== targetKey);
-                const toRemove = new Set();
-                collapsed.forEach((item) => {
-                  const expandedSingle = expandTrainingListForState([item]);
-                  if (expandedSingle.some((t) => String(t || '').toLowerCase() === targetKey)) {
-                    toRemove.add(String(item || '').toLowerCase());
+              const rankField = makeInputGroup('Rank', (() => {
+                const select = document.createElement('select');
+                select.className = 'station-builder-select';
+                select.dataset.focusKey = `unit-${idx}-person-${personIdx}-rank`;
+                const applyOptions = (selectedValue = '') => {
+                  const safe = Array.isArray(currentRankOptions) ? currentRankOptions : [];
+                  const seen = new Set();
+                  select.innerHTML = '';
+                  const blank = document.createElement('option');
+                  blank.value = '';
+                  blank.textContent = '';
+                  select.appendChild(blank);
+                  safe.forEach((opt) => {
+                    const value = cleanRankValue(opt);
+                    if (!value) return;
+                    const key = value.toLowerCase();
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = value;
+                    select.appendChild(option);
+                  });
+                  const current = cleanRankValue(selectedValue || person.rank);
+                  if (current && !seen.has(current.toLowerCase())) {
+                    const option = document.createElement('option');
+                    option.value = current;
+                    option.textContent = current;
+                    select.appendChild(option);
                   }
+                  select.value = current || '';
+                };
+                applyOptions(person.rank || '');
+                select.addEventListener('change', () => {
+                  const val = cleanRankValue(select.value);
+                  person.rank = val || '';
+                  hideError();
                 });
-                if (toRemove.size) {
-                  collapsed = collapsed.filter((item) => !toRemove.has(String(item || '').toLowerCase()));
-                }
-                person.training = expandTrainingListForState(collapsed);
+                return select;
+              })());
+
+              const trainingField = document.createElement('div');
+              trainingField.className = 'station-builder-checkboxes';
+              const label = document.createElement('div');
+              label.textContent = 'Training';
+              label.style.fontWeight = 'bold';
+              personCard.append(nameField, rankField, label);
+              const trainingSet = new Set((person.training || []).map((name) => String(name || '').toLowerCase()));
+              trainings.forEach((opt) => {
+                const tLabel = document.createElement('label');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = trainingSet.has(opt.name.toLowerCase());
+                checkbox.dataset.focusKey = `unit-${idx}-person-${personIdx}-training-${opt.name}`;
+                checkbox.addEventListener('change', () => {
+                  const name = opt.name;
+                  const targetKey = name.toLowerCase();
+                  if (checkbox.checked) {
+                    const combined = Array.isArray(person.training) ? person.training.slice() : [];
+                    if (!combined.some((item) => String(item || '').toLowerCase() === targetKey)) {
+                      combined.push(name);
+                    }
+                    const collapsed = collapseTrainingListForState(combined);
+                    person.training = expandTrainingListForState(collapsed);
+                  } else {
+                    let current = Array.isArray(person.training) ? person.training.slice() : [];
+                    current = current.filter((item) => String(item || '').toLowerCase() !== targetKey);
+                    let collapsed = collapseTrainingListForState(current);
+                    collapsed = collapsed.filter((item) => String(item || '').toLowerCase() !== targetKey);
+                    const toRemove = new Set();
+                    collapsed.forEach((item) => {
+                      const expandedSingle = expandTrainingListForState([item]);
+                      if (expandedSingle.some((t) => String(t || '').toLowerCase() === targetKey)) {
+                        toRemove.add(String(item || '').toLowerCase());
+                      }
+                    });
+                    if (toRemove.size) {
+                      collapsed = collapsed.filter((item) => !toRemove.has(String(item || '').toLowerCase()));
+                    }
+                    person.training = expandTrainingListForState(collapsed);
+                  }
+                  hideError();
+                  renderUnits();
+                  updateCostSummary();
+                });
+                const span = document.createElement('span');
+                span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+                tLabel.append(checkbox, span);
+                trainingField.appendChild(tLabel);
+              });
+              if (!trainings.length) {
+                const emptyTrain = document.createElement('div');
+                emptyTrain.className = 'station-builder-empty';
+                emptyTrain.textContent = 'No training available for this class.';
+                trainingField.appendChild(emptyTrain);
               }
-              hideError();
-              renderPersonnel();
-              updateCostSummary();
+              personCard.appendChild(trainingField);
+              personnelList.appendChild(personCard);
             });
-            const span = document.createElement('span');
-            span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
-            tLabel.append(checkbox, span);
-            trainingField.appendChild(tLabel);
-          });
-          if (!trainings.length) {
-            const emptyTrain = document.createElement('div');
-            emptyTrain.className = 'station-builder-empty';
-            emptyTrain.textContent = 'No training available for this class.';
-            trainingField.appendChild(emptyTrain);
           }
-          wrapper.appendChild(trainingField);
-          personnelContainer.appendChild(wrapper);
+          wrapper.appendChild(personnelList);
+          unitsContainer.appendChild(wrapper);
         });
       });
     }
@@ -3602,11 +3574,15 @@ function openStationBuilderModal(initial = {}) {
         (sum, unit) => sum + unit.equipment.reduce((s, item) => s + findEquipmentCost(item), 0),
         0
       );
-      const personnelCost = state.personnel.reduce((sum, person) => {
-        if (!person.name?.trim()) return sum;
-        const collapsedTraining = collapseTrainingListForState(person.training);
-        const trainingCost = collapsedTraining.reduce((s, t) => s + findTrainingCost(t), 0);
-        return sum + BASE_PERSON_COST + trainingCost;
+      const personnelCost = state.units.reduce((sum, unit) => {
+        const unitPersonnel = Array.isArray(unit.personnel) ? unit.personnel : [];
+        const unitSum = unitPersonnel.reduce((innerSum, person) => {
+          if (!person.name?.trim()) return innerSum;
+          const collapsedTraining = collapseTrainingListForState(person.training);
+          const trainingCost = collapsedTraining.reduce((s, t) => s + findTrainingCost(t), 0);
+          return innerSum + BASE_PERSON_COST + trainingCost;
+        }, 0);
+        return sum + unitSum;
       }, 0);
       const total = stationCost + unitCost + stationEquipCost + unitEquipCost + personnelCost;
       return { stationCost, unitCost, stationEquipCost, unitEquipCost, personnelCost, total };
@@ -3650,6 +3626,11 @@ function openStationBuilderModal(initial = {}) {
           if (!slots && unit.equipment.length) {
             throw new Error(`Unit ${idx + 1} cannot carry equipment.`);
           }
+          const unitPersonnel = Array.isArray(unit.personnel) ? unit.personnel : [];
+          const seatCapacity = Number(def?.capacity || 0) || 0;
+          if (seatCapacity && unitPersonnel.length > seatCapacity) {
+            throw new Error(`Unit ${idx + 1} exceeds seat capacity (${unitPersonnel.length}/${seatCapacity}).`);
+          }
           let seats = null;
           const defaultCap = Number(def?.capacity || 0) || 0;
           if (defaultCap > 0) {
@@ -3666,6 +3647,16 @@ function openStationBuilderModal(initial = {}) {
               seats = Math.max(0, value);
             }
           }
+          const personnel = unitPersonnel
+            .map((person, personIdx) => {
+              const pname = person.name.trim();
+              if (!pname) return null;
+              const uniqueTraining = collapseTrainingListForState(person.training);
+              const rank = cleanRankValue(person.rank);
+              return { name: pname, rank: rank || null, training: uniqueTraining };
+            })
+            .filter(Boolean);
+
           return {
             name,
             type: def.type,
@@ -3673,25 +3664,11 @@ function openStationBuilderModal(initial = {}) {
             tag: unit.tag ? unit.tag.trim() : '',
             priority: Math.min(5, Math.max(1, Number(unit.priority) || 1)),
             equipment: unit.equipment.slice(),
+            patrol: Boolean(unit.patrol),
             seats,
+            personnel,
           };
         });
-
-        const personnel = state.personnel
-          .map((person, idx) => {
-            const name = person.name.trim();
-            if (!name) return null;
-            const assigned = person.assignedUnit == null || person.assignedUnit === ''
-              ? null
-              : Number(person.assignedUnit);
-            if (assigned != null && (!Number.isInteger(assigned) || assigned < 0 || assigned >= units.length)) {
-              throw new Error(`Personnel ${idx + 1} has an invalid unit assignment.`);
-            }
-            const uniqueTraining = collapseTrainingListForState(person.training);
-            const rank = cleanRankValue(person.rank);
-            return { name, rank: rank || null, training: uniqueTraining, assigned_unit: assigned };
-          })
-          .filter(Boolean);
 
         return {
           name: trimmedName,
@@ -3703,7 +3680,6 @@ function openStationBuilderModal(initial = {}) {
           bed_capacity: state.type === 'hospital' ? Math.max(0, Number(state.bed_capacity) || 0) : 0,
           equipment: state.storageEquipment.slice(),
           units,
-          personnel,
         };
       } catch (err) {
         showError(err.message || 'Invalid input.');
@@ -3746,11 +3722,13 @@ function openStationBuilderModal(initial = {}) {
           tag: '',
           priority: 1,
           equipment: [],
+          patrol: false,
+          personnel: [],
+          personnelAddCount: 1,
           seats: null,
         });
       }
       renderUnits();
-      renderPersonnel();
       updateCostSummary();
     }
 
@@ -3771,39 +3749,40 @@ function openStationBuilderModal(initial = {}) {
       return '';
     }
 
-    async function addPersonnel(count = 1) {
+    async function addPersonnelToUnit(unit, unitIndex, count = 1) {
+      if (!unit) return;
+      if (!Array.isArray(unit.personnel)) unit.personnel = [];
       const total = Math.max(1, Math.floor(Number(count) || 1));
       const options = trainingOptions();
       const defaults = getDefaultTrainingsForState(options);
       const expandedDefaults = expandTrainingListForState(defaults);
+      const def = allowedUnitTypes(unit.class).find((entry) => entry.type === unit.type);
+      const seatCap = Number(def?.capacity || 0) || 0;
       for (let i = 0; i < total; i += 1) {
-        const person = { name: '', rank: '', training: expandedDefaults.slice(), assignedUnit: null };
+        if (seatCap && unit.personnel.length >= seatCap) {
+          showError(`Unit ${unitIndex + 1} is at seat capacity (${seatCap}).`);
+          break;
+        }
+        const person = { name: '', rank: '', training: expandedDefaults.slice() };
         const randomName = await fetchRandomPersonName();
         if (randomName) person.name = randomName;
-        state.personnel.push(person);
+        unit.personnel.push(person);
       }
-      renderPersonnel();
+      renderUnits();
       updateCostSummary();
     }
-
-    addPersonBtn.addEventListener('click', async () => addPersonnel(1));
-    addPersonBatchBtn.addEventListener('click', async () => {
-      await addPersonnel(addPersonCountInput.value);
-    });
 
     typeSelect.addEventListener('change', () => {
       state.type = typeSelect.value;
       sanitizeByType();
       renderStationEquipment();
       renderUnits();
-      renderPersonnel();
       updateCostSummary();
     });
 
     sanitizeByType();
     renderStationEquipment();
     renderUnits();
-    renderPersonnel();
     refreshCurrentRankOptions();
     updateCostSummary();
     nameInput.focus();

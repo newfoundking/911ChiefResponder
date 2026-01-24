@@ -87,8 +87,6 @@ const stationTemplate = () => ({
   bed_capacity: 0,
   equipment: [],
   units: [],
-  personnel: [],
-  personnel_add_count: 1,
 });
 
 const unitTemplate = () => ({
@@ -97,13 +95,15 @@ const unitTemplate = () => ({
   tag: '',
   priority: 1,
   equipment: [],
+  patrol: false,
+  personnel: [],
+  personnel_add_count: 1,
 });
 
 const personTemplate = () => ({
   name: '',
   rank: '',
   training: [],
-  assigned_unit: '',
 });
 
 function createPersonForStation(stationType) {
@@ -113,7 +113,6 @@ function createPersonForStation(stationType) {
     name: '',
     rank: '',
     training: expandTrainingListForStation(defaults, stationType),
-    assigned_unit: '',
   };
 }
 
@@ -165,6 +164,15 @@ function ensureUnitDefaults(station) {
     if (!unit.type && options.length) {
       unit.type = options[0].type;
     }
+    if (!Array.isArray(unit.personnel)) {
+      unit.personnel = [];
+    }
+    if (!Number.isFinite(Number(unit.personnel_add_count))) {
+      unit.personnel_add_count = 1;
+    }
+    if (unit.patrol === undefined) {
+      unit.patrol = false;
+    }
   });
 }
 
@@ -197,13 +205,6 @@ function renderStationCard(station, index) {
     unitOptions
       .map((opt) => `<option value="${opt.type}" ${opt.type === selected ? 'selected' : ''}>${opt.type}</option>`)
       .join('');
-  const unitAssignmentOptions = (selected) => {
-    const base = [`<option value="" ${selected === '' ? 'selected' : ''}>Unassigned</option>`];
-    station.units.forEach((unit, idx) => {
-      base.push(`<option value="${idx}" ${String(selected) === String(idx) ? 'selected' : ''}>${unit.name || `Unit ${idx + 1}`}</option>`);
-    });
-    return base.join('');
-  };
 
   return `
     <div class="station-card" data-station-index="${index}">
@@ -290,6 +291,10 @@ function renderStationCard(station, index) {
                 Priority
                 <input type="number" min="1" max="5" data-field="unit-priority" data-focus-key="station-${index}-unit-${unitIndex}-priority" value="${unit.priority}" />
               </label>
+              <label>
+                Patrol
+                <input type="checkbox" data-field="unit-patrol" data-focus-key="station-${index}-unit-${unitIndex}-patrol" ${unit.patrol ? 'checked' : ''} />
+              </label>
             </div>
             <div class="section-title">Unit Equipment</div>
             <div class="pill-list">
@@ -299,6 +304,48 @@ function renderStationCard(station, index) {
                   ${name}
                 </label>`).join('') : '<em>No equipment defined for this class.</em>'}
             </div>
+            <div class="section-title">Unit Personnel</div>
+            <div>
+              ${unit.personnel.map((person, personIndex) => `
+                <div class="person-card" data-person-index="${personIndex}">
+                  <div class="inline-actions" style="justify-content: space-between;">
+                    <strong>Person ${personIndex + 1}</strong>
+                    <button class="ghost" data-action="remove-unit-person">Remove</button>
+                  </div>
+                  <div class="grid">
+                    <label>
+                      Name
+                      <input type="text" data-field="person-name" data-focus-key="station-${index}-unit-${unitIndex}-person-${personIndex}-name" value="${person.name}" placeholder="Alex Rivera" />
+                    </label>
+                    <label>
+                      Rank
+                      ${departmentRanks.length ? `
+                        <select data-field="person-rank" data-focus-key="station-${index}-unit-${unitIndex}-person-${personIndex}-rank">
+                          ${buildRankSelectOptions(departmentRanks, person.rank)}
+                        </select>
+                      ` : `
+                        <input type="text" data-field="person-rank" data-focus-key="station-${index}-unit-${unitIndex}-person-${personIndex}-rank" value="${person.rank}" placeholder="Captain" />
+                      `}
+                    </label>
+                  </div>
+                  <div class="section-title">Training</div>
+                  <div class="pill-list">
+                    ${trainingOptions.length ? trainingOptions.map((name) => `
+                      <label class="pill">
+                        <input type="checkbox" class="training-checkbox" data-focus-key="station-${index}-unit-${unitIndex}-person-${personIndex}-training-${name}" data-training-name="${name}" ${person.training.includes(name) ? 'checked' : ''} />
+                        ${name}
+                      </label>`).join('') : '<em>No training list available.</em>'}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            <div class="inline-actions">
+              <label>
+                Add Count
+                <input type="number" min="1" max="50" data-field="unit-personnel-add-count" data-focus-key="station-${index}-unit-${unitIndex}-personnel-add-count" value="${unit.personnel_add_count || 1}" />
+              </label>
+              <button class="secondary" data-action="add-unit-person">Add Personnel</button>
+            </div>
           </div>
         `).join('')}
       </div>
@@ -306,54 +353,6 @@ function renderStationCard(station, index) {
         <button class="secondary" data-action="add-unit">Add Unit</button>
       </div>
 
-      <div class="section-title">Personnel</div>
-      <div>
-        ${station.personnel.map((person, personIndex) => `
-          <div class="person-card" data-person-index="${personIndex}">
-            <div class="inline-actions" style="justify-content: space-between;">
-              <strong>Person ${personIndex + 1}</strong>
-              <button class="ghost" data-action="remove-person">Remove</button>
-            </div>
-            <div class="grid">
-              <label>
-                Name
-                <input type="text" data-field="person-name" data-focus-key="station-${index}-person-${personIndex}-name" value="${person.name}" placeholder="Alex Rivera" />
-              </label>
-              <label>
-                Rank
-                ${departmentRanks.length ? `
-                  <select data-field="person-rank" data-focus-key="station-${index}-person-${personIndex}-rank">
-                    ${buildRankSelectOptions(departmentRanks, person.rank)}
-                  </select>
-                ` : `
-                  <input type="text" data-field="person-rank" data-focus-key="station-${index}-person-${personIndex}-rank" value="${person.rank}" placeholder="Captain" />
-                `}
-              </label>
-              <label>
-                Assigned Unit
-                <select data-field="person-assigned-unit" data-focus-key="station-${index}-person-${personIndex}-assigned">
-                  ${unitAssignmentOptions(person.assigned_unit)}
-                </select>
-              </label>
-            </div>
-            <div class="section-title">Training</div>
-            <div class="pill-list">
-              ${trainingOptions.length ? trainingOptions.map((name) => `
-                <label class="pill">
-                  <input type="checkbox" class="training-checkbox" data-focus-key="station-${index}-person-${personIndex}-training-${name}" data-training-name="${name}" ${person.training.includes(name) ? 'checked' : ''} />
-                  ${name}
-                </label>`).join('') : '<em>No training list available.</em>'}
-            </div>
-          </div>
-        `).join('')}
-      </div>
-      <div class="inline-actions">
-        <label>
-          Add Count
-          <input type="number" min="1" max="50" data-field="personnel-add-count" data-focus-key="station-${index}-personnel-add-count" value="${station.personnel_add_count || 1}" />
-        </label>
-        <button class="secondary" data-action="add-person">Add Personnel</button>
-      </div>
     </div>
   `;
 }
@@ -373,21 +372,6 @@ function parseCount(value, fallback = 1, max = 50) {
   const num = Math.floor(Number(value));
   if (!Number.isFinite(num)) return fallback;
   return Math.max(1, Math.min(max, num));
-}
-
-function refreshUnitAssignmentOptions(stationCard, station) {
-  const selects = stationCard.querySelectorAll('select[data-field="person-assigned-unit"]');
-  if (!selects.length) return;
-  const options = [];
-  options.push(`<option value="">Unassigned</option>`);
-  station.units.forEach((unit, idx) => {
-    options.push(`<option value="${idx}">${unit.name || `Unit ${idx + 1}`}</option>`);
-  });
-  selects.forEach((select) => {
-    const current = select.value;
-    select.innerHTML = options.join('');
-    select.value = current;
-  });
 }
 
 stationListEl.addEventListener('click', async (event) => {
@@ -412,29 +396,36 @@ stationListEl.addEventListener('click', async (event) => {
     if (unitCard) {
       const unitIndex = Number(unitCard.dataset.unitIndex);
       station.units.splice(unitIndex, 1);
-      station.personnel.forEach((person) => {
-        if (person.assigned_unit !== '' && Number(person.assigned_unit) >= station.units.length) {
-          person.assigned_unit = '';
-        }
-      });
     }
   }
-  if (action === 'add-person') {
-    const countInput = stationCard.querySelector('[data-field="personnel-add-count"]');
-    const count = parseCount(countInput?.value, station.personnel_add_count || 1);
-    station.personnel_add_count = count;
-    const people = Array.from({ length: count }, () => createPersonForStation(station.type));
-    const names = await Promise.all(people.map(() => fetchRandomPersonName()));
-    names.forEach((name, idx) => {
-      if (name) people[idx].name = name;
-    });
-    station.personnel.push(...people);
+  if (action === 'add-unit-person') {
+    const unitCard = event.target.closest('[data-unit-index]');
+    if (unitCard) {
+      const unitIndex = Number(unitCard.dataset.unitIndex);
+      const unit = station.units[unitIndex];
+      if (!unit) return;
+      const countInput = unitCard.querySelector('[data-field="unit-personnel-add-count"]');
+      const count = parseCount(countInput?.value, unit.personnel_add_count || 1);
+      unit.personnel_add_count = count;
+      const people = Array.from({ length: count }, () => createPersonForStation(station.type));
+      const names = await Promise.all(people.map(() => fetchRandomPersonName()));
+      names.forEach((name, idx) => {
+        if (name) people[idx].name = name;
+      });
+      if (!Array.isArray(unit.personnel)) unit.personnel = [];
+      unit.personnel.push(...people);
+    }
   }
-  if (action === 'remove-person') {
+  if (action === 'remove-unit-person') {
+    const unitCard = event.target.closest('[data-unit-index]');
     const personCard = event.target.closest('[data-person-index]');
-    if (personCard) {
+    if (unitCard && personCard) {
+      const unitIndex = Number(unitCard.dataset.unitIndex);
       const personIndex = Number(personCard.dataset.personIndex);
-      station.personnel.splice(personIndex, 1);
+      const unit = station.units[unitIndex];
+      if (unit && Array.isArray(unit.personnel)) {
+        unit.personnel.splice(personIndex, 1);
+      }
     }
   }
 
@@ -451,16 +442,10 @@ stationListEl.addEventListener('change', (event) => {
 
   const field = event.target.dataset.field;
   if (field && !event.target.closest('[data-unit-index]') && !event.target.closest('[data-person-index]')) {
-    if (field === 'personnel-add-count') {
-      station.personnel_add_count = parseCount(event.target.value, station.personnel_add_count || 1);
-      return;
-    }
     if (field === 'type') {
       station.type = event.target.value;
       station.equipment = [];
       station.units = [];
-      station.personnel = [];
-      station.personnel_add_count = 1;
       render();
       return;
     } else if (['bays', 'equipment_slots', 'holding_cells', 'bed_capacity'].includes(field)) {
@@ -487,6 +472,10 @@ stationListEl.addEventListener('change', (event) => {
     const unitIndex = Number(unitCard.dataset.unitIndex);
     const unit = station.units[unitIndex];
     if (!unit) return;
+    if (field === 'unit-personnel-add-count') {
+      unit.personnel_add_count = parseCount(event.target.value, unit.personnel_add_count || 1);
+      return;
+    }
     if (event.target.classList.contains('unit-equipment-checkbox')) {
       const name = event.target.dataset.equipmentName;
       if (!name) return;
@@ -501,30 +490,26 @@ stationListEl.addEventListener('change', (event) => {
     if (field === 'unit-type') unit.type = event.target.value;
     if (field === 'unit-tag') unit.tag = event.target.value;
     if (field === 'unit-priority') unit.priority = parseNumber(event.target.value, 1);
-    if (field === 'unit-name') {
-      refreshUnitAssignmentOptions(stationCard, station);
-    }
-    return;
-  }
+    if (field === 'unit-patrol') unit.patrol = event.target.checked;
 
-  const personCard = event.target.closest('[data-person-index]');
-  if (personCard) {
-    const personIndex = Number(personCard.dataset.personIndex);
-    const person = station.personnel[personIndex];
-    if (!person) return;
-    if (event.target.classList.contains('training-checkbox')) {
-      const name = event.target.dataset.trainingName;
-      if (!name) return;
-      if (event.target.checked) {
-        if (!person.training.includes(name)) person.training.push(name);
-      } else {
-        person.training = person.training.filter((item) => item !== name);
+    const personCard = event.target.closest('[data-person-index]');
+    if (personCard) {
+      const personIndex = Number(personCard.dataset.personIndex);
+      const person = unit.personnel?.[personIndex];
+      if (!person) return;
+      if (event.target.classList.contains('training-checkbox')) {
+        const name = event.target.dataset.trainingName;
+        if (!name) return;
+        if (event.target.checked) {
+          if (!person.training.includes(name)) person.training.push(name);
+        } else {
+          person.training = person.training.filter((item) => item !== name);
+        }
+        return;
       }
-      return;
+      if (field === 'person-name') person.name = event.target.value;
+      if (field === 'person-rank') person.rank = event.target.value;
     }
-    if (field === 'person-name') person.name = event.target.value;
-    if (field === 'person-rank') person.rank = event.target.value;
-    if (field === 'person-assigned-unit') person.assigned_unit = event.target.value;
   }
 });
 
@@ -580,12 +565,12 @@ submitBtn.addEventListener('click', async () => {
       tag: unit.tag.trim(),
       priority: parseNumber(unit.priority, 1),
       equipment: unit.equipment.slice(),
-    })),
-    personnel: station.personnel.map((person) => ({
-      name: person.name.trim(),
-      rank: person.rank.trim(),
-      training: person.training.slice(),
-      assigned_unit: person.assigned_unit,
+      patrol: Boolean(unit.patrol),
+      personnel: (Array.isArray(unit.personnel) ? unit.personnel : []).map((person) => ({
+        name: person.name.trim(),
+        rank: person.rank.trim(),
+        training: person.training.slice(),
+      })),
     })),
   }));
 
