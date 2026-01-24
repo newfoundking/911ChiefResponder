@@ -99,6 +99,13 @@ const STATION_BUILD_COST = 50000;
 const STATION_CLASS_MULTIPLIERS = {
   fire_rescue: 1.5,
 };
+const STATION_UPGRADES = [
+  {
+    from: 'fire',
+    to: 'fire_rescue',
+    label: 'Fire Rescue',
+  },
+];
 const BASE_PERSON_COST = 100;
 
 function buildStationPlan(body = {}) {
@@ -378,6 +385,36 @@ function priceHospitalBeds(count, isExpansion) {
   return isExpansion ? Math.floor(base * HOSPITAL_BED_EXP_MULTIPLIER) : base;
 }
 
+function computeStationBaseCost(station) {
+  const bays = Math.max(0, Number(station.bay_count ?? station.bays ?? 0));
+  const equipmentSlots = Math.max(0, Number(station.equipment_slots ?? 0));
+  const holdingCells = Math.max(0, Number(station.holding_cells ?? 0));
+  return (
+    STATION_BUILD_COST +
+    priceBays(bays, false) +
+    (equipmentSlots * EQUIPMENT_SLOT_COST) +
+    (holdingCells > 0 ? priceHoldingCells(holdingCells, false) : 0)
+  );
+}
+
+function listStationUpgradeOptions(station) {
+  const baseCost = computeStationBaseCost(station);
+  const currentType = String(station.type || '').toLowerCase();
+  return STATION_UPGRADES
+    .filter((upgrade) => upgrade.from === currentType)
+    .map((upgrade) => {
+      const fromMultiplier = Number(STATION_CLASS_MULTIPLIERS[currentType] || 1);
+      const toMultiplier = Number(STATION_CLASS_MULTIPLIERS[upgrade.to] || 1);
+      const cost = Math.max(0, Math.round(baseCost * (toMultiplier - fromMultiplier)));
+      return {
+        from: currentType,
+        to: upgrade.to,
+        label: upgrade.label,
+        cost,
+      };
+    });
+}
+
 async function hydrateFacilityFields(row) {
   let equipment;
   try { equipment = JSON.parse(row.equipment || '[]'); }
@@ -451,6 +488,57 @@ async function getStation(req, res) {
     if (!row) return res.status(404).json({ error: 'Station not found' });
     const hydrated = await hydrateFacilityFields(row);
     res.json(hydrated);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// GET /api/stations/:id/upgrades
+async function getStationUpgrades(req, res) {
+  const id = Number(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid station id' });
+  try {
+    const row = await getAsync('SELECT * FROM stations WHERE id=?', [id]);
+    if (!row) return res.status(404).json({ error: 'Station not found' });
+    const options = listStationUpgradeOptions(row);
+    res.json({ station_id: id, options });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// PATCH /api/stations/:id/upgrade  { type: <string> }
+async function patchStationUpgrade(req, res) {
+  const id = Number(req.params.id);
+  const targetType = String(req.body?.type || '').toLowerCase();
+  if (!id || !targetType) return res.status(400).json({ error: 'Invalid station id or type' });
+  try {
+    const row = await getAsync('SELECT * FROM stations WHERE id=?', [id]);
+    if (!row) return res.status(404).json({ error: 'Station not found' });
+    const options = listStationUpgradeOptions(row);
+    const upgrade = options.find((option) => option.to === targetType);
+    if (!upgrade) return res.status(400).json({ error: 'Upgrade not available for this station' });
+
+    const funds = await requireFunds(upgrade.cost);
+    if (!funds.ok) {
+      return res.status(409).json({ error: 'Insufficient funds', balance: funds.balance, needed: upgrade.cost });
+    }
+
+    await runAsync('BEGIN IMMEDIATE TRANSACTION');
+    try {
+      const result = await runAsync('UPDATE stations SET type=? WHERE id=?', [upgrade.to, id]);
+      if (!result.changes) {
+        await runAsync('ROLLBACK');
+        return res.status(404).json({ error: 'Station not found' });
+      }
+      await adjustBalance(-upgrade.cost);
+      await runAsync('COMMIT');
+      const balance = await getBalance();
+      res.json({ success: true, station_id: id, type: upgrade.to, cost: upgrade.cost, balance });
+    } catch (err) {
+      await runAsync('ROLLBACK');
+      res.status(500).json({ error: err.message });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -815,8 +903,10 @@ function getStationPersonnel(req, res) {
 module.exports = {
   getStations,
   getStation,
+  getStationUpgrades,
   createStation,
   createDepartmentBulk,
+  patchStationUpgrade,
   patchBays,
   patchIcon,
   patchName,
