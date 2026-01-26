@@ -4767,49 +4767,6 @@ async function openAssignModal(unitId, stationId) {
     <br><br>
     <button id="assignPersonnelConfirm">Assign</button>
   `;
-  const unitTypeSelect = detail.querySelector('#unit-type');
-  const unitClassSelect = detail.querySelector('#unit-class');
-  const unitSeatInput = detail.querySelector('#unit-seats');
-  const updateSeatField = (forceDefault = false) => {
-    if (!unitSeatInput || !unitTypeSelect) return;
-    const selectedClass = unitClassSelect ? unitClassSelect.value : station.type;
-    const def = findUnitDefinitionByType(selectedClass, unitTypeSelect.value);
-    const defaultSeats = Number(def?.capacity || 0) || 0;
-    if (!defaultSeats) {
-      unitSeatInput.value = '';
-      unitSeatInput.placeholder = 'N/A';
-      unitSeatInput.disabled = true;
-      unitSeatInput.title = 'This unit type cannot carry personnel.';
-      return;
-    }
-    unitSeatInput.disabled = false;
-    unitSeatInput.min = '1';
-    unitSeatInput.max = String(defaultSeats);
-    unitSeatInput.placeholder = String(defaultSeats);
-    unitSeatInput.title = `Enter between 1 and ${defaultSeats}. Leave blank to use default (${defaultSeats}).`;
-    const raw = unitSeatInput.value.trim();
-    if (!raw) {
-      if (forceDefault) {
-        unitSeatInput.value = String(defaultSeats);
-      } else {
-        unitSeatInput.value = '';
-      }
-      return;
-    }
-    let value = Math.floor(Number(raw));
-    if (!Number.isFinite(value)) {
-      unitSeatInput.value = String(defaultSeats);
-      return;
-    }
-    value = Math.max(1, Math.min(defaultSeats, value));
-    unitSeatInput.value = String(value);
-  };
-  if (unitSeatInput && unitTypeSelect) {
-    updateSeatField(true);
-    unitClassSelect?.addEventListener('change', () => updateSeatField(true));
-    unitTypeSelect.addEventListener('change', () => updateSeatField(true));
-    unitSeatInput.addEventListener('blur', () => updateSeatField(false));
-  }
 
   document.getElementById("assignPersonnelConfirm").onclick = async () => {
     const select = document.getElementById("assign-personnel-select");
