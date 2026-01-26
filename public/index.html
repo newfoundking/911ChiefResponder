@@ -2739,7 +2739,7 @@ async function dispatchSelectedFromList(mission, showNext = false) {
   const ids = Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(cb => parseInt(cb.value, 10));
   if (!ids.length) { notifyError('Select at least one unit to dispatch.'); return; }
   try {
-    await sendUnitsToMission(mission, ids, null, false);
+    await sendUnitsToMission(mission, ids, null, true);
     await refreshAssignedUnitsUI(mission.id, mission);
     await refreshMissionUnitRoster(mission);
     renderMissionUnitList(mission);

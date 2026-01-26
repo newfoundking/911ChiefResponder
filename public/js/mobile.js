@@ -461,7 +461,7 @@ function pointInPolygon(lat, lon, polygon) {
   return inside;
 }
 
-async function fetchAvailableUnitsForMission(mission) {
+async function fetchAvailableUnitsForMission(mission, { ignoreDepartments = false } = {}) {
   const [stations, unitsRaw] = await Promise.all([
     fetchJson('/api/stations'),
     fetchJson('/api/units?status=available')
@@ -469,7 +469,7 @@ async function fetchAvailableUnitsForMission(mission) {
 
   const stationMap = new Map(stations.map((station) => [station.id, station]));
   const missionDepts = await missionDepartmentsFor(mission);
-  const restrictByDept = missionDepts.length > 0;
+  const restrictByDept = missionDepts.length > 0 && !ignoreDepartments;
 
   const units = unitsRaw
     .filter((unit) => {
@@ -1379,7 +1379,7 @@ function buildMissionDetail(mission) {
 }
 
 function buildMissionDispatchSection(mission) {
-  const dispatchable = getDispatchableUnitsForMission(mission);
+  const dispatchable = getDispatchableUnitsForMission(mission, { ignoreDepartments: true });
   if (!dispatchable.length) {
     return { node: null, fallback: 'No eligible units available.' };
   }
@@ -1541,21 +1541,11 @@ function buildManualDispatchPanel(mission, { setStatus, onComplete }) {
   dispatchBtn.textContent = 'Dispatch Selected';
   actions.appendChild(dispatchBtn);
 
-  const forceLabel = document.createElement('label');
-  forceLabel.className = 'dispatch-panel__force';
-  const forceCheckbox = document.createElement('input');
-  forceCheckbox.type = 'checkbox';
-  forceLabel.appendChild(forceCheckbox);
-  const forceText = document.createElement('span');
-  forceText.textContent = 'Force dispatch';
-  forceLabel.appendChild(forceText);
-  actions.appendChild(forceLabel);
-
   const renderUnits = async () => {
     listWrapper.innerHTML = '<div class="dispatch-panel__loading">Loading available units…</div>';
     dispatchBtn.disabled = true;
     try {
-      const { units } = await fetchAvailableUnitsForMission(mission);
+      const { units } = await fetchAvailableUnitsForMission(mission, { ignoreDepartments: true });
       if (!units.length) {
         listWrapper.innerHTML = '<div class="dispatch-panel__empty">No available units meet the criteria.</div>';
         return;
@@ -1659,7 +1649,7 @@ function buildManualDispatchPanel(mission, { setStatus, onComplete }) {
     dispatchBtn.disabled = true;
     setStatus('Dispatching selected units…', 'info');
     try {
-      await dispatchUnitsForMission(mission, selected, { force: forceCheckbox.checked });
+      await dispatchUnitsForMission(mission, selected, { force: true });
       setStatus(`Dispatched ${selected.length} unit${selected.length === 1 ? '' : 's'}.`, 'success');
       await onComplete();
     } catch (err) {
@@ -1683,7 +1673,7 @@ function buildUnitTypeDispatchPanel(mission, { setStatus, onComplete }) {
   const populate = async () => {
     listWrapper.innerHTML = '<div class="dispatch-panel__loading">Loading unit types…</div>';
     try {
-      const { units } = await fetchAvailableUnitsForMission(mission);
+      const { units } = await fetchAvailableUnitsForMission(mission, { ignoreDepartments: true });
       const groups = new Map();
       units.forEach((unit) => {
         const typeKey = unit.type || 'Unknown';
@@ -1893,10 +1883,10 @@ async function runCardDispatchMission(mission) {
   return autoDispatchMission(rcMission);
 }
 
-function getDispatchableUnitsForMission(mission) {
+function getDispatchableUnitsForMission(mission, { ignoreDepartments = false } = {}) {
   const assignedIds = new Set((missionAssignments.get(mission.id) || []).map((unit) => unit.id));
   const departments = new Set((Array.isArray(mission.departments) ? mission.departments : []).filter(Boolean));
-  const restrictByDept = departments.size > 0;
+  const restrictByDept = departments.size > 0 && !ignoreDepartments;
 
   return latestUnits
     .filter((unit) => {
