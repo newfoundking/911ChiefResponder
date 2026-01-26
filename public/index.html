@@ -604,6 +604,7 @@
                         <div class="mission-overlay__header-actions">
                                 <button id="closeMissionBtn" class="close-btn" onclick="closeMissionDetails()">Close</button>
                         </div>
+                        <button id="closeMissionBtn" class="incident-modal__close" onclick="closeMissionDetails()">Close</button>
                 </header>
 
                 <section class="mission-overlay__run-cards hidden">
@@ -2602,7 +2603,6 @@ async function showMissionDetails(mission) {
   document.getElementById('nextMissionBtnFooter').onclick = showNextMission;
   document.getElementById('prevMissionBtnFooter').onclick = showPrevMission;
   document.getElementById('autoDispatchBtn').onclick = () => autoDispatch(mission);
-  document.getElementById('createRunCardBtn').onclick = () => openRunCardCreator(mission);
   document.getElementById('dispatchSelectedBtn').onclick = () => dispatchSelectedFromList(mission, false);
   document.getElementById('dispatchNextBtn').onclick = () => dispatchSelectedFromList(mission, true);
   const openDispatchBtn = document.getElementById('openDispatchPanelBtn');
@@ -2623,24 +2623,12 @@ async function showMissionDetails(mission) {
     };
   });
 
-  refreshAssignedUnitsUI(mission.id).then(assigned => {
-    const reqDiv = document.getElementById('reqDynamic');
-    if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
-  });
-  document.getElementById("missionDetails").style.display = "flex";
-  const active = activeWorkTimers.get(mission.id);
-  if (active && active.endTime) {
-    startMissionCountdown(mission.id, active.endTime);
-  } else {
-    const t = document.getElementById('missionTimerArea');
-    if (t) t.textContent = '';
-  }
+  document.getElementById('missionDetails').classList.remove('hidden');
 }
 
 function closeMissionDetails() {
-  document.getElementById('missionDetails').style.display = 'none';
+  document.getElementById('missionDetails').classList.add('hidden');
   openMissionId = null;
-  closeDispatchPanel();
 }
 
 // ===== Station details =====
