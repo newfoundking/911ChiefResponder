@@ -1082,6 +1082,7 @@ let buildStationMode = false;
   let pendingStationCoords = null;
   let openMissionId = null;
   let missionsCache = [];
+  const assignedUnitsCache = new Map();
   let missionUnitTab = 'available';
   let missionMaxDistance = 400;
   let missionRosterCache = null;
@@ -1630,6 +1631,14 @@ async function fetchMissions() {
       missions = sortMissions(missions);
       missionsCache = missions;
 
+      if (openMissionId !== null) {
+        const openMission = missions.find(m => m.id === openMissionId);
+        if (openMission) {
+          const assigned = assignedUnitsCache.get(openMissionId) || [];
+          refreshRequirementsUI(openMissionId, assigned, openMission);
+        }
+      }
+
       const missionById = new Map(missions.map(m => [m.id, m]));
     const missionIds = new Set(missionById.keys());
     for (const [id, iid] of Array.from(missionListTimers.entries())) {
@@ -2020,9 +2029,11 @@ async function refreshAssignedUnitsUI(missionId, missionData = null) {
     (assigned||[]).forEach(u => _unitById.set(u.id, normalizeUnitRecord(u)));
     if (!Array.isArray(assigned) || !assigned.length) {
       div.innerHTML = '<em>No units assigned yet.</em>';
+      assignedUnitsCache.set(missionId, []);
       await refreshRequirementsUI(missionId, [], missionData);
       return [];
     }
+    assignedUnitsCache.set(missionId, assigned);
     div.innerHTML = `
       <div class="assigned-units-header">Assigned Units</div>
       <div class="assigned-units-table-wrapper">
