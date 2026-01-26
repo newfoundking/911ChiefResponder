@@ -588,89 +588,22 @@
 </div>
 
 <!-- Mission Details Overlay -->
-<div id="missionDetails" class="mission-overlay" style="display: none;">
-        <div class="mission-overlay__panel">
-                <header class="mission-overlay__header">
-                        <div class="mission-overlay__title-block">
-				<div class="mission-overlay__title-row">
-					<span id="missionTitle" class="mission-overlay__title">Mission</span>
-					<span id="missionTimerArea" class="mission-overlay__timer"></span>
-				</div>
-				<div class="mission-overlay__meta-row">
-					<div id="missionAddress" class="mission-overlay__address"></div>
-					<div id="missionZones" class="mission-overlay__zones"></div>
-				</div>
-			</div>
-                        <div class="mission-overlay__header-actions">
-                                <button id="openDispatchPanelBtn" class="button">Dispatch Panel</button>
-                                <button id="closeMissionBtn" class="close-btn" onclick="closeMissionDetails()">Close</button>
+<div id="missionDetails" class="incident-modal hidden">
+        <div class="incident-modal__panel">
+                <header class="incident-modal__header">
+                        <div>
+                                <div id="missionTitle" class="incident-modal__title">Mission</div>
+                                <div id="missionAddress" class="incident-modal__address"></div>
                         </div>
+                        <button id="closeMissionBtn" class="incident-modal__close" onclick="closeMissionDetails()">Close</button>
                 </header>
 
-                <section class="mission-overlay__run-cards">
-                        <div class="mission-section-title">
-                                <h4>Run Cards</h4>
-                                <div class="mission-section-actions">
-                                        <button id="createRunCardBtn">Create Run Card</button>
-                                </div>
-                        </div>
-                        <div id="runCardList" class="run-card-list">Loading run cards…</div>
-                </section>
-
-                <section class="mission-overlay__body">
-                        <div class="mission-overlay__left mission-overlay__column">
-                                <div class="mission-subsection">
-                                        <div id="reqDynamic"></div>
-                                        <div id="missionMeta"></div>
-                                </div>
-                                <div id="assignedUnitsArea" class="mission-assigned-list"></div>
-                        </div>
-                        <div class="mission-overlay__right mission-overlay__column hidden">
-                                <div class="mission-dispatch-header">
-                                        <h4 class="mission-dispatch-title">Dispatch Panel</h4>
-                                        <button id="closeDispatchPanelBtn" class="close-btn" type="button">Close</button>
-                                </div>
-                                <div class="mission-distance-filter" id="missionDistanceFilter"></div>
-                                <div class="mission-unit-controls">
-                                        <div class="mission-units-tabs">
-                                                <button class="mission-units-tab active" data-tab="available">Available Units</button>
-                                                <button class="mission-units-tab" data-tab="oncall">Units on Call</button>
-                                        </div>
-                                        <div class="mission-unit-filters">
-                                                <label>
-                                                        Search
-                                                        <input id="missionSearchFilter" type="text" placeholder="Name, type, station">
-                                                </label>
-                                                <label>
-                                                        Department
-                                                        <select id="missionDeptFilter"></select>
-                                                </label>
-                                                <label>
-                                                        Type
-                                                        <select id="missionTypeFilter"></select>
-                                                </label>
-                                                <label>
-                                                        Sort
-                                                        <select id="missionSortFilter">
-                                                                <option value="distance">Distance</option>
-                                                                <option value="name">Unit Name</option>
-                                                                <option value="priority">Priority</option>
-                                                        </select>
-                                                </label>
-                                        </div>
-                                </div>
-                                <div id="missionUnitList" class="mission-unit-list">Loading units…</div>
-                        </div>
-                </section>
-
-                <footer class="mission-overlay__footer">
-                        <div class="mission-footer-actions">
-                                <button id="prevMissionBtnFooter" class="button">Back</button>
-                                <button id="nextMissionBtnFooter" class="button">Next</button>
-                                <button id="autoDispatchBtn" class="button button-primary">Auto Dispatch</button>
-                                <button id="dispatchSelectedBtn" class="button button-primary">Dispatch</button>
-                                <button id="dispatchNextBtn" class="button">Dispatch + Next</button>
-                        </div>
+                <footer class="incident-modal__footer">
+                        <button id="prevMissionBtnFooter" class="button">Back</button>
+                        <button id="nextMissionBtnFooter" class="button">Next</button>
+                        <button id="autoDispatchBtn" class="button button-primary">Auto Dispatch</button>
+                        <button id="dispatchSelectedBtn" class="button button-primary">Dispatch</button>
+                        <button id="dispatchNextBtn" class="button">Dispatch + Next</button>
                 </footer>
         </div>
 </div>
@@ -2580,63 +2513,18 @@ async function showMissionDetails(mission) {
   missionSortFilter = 'distance';
   missionSearchFilter = '';
 
-  const patientHtml = renderPatientInfo(mission);
-  const prisonerHtml = renderPrisonerInfo(mission);
-  const meta = document.getElementById('missionMeta');
-  if (meta) {
-    meta.innerHTML = `
-      <div><strong>Status:</strong> ${mission.status}</div>
-      ${patientHtml ? `<div class="mission-meta-section"><strong>Patients:</strong>${patientHtml}</div>` : ''}
-      ${prisonerHtml ? `<div class="mission-meta-section"><strong>Prisoners:</strong>${prisonerHtml}</div>` : ''}
-    `;
-  }
-
-  renderMissionDistanceFilter(mission);
-  await refreshRunCardList(mission);
-  await refreshMissionUnitRoster(mission);
-  missionUnitTab = 'available';
-  document.querySelectorAll('.mission-units-tab').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab === 'available');
-  });
-  openDispatchPanel();
-  renderMissionUnitList(mission);
-
   document.getElementById('nextMissionBtnFooter').onclick = showNextMission;
   document.getElementById('prevMissionBtnFooter').onclick = showPrevMission;
   document.getElementById('autoDispatchBtn').onclick = () => autoDispatch(mission);
-  document.getElementById('createRunCardBtn').onclick = () => openRunCardCreator(mission);
   document.getElementById('dispatchSelectedBtn').onclick = () => dispatchSelectedFromList(mission, false);
   document.getElementById('dispatchNextBtn').onclick = () => dispatchSelectedFromList(mission, true);
-  document.getElementById('openDispatchPanelBtn').onclick = () => openDispatchPanel();
-  document.getElementById('closeDispatchPanelBtn').onclick = () => closeDispatchPanel();
 
-  document.querySelectorAll('.mission-units-tab').forEach(btn => {
-    btn.onclick = () => {
-      document.querySelectorAll('.mission-units-tab').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      missionUnitTab = btn.dataset.tab;
-      renderMissionUnitList(mission);
-    };
-  });
-
-  refreshAssignedUnitsUI(mission.id).then(assigned => {
-    const reqDiv = document.getElementById('reqDynamic');
-    if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
-  });
-  document.getElementById("missionDetails").style.display = "flex";
-  const active = activeWorkTimers.get(mission.id);
-  if (active && active.endTime) {
-    startMissionCountdown(mission.id, active.endTime);
-  } else {
-    const t = document.getElementById('missionTimerArea');
-    if (t) t.textContent = '';
-  }
+  document.getElementById('missionDetails').classList.remove('hidden');
 }
 
 function closeMissionDetails() {
-  document.getElementById('missionDetails').style.display = 'none';
+  document.getElementById('missionDetails').classList.add('hidden');
   openMissionId = null;
-  closeDispatchPanel();
 }
 
 // ===== Station details =====
