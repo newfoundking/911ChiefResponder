@@ -602,12 +602,11 @@
 				</div>
 			</div>
                         <div class="mission-overlay__header-actions">
-                                <button id="openDispatchPanelBtn" class="button">Dispatch Panel</button>
                                 <button id="closeMissionBtn" class="close-btn" onclick="closeMissionDetails()">Close</button>
                         </div>
                 </header>
 
-                <section class="mission-overlay__run-cards">
+                <section class="mission-overlay__run-cards hidden">
                         <div class="mission-section-title">
                                 <h4>Run Cards</h4>
                                 <div class="mission-section-actions">
@@ -617,7 +616,7 @@
                         <div id="runCardList" class="run-card-list">Loading run cards…</div>
                 </section>
 
-                <section class="mission-overlay__body">
+                <section class="mission-overlay__body hidden">
                         <div class="mission-overlay__left mission-overlay__column">
                                 <div class="mission-subsection">
                                         <div id="reqDynamic"></div>
@@ -2598,7 +2597,6 @@ async function showMissionDetails(mission) {
   document.querySelectorAll('.mission-units-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === 'available');
   });
-  openDispatchPanel();
   renderMissionUnitList(mission);
 
   document.getElementById('nextMissionBtnFooter').onclick = showNextMission;
@@ -2607,8 +2605,14 @@ async function showMissionDetails(mission) {
   document.getElementById('createRunCardBtn').onclick = () => openRunCardCreator(mission);
   document.getElementById('dispatchSelectedBtn').onclick = () => dispatchSelectedFromList(mission, false);
   document.getElementById('dispatchNextBtn').onclick = () => dispatchSelectedFromList(mission, true);
-  document.getElementById('openDispatchPanelBtn').onclick = () => openDispatchPanel();
-  document.getElementById('closeDispatchPanelBtn').onclick = () => closeDispatchPanel();
+  const openDispatchBtn = document.getElementById('openDispatchPanelBtn');
+  if (openDispatchBtn) {
+    openDispatchBtn.onclick = () => openDispatchPanel();
+  }
+  const closeDispatchBtn = document.getElementById('closeDispatchPanelBtn');
+  if (closeDispatchBtn) {
+    closeDispatchBtn.onclick = () => closeDispatchPanel();
+  }
 
   document.querySelectorAll('.mission-units-tab').forEach(btn => {
     btn.onclick = () => {
