@@ -350,6 +350,18 @@ db.serialize(() => {
       equipment TEXT
     )
   `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS run_card_presets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mission_name TEXT NOT NULL,
+      label TEXT NOT NULL,
+      units TEXT,
+      training TEXT,
+      equipment TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      UNIQUE(mission_name, label)
+    )
+  `);
 
   // Units
   db.run(`
@@ -1838,15 +1850,106 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
 });
 
 // Run card endpoints
+app.get('/api/run-cards', (req, res) => {
+  const missionName = req.query.mission;
+  if (!missionName) return res.status(400).json({ error: 'mission query param required' });
+  db.all(
+    'SELECT id, label, units, training, equipment FROM run_card_presets WHERE mission_name=? ORDER BY label',
+    [missionName],
+    (err, rows) => {
+      if (err) return res.status(500).json({ error: err.message });
+      const presets = (rows || []).map(r => ({
+        id: r.id,
+        label: r.label,
+        source: 'custom',
+        units: parseArrayField(r.units),
+        training: parseArrayField(r.training),
+        equipment: parseArrayField(r.equipment)
+      }));
+      db.get('SELECT units, training, equipment FROM run_cards WHERE mission_name=?', [missionName], (err2, row) => {
+        if (err2) return res.status(500).json({ error: err2.message });
+        if (row) {
+          presets.unshift({
+            id: null,
+            label: 'Default',
+            source: 'legacy',
+            units: parseArrayField(row.units),
+            training: parseArrayField(row.training),
+            equipment: parseArrayField(row.equipment)
+          });
+        }
+        res.json(presets);
+      });
+    }
+  );
+});
+
 app.get('/api/run-cards/:name', (req, res) => {
+  const { id, label } = req.query || {};
+  if (id || label) {
+    const params = [req.params.name];
+    let sql = 'SELECT id, label, units, training, equipment FROM run_card_presets WHERE mission_name=?';
+    if (id) { sql += ' AND id=?'; params.push(id); }
+    if (!id && label) { sql += ' AND label=?'; params.push(label); }
+    return db.get(sql, params, (err, row) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!row) return res.status(404).json({ error: 'Not found' });
+      res.json({
+        id: row.id,
+        label: row.label,
+        units: parseArrayField(row.units),
+        training: parseArrayField(row.training),
+        equipment: parseArrayField(row.equipment)
+      });
+    });
+  }
   db.get('SELECT units, training, equipment FROM run_cards WHERE mission_name=?', [req.params.name], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
-    if (!row) return res.status(404).json({ error: 'Not found' });
-    const units = parseArrayField(row.units);
-    const training = parseArrayField(row.training);
-    const equipment = parseArrayField(row.equipment);
-    res.json({ units, training, equipment });
+    if (row) {
+      const units = parseArrayField(row.units);
+      const training = parseArrayField(row.training);
+      const equipment = parseArrayField(row.equipment);
+      return res.json({ units, training, equipment });
+    }
+    db.get(
+      'SELECT id, label, units, training, equipment FROM run_card_presets WHERE mission_name=? ORDER BY label LIMIT 1',
+      [req.params.name],
+      (err2, preset) => {
+        if (err2) return res.status(500).json({ error: err2.message });
+        if (!preset) return res.status(404).json({ error: 'Not found' });
+        res.json({
+          id: preset.id,
+          label: preset.label,
+          units: parseArrayField(preset.units),
+          training: parseArrayField(preset.training),
+          equipment: parseArrayField(preset.equipment)
+        });
+      }
+    );
   });
+});
+
+app.post('/api/run-cards', express.json(), (req, res) => {
+  const b = req.body || {};
+  if (!b.mission_name || !b.label) {
+    return res.status(400).json({ error: 'mission_name and label are required' });
+  }
+  const units = JSON.stringify(b.units || []);
+  const training = JSON.stringify(b.training || []);
+  const equipment = JSON.stringify(b.equipment || []);
+  db.run(
+    `INSERT INTO run_card_presets (mission_name, label, units, training, equipment)
+     VALUES (?,?,?,?,?)
+     ON CONFLICT(mission_name, label) DO UPDATE SET
+       units=excluded.units,
+       training=excluded.training,
+       equipment=excluded.equipment`,
+    [b.mission_name, b.label, units, training, equipment],
+    err => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true });
+    }
+  );
 });
 
 app.put('/api/run-cards/:name', express.json(), (req, res) => {
