@@ -2002,7 +2002,7 @@ map.on('draw:created', async e => {
   fetchZones();
 });
 
-async function refreshAssignedUnitsUI(missionId) {
+async function refreshAssignedUnitsUI(missionId, missionData = null) {
   const div = document.getElementById('assignedUnitsArea');
   if (!div) return [];
   try {
@@ -2020,6 +2020,7 @@ async function refreshAssignedUnitsUI(missionId) {
     (assigned||[]).forEach(u => _unitById.set(u.id, normalizeUnitRecord(u)));
     if (!Array.isArray(assigned) || !assigned.length) {
       div.innerHTML = '<em>No units assigned yet.</em>';
+      await refreshRequirementsUI(missionId, [], missionData);
       return [];
     }
     div.innerHTML = `
@@ -2070,6 +2071,7 @@ async function refreshAssignedUnitsUI(missionId) {
         clearUnitEta(u.id);
       }
     });
+    await refreshRequirementsUI(missionId, assigned, missionData);
     return assigned;
   } catch (e) {
     console.error(e);
@@ -2223,6 +2225,23 @@ function renderRequirementsDynamic(mission, assigned) {
   return html;
 }
 
+async function refreshRequirementsUI(missionId, assigned, missionData = null) {
+  const reqDiv = document.getElementById('reqDynamic');
+  if (!reqDiv) return;
+  let mission = missionData;
+  if (!mission) mission = missionsCache.find(m => m.id === missionId);
+  if (!mission) {
+    try {
+      mission = await fetch(`/api/missions/${missionId}`).then(r => r.json());
+    } catch {
+      mission = null;
+    }
+  }
+  if (!mission) return;
+  reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned || []);
+  attachPenaltyHandlers(mission);
+}
+
 function attachPenaltyHandlers(mission) {
   document.querySelectorAll('.penalty-opt').forEach(cb => {
     cb.addEventListener('change', async () => {
@@ -2237,7 +2256,7 @@ function attachPenaltyHandlers(mission) {
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ penalties: selected })
       });
-      await refreshAssignedUnitsUI(mission.id);
+      await refreshAssignedUnitsUI(mission.id, mission);
       checkMissionCompletion(mission);
     });
   });
@@ -2692,7 +2711,7 @@ async function renderMissionUnitList(mission) {
       if (!Number.isFinite(unitId)) return;
       try {
         await sendUnitsToMission(mission, [unitId], null, true);
-        await refreshAssignedUnitsUI(mission.id);
+        await refreshAssignedUnitsUI(mission.id, mission);
         await refreshMissionUnitRoster(mission);
         renderMissionUnitList(mission);
       } catch (err) {
@@ -2710,7 +2729,7 @@ async function dispatchSelectedFromList(mission, showNext = false) {
   if (!ids.length) { notifyError('Select at least one unit to dispatch.'); return; }
   try {
     await sendUnitsToMission(mission, ids, null, false);
-    await refreshAssignedUnitsUI(mission.id);
+    await refreshAssignedUnitsUI(mission.id, mission);
     await refreshMissionUnitRoster(mission);
     renderMissionUnitList(mission);
     if (showNext) showNextMission();
@@ -2753,7 +2772,7 @@ async function showMissionDetails(mission) {
   renderMissionDistanceFilter(mission);
   await refreshRunCardList(mission);
   await refreshMissionUnitRoster(mission);
-  await refreshAssignedUnitsUI(mission.id);
+  await refreshAssignedUnitsUI(mission.id, mission);
   missionUnitTab = 'available';
   document.querySelectorAll('.mission-units-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === 'available');
@@ -5231,9 +5250,7 @@ async function openManualDispatch(mission) {
     await Promise.all(ids.map(id => fetch('/api/mission-units',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mission_id: mission.id, unit_id: id, ...(force ? { force: true } : {}) }) })));
   if (ids.length) playSound('/audio/dispatch.mp3');
   if (area) area.innerHTML = `<strong>Dispatched ${ids.length} unit(s) to mission #${mission.id}.</strong>`;
-  const assigned = await refreshAssignedUnitsUI(mission.id);
-  const reqDiv = document.getElementById('reqDynamic');
-  if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
+  await refreshAssignedUnitsUI(mission.id, mission);
 
   const allUnits = await (await fetch('/api/units')).json();
   cacheUnits(allUnits);
@@ -5274,9 +5291,7 @@ async function openManualDispatch(mission) {
         }
         if (typeof clearUnitEta === 'function') clearUnitEta(uid);
 
-        const assignedAfter = await refreshAssignedUnitsUI(mission.id);
-        const reqDiv2 = document.getElementById('reqDynamic');
-        if (reqDiv2) { reqDiv2.innerHTML = renderRequirementsDynamic(mission, assignedAfter); attachPenaltyHandlers(mission); }
+        await refreshAssignedUnitsUI(mission.id, mission);
         checkMissionCompletion(mission);
       },
       { mission_id: mission.id, phase: 'to_scene' }
@@ -5598,12 +5613,11 @@ async function clearAssignedUnit(missionId, unitId) {
       { phase: 'return' }
     );
   }
-  const assigned = await refreshAssignedUnitsUI(missionId);
+  await refreshAssignedUnitsUI(missionId, mission);
   if (document.getElementById('manualDispatchArea')) openManualDispatch({ id: missionId, lat: mission.lat, lon: mission.lon });
   const missionSnap = missions.find(m=>m.id===missionId);
-  if (missionSnap) {
-    const reqDiv = document.getElementById('reqDynamic');
-    if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(missionSnap, assigned); attachPenaltyHandlers(missionSnap); }
+  if (missionSnap && missionSnap !== mission) {
+    await refreshAssignedUnitsUI(missionId, missionSnap);
   }
 }
 
@@ -5708,7 +5722,7 @@ function setupTimerForMission(mission, endTime) {
         { phase: 'return' }
       );
     }
-    await refreshAssignedUnitsUI(mission.id);
+  await refreshAssignedUnitsUI(mission.id, mission);
     await fetchMissions();
     const area = document.getElementById('manualDispatchArea');
     const parts = [];
