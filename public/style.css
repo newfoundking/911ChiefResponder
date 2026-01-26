@@ -621,6 +621,32 @@ h3 {
   border: 1px solid #444;
 }
 
+.req-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.req-units,
+.req-personnel {
+  background: #262626;
+  border: 1px solid #3f3f3f;
+  border-radius: 8px;
+  padding: 10px;
+  min-height: 0;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.req-units p,
+.req-personnel p {
+  margin-top: 0;
+}
+
+.req-penalties {
+  margin-top: 12px;
+}
+
 .mission-meta-section ul {
   margin: 6px 0 0 16px;
 }

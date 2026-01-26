@@ -623,7 +623,6 @@
                                         <div id="reqDynamic"></div>
                                         <div id="missionMeta"></div>
                                 </div>
-                                <div class="mission-distance-filter" id="missionDistanceFilter"></div>
                                 <div id="assignedUnitsArea" class="mission-assigned-list"></div>
                         </div>
                         <div class="mission-overlay__right mission-overlay__column hidden">
@@ -631,6 +630,7 @@
                                         <h4 class="mission-dispatch-title">Dispatch Panel</h4>
                                         <button id="closeDispatchPanelBtn" class="close-btn" type="button">Close</button>
                                 </div>
+                                <div class="mission-distance-filter" id="missionDistanceFilter"></div>
                                 <div class="mission-unit-controls">
                                         <div class="mission-units-tabs">
                                                 <button class="mission-units-tab active" data-tab="available">Available Units</button>
@@ -2081,11 +2081,27 @@ function renderRequirementsDynamic(mission, assigned) {
     return `<li>${need} × ${name} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
   });
 
-  let html = '';
-  if (unitItems.length) html += `<p><strong>Unit Requirements:</strong></p><ul>${unitItems.join('')}</ul>`;
-  if (trainingItems.length) html += `<p><strong>Personnel Requirements:</strong></p><ul>${trainingItems.join('')}</ul>`;
-  if (equipmentItems.length) html += `<p><strong>Equipment Required:</strong></p><ul>${equipmentItems.join('')}</ul>`;
-  if (!html) html = '<em>No specific unit requirements.</em>';
+  const unitBlocks = [];
+  if (unitItems.length) {
+    unitBlocks.push(`<p><strong>Unit Requirements:</strong></p><ul>${unitItems.join('')}</ul>`);
+  }
+  if (equipmentItems.length) {
+    unitBlocks.push(`<p><strong>Equipment Required:</strong></p><ul>${equipmentItems.join('')}</ul>`);
+  }
+  if (!unitBlocks.length) unitBlocks.push('<em>No unit requirements.</em>');
+
+  const personnelBlocks = [];
+  if (trainingItems.length) {
+    personnelBlocks.push(`<p><strong>Personnel Requirements:</strong></p><ul>${trainingItems.join('')}</ul>`);
+  }
+  if (!personnelBlocks.length) personnelBlocks.push('<em>No personnel requirements.</em>');
+
+  let html = `
+    <div class="req-grid">
+      <div class="req-units">${unitBlocks.join('')}</div>
+      <div class="req-personnel">${personnelBlocks.join('')}</div>
+    </div>
+  `;
 
   const options = Array.isArray(mission.penalty_options) ? mission.penalty_options : [];
   if (options.length) {
@@ -2099,7 +2115,7 @@ function renderRequirementsDynamic(mission, assigned) {
       );
       return `<div><label><input type="checkbox" class="penalty-opt" data-idx="${idx}" ${checked ? "checked" : ""}> Ignore ${p.quantity}×${p.category ? p.category + ':' : ''}${p.type} (-${p.timePenalty || 0}% speed, -${p.rewardPenalty || 0}% reward)</label></div>`;
     });
-    html += `<div><strong>Penalties:</strong>${rows.join('')}</div>`;
+    html += `<div class="req-penalties"><strong>Penalties:</strong>${rows.join('')}</div>`;
   }
   return html;
 }
