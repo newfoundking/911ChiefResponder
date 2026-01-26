@@ -2242,25 +2242,48 @@ async function refreshRunCardList(mission) {
   if (!list) return;
   list.innerHTML = 'Loading run cards…';
   const cards = await fetchRunCardsForMission(mission.type);
-  if (!cards.length) {
-    list.innerHTML = '<em>No run cards saved for this call type.</em>';
-    return;
-  }
-  list.innerHTML = cards.map(card => `
-    <div class="run-card">
+  const createCardHtml = `
+    <div class="run-card run-card--create">
       <div class="run-card__header">
-        <button class="run-card-dispatch run-card-title-btn" data-id="${card.id ?? ''}" data-source="${card.source || 'custom'}">
-          ${card.label || 'Run Card'}
+        <button class="run-card-dispatch run-card-create-btn" type="button">
+          + Create New Run Card
         </button>
       </div>
-      <div class="run-card__summary">
-        ${formatRunCardSummary('Units', card.units, 'type')}
-        ${formatRunCardSummary('Training', card.training, 'training')}
-        ${formatRunCardSummary('Equipment', card.equipment, 'name')}
-      </div>
+      <div class="run-card__summary">Build a new run card template for this mission type.</div>
     </div>
-  `).join('');
+  `;
+  if (!cards.length) {
+    list.innerHTML = `
+      ${createCardHtml}
+      <div class="run-card">
+        <div class="run-card__summary"><em>No run cards saved for this call type.</em></div>
+      </div>
+    `;
+  } else {
+    list.innerHTML = [
+      createCardHtml,
+      ...cards.map(card => `
+        <div class="run-card">
+          <div class="run-card__header">
+            <button class="run-card-dispatch run-card-title-btn" data-id="${card.id ?? ''}" data-source="${card.source || 'custom'}">
+              ${card.label || 'Run Card'}
+            </button>
+            ${card.source === 'default' ? '<span class="run-card-badge">Default</span>' : ''}
+          </div>
+          <div class="run-card__summary">
+            ${formatRunCardSummary('Units', card.units, 'type')}
+            ${formatRunCardSummary('Training', card.training, 'training')}
+            ${formatRunCardSummary('Equipment', card.equipment, 'name')}
+          </div>
+        </div>
+      `)
+    ].join('');
+  }
+  list.querySelectorAll('.run-card-create-btn').forEach(btn => {
+    btn.addEventListener('click', () => openRunCardCreator(mission));
+  });
   list.querySelectorAll('.run-card-dispatch').forEach(btn => {
+    if (btn.classList.contains('run-card-create-btn')) return;
     btn.addEventListener('click', () => runCardDispatch(mission, {
       id: btn.dataset.id || null,
       source: btn.dataset.source || 'custom'
