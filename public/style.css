@@ -436,8 +436,8 @@ h3 {
 .mission-overlay__panel {
   background: #3a3a3a;
   color: #f5f5f5;
-  width: min(1400px, 100%);
-  height: min(90vh, 100%);
+  width: min(90vw, 1500px);
+  height: min(88vh, 100%);
   border-radius: 16px;
   display: flex;
   flex-direction: column;
@@ -456,8 +456,8 @@ h3 {
 }
 
 .mission-overlay__title {
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 32px;
+  font-weight: 800;
 }
 
 .mission-overlay__title-row {
@@ -486,6 +486,7 @@ h3 {
   background: #353535;
   padding: 12px 20px;
   border-bottom: 1px solid #2a2a2a;
+  border-top: 1px solid #2a2a2a;
 }
 
 .mission-section-title {
@@ -520,8 +521,24 @@ h3 {
 .run-card__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   margin-bottom: 6px;
+}
+
+.run-card-title-btn {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+.run-card-title-btn:hover,
+.run-card-title-btn:focus {
+  color: #ffd66b;
 }
 
 .run-card__summary div {
@@ -530,21 +547,23 @@ h3 {
 }
 
 .run-card-dispatch {
-  background: #2e7d32;
+  background: #2b2b2b;
   color: #fff;
-  border: none;
-  border-radius: 6px;
+  border: 1px solid #555;
+  border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
+  width: 100%;
+  text-align: left;
 }
 
 .mission-overlay__body {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1.3fr;
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
   padding: 16px 20px;
-  overflow: hidden;
+  overflow-y: auto;
   background: #3d3d3d;
 }
 
@@ -553,7 +572,8 @@ h3 {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  overflow: hidden;
+  min-height: 0;
+  overflow: visible;
 }
 
 .mission-subsection {
@@ -612,50 +632,34 @@ h3 {
   margin-bottom: 8px;
 }
 
-.assigned-units-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.assigned-units-table-wrapper {
+  overflow-x: auto;
 }
 
-.assigned-unit-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px;
-  background: #262626;
-  border-radius: 8px;
-  border: 1px solid #3f3f3f;
-}
-
-.assigned-unit-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.assigned-unit-type {
-  color: #d0d0d0;
+.mission-assigned-table {
+  width: 100%;
+  border-collapse: collapse;
   font-size: 13px;
 }
 
-.assigned-unit-station {
-  color: #b5b5b5;
-  font-size: 12px;
+.mission-assigned-table th,
+.mission-assigned-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid #444;
+  text-align: left;
 }
 
-.assigned-unit-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.mission-assigned-table th {
+  color: #ddd;
+  font-weight: 600;
 }
 
-.assigned-unit-row .unit-link {
+.mission-assigned-table .unit-link {
   color: #8ab4ff;
   cursor: pointer;
 }
 
-.assigned-unit-meta button {
+.mission-assigned-table .clear-unit-btn {
   background: #9b1c1c;
   color: #fff;
   border: none;
@@ -667,6 +671,35 @@ h3 {
 .mission-units-tabs {
   display: flex;
   gap: 8px;
+}
+
+.mission-unit-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mission-unit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mission-unit-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #cfcfcf;
+}
+
+.mission-unit-filters select {
+  background: #2f2f2f;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 4px 8px;
+  min-width: 140px;
 }
 
 .mission-units-tab {
@@ -725,7 +758,8 @@ h3 {
 }
 
 .mission-overlay__footer {
-  background: #b02a2a;
+  background: #2f2f2f;
+  border-top: 1px solid #2a2a2a;
   padding: 10px 20px;
   display: flex;
   align-items: center;
