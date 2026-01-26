@@ -554,6 +554,15 @@ h3 {
   margin-top: 4px;
 }
 
+.run-card__summary {
+  display: none;
+}
+
+.run-card:hover .run-card__summary,
+.run-card:focus-within .run-card__summary {
+  display: block;
+}
+
 .run-card-dispatch {
   background: #2b2b2b;
   color: #fff;
