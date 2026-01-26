@@ -2753,6 +2753,7 @@ async function showMissionDetails(mission) {
   renderMissionDistanceFilter(mission);
   await refreshRunCardList(mission);
   await refreshMissionUnitRoster(mission);
+  await refreshAssignedUnitsUI(mission.id);
   missionUnitTab = 'available';
   document.querySelectorAll('.mission-units-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === 'available');
