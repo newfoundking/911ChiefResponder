@@ -2346,35 +2346,203 @@ function formatRunCardSummary(title, items, labelKey) {
   return `<div><strong>${title}:</strong> ${lines.join(', ')}</div>`;
 }
 
-function formatRunCardEntriesInput(items, labelKey) {
-  if (!items?.length) return '';
-  return items
-    .map((i) => {
-      const qty = i.quantity ?? i.qty ?? i.count ?? 1;
-      const label = i[labelKey] || i.type || i.name || i.training || i;
-      if (!label) return null;
-      return qty > 1 ? `${label}:${qty}` : `${label}`;
-    })
-    .filter(Boolean)
-    .join(', ');
+function getEquipDisplayList() {
+  const lists = Object.values(equipment || {}).flat();
+  return lists.map(item => {
+    if (typeof item === 'string') return { name: item, cost: null };
+    return { name: item.name, cost: item.cost ?? null };
+  });
 }
 
-function parseRunCardEntries(input, labelKey) {
-  if (!input || !input.trim()) return [];
-  return input
-    .split(',')
-    .map(part => part.trim())
-    .filter(Boolean)
-    .map(part => {
-      const match = part.match(/^(.*?)(?:\\s*[:x*]\\s*(\\d+))?$/i);
-      const label = match ? match[1].trim() : part.trim();
-      const qty = match && match[2] ? parseInt(match[2], 10) : 1;
-      if (!label) return null;
-      if (labelKey === 'type') return { type: label, quantity: qty };
-      if (labelKey === 'training') return { training: label, qty };
-      return { name: label, qty };
+function getTrainingDisplayList() {
+  const lists = Object.values(trainingsByClass || {}).flat();
+  return lists.map(item => {
+    if (typeof item === 'string') return { name: item, cost: null };
+    return { name: item.name, cost: item.cost ?? null };
+  });
+}
+
+function createRunCardRow(container, options, selectedValue = '', qty = 1) {
+  const row = document.createElement('div');
+  row.className = 'run-card-row';
+  row.style.display = 'flex';
+  row.style.gap = '8px';
+  row.style.alignItems = 'center';
+
+  const select = document.createElement('select');
+  const emptyOpt = document.createElement('option');
+  emptyOpt.value = '';
+  emptyOpt.textContent = 'Select...';
+  select.appendChild(emptyOpt);
+  options.forEach(opt => {
+    const option = document.createElement('option');
+    option.value = opt.value;
+    option.textContent = opt.label;
+    if (opt.value === selectedValue) option.selected = true;
+    select.appendChild(option);
+  });
+
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = 1;
+  input.value = qty;
+  input.style.width = '80px';
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.textContent = 'Remove';
+  remove.addEventListener('click', () => container.removeChild(row));
+
+  row.appendChild(select);
+  row.appendChild(input);
+  row.appendChild(remove);
+  container.appendChild(row);
+}
+
+function collectRunCardRows(container, key) {
+  return Array.from(container.querySelectorAll('.run-card-row'))
+    .map(row => {
+      const select = row.querySelector('select');
+      const input = row.querySelector('input[type="number"]');
+      const value = select?.value?.trim();
+      const qty = Math.max(1, Number.parseInt(input?.value ?? '1', 10) || 1);
+      if (!value) return null;
+      if (key === 'type') return { type: value, quantity: qty };
+      if (key === 'training') return { training: value, qty };
+      return { name: value, qty };
     })
     .filter(Boolean);
+}
+
+function openRunCardFormModal({ title, includeLabel, initial = {} }) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    const content = document.createElement('div');
+    content.className = 'modal-content';
+
+    const form = document.createElement('form');
+    form.style.display = 'flex';
+    form.style.flexDirection = 'column';
+    form.style.gap = '12px';
+
+    const heading = document.createElement('h3');
+    heading.textContent = title || 'Run Card';
+    form.appendChild(heading);
+
+    let labelInput = null;
+    if (includeLabel) {
+      const labelWrap = document.createElement('div');
+      const label = document.createElement('label');
+      label.textContent = 'Run card name';
+      label.style.marginBottom = '4px';
+      labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.value = initial.label || '';
+      labelWrap.style.display = 'flex';
+      labelWrap.style.flexDirection = 'column';
+      labelWrap.appendChild(label);
+      labelWrap.appendChild(labelInput);
+      form.appendChild(labelWrap);
+    }
+
+    const section = (titleText) => {
+      const wrap = document.createElement('div');
+      const header = document.createElement('strong');
+      header.textContent = titleText;
+      wrap.appendChild(header);
+      const container = document.createElement('div');
+      container.style.display = 'flex';
+      container.style.flexDirection = 'column';
+      container.style.gap = '6px';
+      wrap.appendChild(container);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = `Add ${titleText}`;
+      wrap.appendChild(btn);
+      form.appendChild(wrap);
+      return { container, btn };
+    };
+
+    const unitOptions = (unitTypes || []).map(u => ({
+      value: u.type,
+      label: `${u.class} - ${u.type}`
+    }));
+    const trainingOptions = getTrainingDisplayList().map(({ name, cost }) => ({
+      value: name,
+      label: cost ? `${name} ($${cost})` : name
+    }));
+    const equipmentOptions = getEquipDisplayList().map(({ name, cost }) => ({
+      value: name,
+      label: cost ? `${name} ($${cost})` : name
+    }));
+
+    const unitsSection = section('Unit');
+    const trainingSection = section('Training');
+    const equipmentSection = section('Equipment');
+
+    unitsSection.btn.addEventListener('click', () => createRunCardRow(unitsSection.container, unitOptions));
+    trainingSection.btn.addEventListener('click', () => createRunCardRow(trainingSection.container, trainingOptions));
+    equipmentSection.btn.addEventListener('click', () => createRunCardRow(equipmentSection.container, equipmentOptions));
+
+    (initial.units || []).forEach(u => {
+      const value = Array.isArray(u.types) ? u.types[0] : (u.type || u.types || '');
+      createRunCardRow(unitsSection.container, unitOptions, value, u.quantity ?? u.count ?? 1);
+    });
+    (initial.training || []).forEach(t => {
+      const value = t.training || t.name || t || '';
+      createRunCardRow(trainingSection.container, trainingOptions, value, t.qty ?? t.quantity ?? t.count ?? 1);
+    });
+    (initial.equipment || []).forEach(e => {
+      const value = e.name || e.type || e || '';
+      createRunCardRow(equipmentSection.container, equipmentOptions, value, e.qty ?? e.quantity ?? e.count ?? 1);
+    });
+
+    if (!(initial.units || []).length) createRunCardRow(unitsSection.container, unitOptions);
+    if (!(initial.training || []).length) createRunCardRow(trainingSection.container, trainingOptions);
+    if (!(initial.equipment || []).length) createRunCardRow(equipmentSection.container, equipmentOptions);
+
+    const btnRow = document.createElement('div');
+    btnRow.style.display = 'flex';
+    btnRow.style.gap = '8px';
+    btnRow.style.justifyContent = 'flex-end';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'submit';
+    saveBtn.textContent = 'Save';
+    saveBtn.style.background = '#0b5';
+    saveBtn.style.color = '#fff';
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(saveBtn);
+    form.appendChild(btnRow);
+
+    content.appendChild(form);
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+
+    const close = res => {
+      document.body.removeChild(overlay);
+      resolve(res);
+    };
+
+    cancelBtn.onclick = () => close(null);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const label = labelInput ? labelInput.value.trim() : '';
+      if (labelInput && !label) {
+        labelInput.focus();
+        return;
+      }
+      const units = collectRunCardRows(unitsSection.container, 'type');
+      const training = collectRunCardRows(trainingSection.container, 'training');
+      const equipment = collectRunCardRows(equipmentSection.container, 'equipment');
+      close({ label, units, training, equipment });
+    });
+  });
 }
 
 async function fetchRunCardsForMission(missionType) {
@@ -2437,22 +2605,18 @@ async function refreshRunCardList(mission) {
 }
 
 async function openRunCardCreator(mission) {
-  const result = await openFormModal({
+  const result = await openRunCardFormModal({
     title: `Create Run Card for ${mission.type}`,
-    fields: [
-      { name: 'label', label: 'Run card name', type: 'text', required: true, placeholder: 'Downtown response' },
-      { name: 'units', label: 'Units (comma-separated, e.g., Engine:2, Ladder:1)', type: 'text', placeholder: 'Engine:2, Ladder:1' },
-      { name: 'training', label: 'Training (comma-separated, e.g., ALS:1)', type: 'text', placeholder: 'ALS:1' },
-      { name: 'equipment', label: 'Equipment (comma-separated, e.g., Jaws:1)', type: 'text', placeholder: 'Jaws:1' }
-    ]
+    includeLabel: true,
+    initial: { label: '', units: [], training: [], equipment: [] }
   });
   if (!result) return;
   const payload = {
     mission_name: mission.type,
     label: result.label.trim(),
-    units: parseRunCardEntries(result.units, 'type'),
-    training: parseRunCardEntries(result.training, 'training'),
-    equipment: parseRunCardEntries(result.equipment, 'equipment')
+    units: result.units,
+    training: result.training,
+    equipment: result.equipment
   };
   try {
     const res = await fetch('/api/run-cards', {
@@ -2473,24 +2637,21 @@ async function openRunCardCreator(mission) {
 
 async function openRunCardEditor(mission, card) {
   const isDefault = card.source === 'legacy' || card.source === 'default';
-  const fields = [];
-  if (!isDefault) {
-    fields.push({ name: 'label', label: 'Run card name', type: 'text', required: true, value: card.label || '' });
-  }
-  fields.push(
-    { name: 'units', label: 'Units (comma-separated, e.g., Engine:2, Ladder:1)', type: 'text', value: formatRunCardEntriesInput(card.units, 'type') },
-    { name: 'training', label: 'Training (comma-separated, e.g., ALS:1)', type: 'text', value: formatRunCardEntriesInput(card.training, 'training') },
-    { name: 'equipment', label: 'Equipment (comma-separated, e.g., Jaws:1)', type: 'text', value: formatRunCardEntriesInput(card.equipment, 'name') }
-  );
-  const result = await openFormModal({
+  const result = await openRunCardFormModal({
     title: isDefault ? `Edit Default Run Card for ${mission.type}` : `Edit Run Card for ${mission.type}`,
-    fields
+    includeLabel: !isDefault,
+    initial: {
+      label: card.label || '',
+      units: card.units || [],
+      training: card.training || [],
+      equipment: card.equipment || []
+    }
   });
   if (!result) return;
   const payload = {
-    units: parseRunCardEntries(result.units, 'type'),
-    training: parseRunCardEntries(result.training, 'training'),
-    equipment: parseRunCardEntries(result.equipment, 'equipment')
+    units: result.units,
+    training: result.training,
+    equipment: result.equipment
   };
   try {
     if (isDefault) {
