@@ -436,8 +436,8 @@ h3 {
 .mission-overlay__panel {
   background: #3a3a3a;
   color: #f5f5f5;
-  width: min(90vw, 1500px);
-  height: min(88vh, 100%);
+  width: min(95vw, 1600px);
+  height: min(92vh, 100%);
   border-radius: 16px;
   display: flex;
   flex-direction: column;
@@ -560,36 +560,28 @@ h3 {
 .mission-overlay__body {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
   padding: 16px 20px;
-  overflow-y: auto;
+  overflow: hidden;
   background: #3d3d3d;
   position: relative;
 }
 
-.mission-overlay__left,
-.mission-overlay__right {
+.mission-overlay__column {
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
-  overflow: visible;
+  overflow-y: auto;
 }
 
 .mission-overlay__right {
-  position: absolute;
-  top: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(980px, 92%);
-  max-height: calc(100% - 36px);
   background: #2f2f2f;
   border: 1px solid #555;
   border-radius: 14px;
   padding: 16px;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
-  z-index: 3;
 }
 
 .mission-dispatch-header {
@@ -802,9 +794,7 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
+  flex-shrink: 0;
 }
 
 .mission-footer-actions {
