@@ -600,6 +600,7 @@
                                 <div id="missionZones" class="mission-overlay__zones"></div>
                         </div>
                         <div class="mission-overlay__header-actions">
+                                <button id="openDispatchPanelBtn" class="button">Dispatch Panel</button>
                                 <button id="closeMissionBtn" class="close-btn" onclick="closeMissionDetails()">Close</button>
                         </div>
                 </header>
@@ -623,13 +624,21 @@
                                 <div class="mission-distance-filter" id="missionDistanceFilter"></div>
                                 <div id="assignedUnitsArea" class="mission-assigned-list"></div>
                         </div>
-                        <div class="mission-overlay__right">
+                        <div class="mission-overlay__right hidden">
+                                <div class="mission-dispatch-header">
+                                        <h4 class="mission-dispatch-title">Dispatch Panel</h4>
+                                        <button id="closeDispatchPanelBtn" class="close-btn" type="button">Close</button>
+                                </div>
                                 <div class="mission-unit-controls">
                                         <div class="mission-units-tabs">
                                                 <button class="mission-units-tab active" data-tab="available">Available Units</button>
                                                 <button class="mission-units-tab" data-tab="oncall">Units on Call</button>
                                         </div>
                                         <div class="mission-unit-filters">
+                                                <label>
+                                                        Search
+                                                        <input id="missionSearchFilter" type="text" placeholder="Name, type, station">
+                                                </label>
                                                 <label>
                                                         Department
                                                         <select id="missionDeptFilter"></select>
@@ -971,9 +980,10 @@ let buildStationMode = false;
   let missionUnitTab = 'available';
   let missionMaxDistance = 400;
   let missionRosterCache = null;
-  let missionDeptFilter = 'all';
-  let missionTypeFilter = 'all';
-  let missionSortFilter = 'distance';
+let missionDeptFilter = 'all';
+let missionTypeFilter = 'all';
+let missionSortFilter = 'distance';
+let missionSearchFilter = '';
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
@@ -2302,7 +2312,6 @@ async function refreshMissionUnitRoster(mission) {
   cacheStations(stations);
   cacheUnits(units);
   const stationMap = new Map(stations.map(s => [s.id, s]));
-  const missionDepts = await missionDepartmentsFor(mission);
   const rows = (units || []).map(u => {
     const station = stationMap.get(u.station_id);
     const dist = station ? haversineKm(station.lat, station.lon, mission.lat, mission.lon) : Infinity;
@@ -2311,11 +2320,7 @@ async function refreshMissionUnitRoster(mission) {
       station,
       distance: dist
     };
-  }).filter(row => {
-    if (!row.station) return false;
-    if (!missionDepts.length) return true;
-    return missionDepts.includes(row.station.department);
-  });
+  }).filter(row => row.station);
   missionRosterCache = { missionId: mission.id, rows };
 }
 
@@ -2361,7 +2366,8 @@ function renderMissionUnitFilters(rows) {
   const deptSelect = document.getElementById('missionDeptFilter');
   const typeSelect = document.getElementById('missionTypeFilter');
   const sortSelect = document.getElementById('missionSortFilter');
-  if (!deptSelect || !typeSelect || !sortSelect) return;
+  const searchInput = document.getElementById('missionSearchFilter');
+  if (!deptSelect || !typeSelect || !sortSelect || !searchInput) return;
 
   const departments = Array.from(new Set(rows.map(row => row.station?.department).filter(Boolean))).sort();
   const types = Array.from(new Set(rows.map(row => row.unit.type).filter(Boolean))).sort();
@@ -2378,6 +2384,7 @@ function renderMissionUnitFilters(rows) {
   deptSelect.value = missionDeptFilter;
   typeSelect.value = missionTypeFilter;
   sortSelect.value = missionSortFilter;
+  searchInput.value = missionSearchFilter;
 
   deptSelect.onchange = () => {
     missionDeptFilter = deptSelect.value;
@@ -2389,6 +2396,10 @@ function renderMissionUnitFilters(rows) {
   };
   sortSelect.onchange = () => {
     missionSortFilter = sortSelect.value;
+    renderMissionUnitList(openMissionId ? missionsCache.find(m => m.id === openMissionId) : null);
+  };
+  searchInput.oninput = () => {
+    missionSearchFilter = searchInput.value;
     renderMissionUnitList(openMissionId ? missionsCache.find(m => m.id === openMissionId) : null);
   };
 }
@@ -2403,6 +2414,7 @@ async function renderMissionUnitList(mission) {
   }
   const baseRows = missionRosterCache?.rows || [];
   renderMissionUnitFilters(baseRows);
+  const searchValue = missionSearchFilter.trim().toLowerCase();
   const rows = baseRows.filter(row => {
     if (row.distance > missionMaxDistance) return false;
     if (missionUnitTab === 'available') return (row.unit.status || 'available') === 'available';
@@ -2410,6 +2422,17 @@ async function renderMissionUnitList(mission) {
   }).filter(row => {
     if (missionDeptFilter !== 'all' && row.station?.department !== missionDeptFilter) return false;
     if (missionTypeFilter !== 'all' && row.unit.type !== missionTypeFilter) return false;
+    if (searchValue) {
+      const terms = [
+        row.unit.name,
+        row.unit.type,
+        row.unit.class,
+        row.unit.tag,
+        row.station?.name,
+        row.station?.department
+      ].map(value => String(value || '').toLowerCase());
+      if (!terms.some(term => term.includes(searchValue))) return false;
+    }
     return true;
   });
   rows.sort((a, b) => {
@@ -2497,6 +2520,16 @@ async function dispatchSelectedFromList(mission, showNext = false) {
   }
 }
 
+function openDispatchPanel() {
+  const panel = document.querySelector('.mission-overlay__right');
+  if (panel) panel.classList.remove('hidden');
+}
+
+function closeDispatchPanel() {
+  const panel = document.querySelector('.mission-overlay__right');
+  if (panel) panel.classList.add('hidden');
+}
+
 // ===== Mission details =====
 async function showMissionDetails(mission) {
   openMissionId = mission.id;
@@ -2504,6 +2537,7 @@ async function showMissionDetails(mission) {
   missionDeptFilter = 'all';
   missionTypeFilter = 'all';
   missionSortFilter = 'distance';
+  missionSearchFilter = '';
 
   const patientHtml = renderPatientInfo(mission);
   const prisonerHtml = renderPrisonerInfo(mission);
@@ -2523,6 +2557,7 @@ async function showMissionDetails(mission) {
   document.querySelectorAll('.mission-units-tab').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === 'available');
   });
+  openDispatchPanel();
   renderMissionUnitList(mission);
 
   document.getElementById('nextMissionBtnFooter').onclick = showNextMission;
@@ -2531,6 +2566,8 @@ async function showMissionDetails(mission) {
   document.getElementById('createRunCardBtn').onclick = () => openRunCardCreator(mission);
   document.getElementById('dispatchSelectedBtn').onclick = () => dispatchSelectedFromList(mission, false);
   document.getElementById('dispatchNextBtn').onclick = () => dispatchSelectedFromList(mission, true);
+  document.getElementById('openDispatchPanelBtn').onclick = () => openDispatchPanel();
+  document.getElementById('closeDispatchPanelBtn').onclick = () => closeDispatchPanel();
 
   document.querySelectorAll('.mission-units-tab').forEach(btn => {
     btn.onclick = () => {
@@ -2558,6 +2595,7 @@ async function showMissionDetails(mission) {
 function closeMissionDetails() {
   document.getElementById('missionDetails').style.display = 'none';
   openMissionId = null;
+  closeDispatchPanel();
 }
 
 // ===== Station details =====
