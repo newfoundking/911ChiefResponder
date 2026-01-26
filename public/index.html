@@ -587,17 +587,63 @@
         <button id="clearMissions" class="button button-danger">DEBUG CLEAR ALL CALLS</button>
 </div>
 
-<!-- Modal for Mission & Station Details -->
-<div id="missionDetails" style="
-  position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
-  background: var(--bg-panel); padding: 1em; border: 1px solid var(--border-soft);
-  box-shadow: var(--shadow-strong); z-index: 9999;
-  width: 420px; max-height: 80vh; overflow-y: auto; border-radius: 16px;
-  display: none;">
-        <button id="nextMissionBtn" class="next-btn">Next</button>
-        <button id="closeMissionBtn" class="close-btn" onclick="closeMissionDetails()">Close</button>
-        <h3>Details</h3>
-        <div id="missionDetailsContent">Loading...</div>
+<!-- Mission Details Overlay -->
+<div id="missionDetails" class="mission-overlay" style="display: none;">
+        <div class="mission-overlay__panel">
+                <header class="mission-overlay__header">
+                        <div class="mission-overlay__title-block">
+                                <div class="mission-overlay__title-row">
+                                        <span id="missionTitle" class="mission-overlay__title">Mission</span>
+                                        <span id="missionTimerArea" class="mission-overlay__timer"></span>
+                                </div>
+                                <div id="missionAddress" class="mission-overlay__address"></div>
+                                <div id="missionZones" class="mission-overlay__zones"></div>
+                        </div>
+                        <div class="mission-overlay__header-actions">
+                                <button id="prevMissionBtn" class="mission-nav-btn">Back</button>
+                                <button id="nextMissionBtn" class="mission-nav-btn">Next</button>
+                                <button id="closeMissionBtn" class="close-btn" onclick="closeMissionDetails()">Close</button>
+                        </div>
+                </header>
+
+                <section class="mission-overlay__run-cards">
+                        <div class="mission-section-title">
+                                <h4>Run Cards</h4>
+                                <div class="mission-section-actions">
+                                        <button id="createRunCardBtn">Create Run Card</button>
+                                        <button id="autoDispatchBtn" class="button button-primary">Auto Dispatch</button>
+                                </div>
+                        </div>
+                        <div id="runCardList" class="run-card-list">Loading run cards…</div>
+                </section>
+
+                <section class="mission-overlay__body">
+                        <div class="mission-overlay__left">
+                                <div class="mission-subsection">
+                                        <div id="reqDynamic"></div>
+                                        <div id="missionMeta"></div>
+                                </div>
+                                <div class="mission-distance-filter" id="missionDistanceFilter"></div>
+                                <div id="assignedUnitsArea" class="mission-assigned-list"></div>
+                        </div>
+                        <div class="mission-overlay__right">
+                                <div class="mission-units-tabs">
+                                        <button class="mission-units-tab active" data-tab="available">Available Units</button>
+                                        <button class="mission-units-tab" data-tab="oncall">Units on Call</button>
+                                </div>
+                                <div id="missionUnitList" class="mission-unit-list">Loading units…</div>
+                        </div>
+                </section>
+
+                <footer class="mission-overlay__footer">
+                        <div class="mission-footer-actions">
+                                <button id="dispatchSelectedBtn" class="button button-primary">Dispatch</button>
+                                <button id="dispatchNextBtn" class="button">Dispatch + Next</button>
+                                <button id="prevMissionBtnFooter" class="button">Back</button>
+                                <button id="nextMissionBtnFooter" class="button">Next</button>
+                        </div>
+                </footer>
+        </div>
 </div>
 
 <!-- Station Creation Form -->
@@ -904,6 +950,9 @@ let buildStationMode = false;
   let pendingStationCoords = null;
   let openMissionId = null;
   let missionsCache = [];
+  let missionUnitTab = 'available';
+  let missionMaxDistance = 400;
+  let missionRosterCache = null;
 
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
@@ -1838,15 +1887,25 @@ async function refreshAssignedUnitsUI(missionId) {
       return [];
     }
     div.innerHTML = `
-      <strong>Assigned Units:</strong>
-      <ul style="list-style:none; padding-left:0;">
-        ${assigned.map(u => `
-          <li style="display:flex; align-items:center; gap:6px; margin:4px 0;">
-            <span class="unit-link" data-unitid="${u.id}" style="cursor:pointer; color:blue;">${u.name}</span> (${u.type}) — <span id="unit-status-${u.id}">${formatStatus(u.status || 'enroute', u.responding)}</span>
-            <button data-unitid="${u.id}" data-missionid="${missionId}" class="clear-unit-btn">Clear</button>
-          </li>
-        `).join('')}
-      </ul>`;
+      <div class="assigned-units-header">Assigned Units</div>
+      <div class="assigned-units-list">
+        ${assigned.map(u => {
+          const station = _stationById.get(u.station_id);
+          return `
+            <div class="assigned-unit-row">
+              <div class="assigned-unit-main">
+                <span class="unit-link" data-unitid="${u.id}">${u.name}</span>
+                <span class="assigned-unit-type">${u.type}</span>
+                <span class="assigned-unit-station">${station?.name || 'Unknown Station'}</span>
+              </div>
+              <div class="assigned-unit-meta">
+                <span id="unit-status-${u.id}">${formatStatus(u.status || 'enroute', u.responding)}</span>
+                <button data-unitid="${u.id}" data-missionid="${missionId}" class="clear-unit-btn">Cancel</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>`;
     div.querySelectorAll('.unit-link').forEach(span => {
       span.addEventListener('click', () => showUnitDetails(parseInt(span.dataset.unitid,10)));
     });
@@ -2072,37 +2131,336 @@ function showNextMission() {
   if (next) showMissionDetails(next);
 }
 
+function showPrevMission() {
+  if (!missionsCache.length || openMissionId === null) return;
+  const idx = missionsCache.findIndex(m => m.id === openMissionId);
+  const prev = missionsCache[(idx - 1 + missionsCache.length) % missionsCache.length];
+  if (prev) showMissionDetails(prev);
+}
+
+function missionZonesFor(mission) {
+  if (!Number.isFinite(mission.lat) || !Number.isFinite(mission.lon)) return [];
+  const matches = responseZones.filter(z => pointInPolygon(mission.lat, mission.lon, z.polygon));
+  matches.sort((a, b) => (a.priority ?? 9999) - (b.priority ?? 9999));
+  return matches.map(z => z.name);
+}
+
+function formatRunCardSummary(title, items, labelKey) {
+  if (!items?.length) return '';
+  const lines = items.map((i) => {
+    const qty = i.quantity ?? i.qty ?? i.count ?? 1;
+    const label = i[labelKey] || i.type || i.name || i.training || i;
+    return `${qty}×${label}`;
+  });
+  return `<div><strong>${title}:</strong> ${lines.join(', ')}</div>`;
+}
+
+function parseRunCardEntries(input, labelKey) {
+  if (!input || !input.trim()) return [];
+  return input
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => {
+      const match = part.match(/^(.*?)(?:\\s*[:x*]\\s*(\\d+))?$/i);
+      const label = match ? match[1].trim() : part.trim();
+      const qty = match && match[2] ? parseInt(match[2], 10) : 1;
+      if (!label) return null;
+      if (labelKey === 'type') return { type: label, quantity: qty };
+      if (labelKey === 'training') return { training: label, qty };
+      return { name: label, qty };
+    })
+    .filter(Boolean);
+}
+
+async function fetchRunCardsForMission(missionType) {
+  const res = await fetch(`/api/run-cards?mission=${encodeURIComponent(missionType)}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+async function refreshRunCardList(mission) {
+  const list = document.getElementById('runCardList');
+  if (!list) return;
+  list.innerHTML = 'Loading run cards…';
+  const cards = await fetchRunCardsForMission(mission.type);
+  if (!cards.length) {
+    list.innerHTML = '<em>No run cards saved for this call type.</em>';
+    return;
+  }
+  list.innerHTML = cards.map(card => `
+    <div class="run-card">
+      <div class="run-card__header">
+        <strong>${card.label || 'Run Card'}</strong>
+        <button class="run-card-dispatch" data-id="${card.id ?? ''}" data-source="${card.source || 'custom'}">Dispatch</button>
+      </div>
+      <div class="run-card__summary">
+        ${formatRunCardSummary('Units', card.units, 'type')}
+        ${formatRunCardSummary('Training', card.training, 'training')}
+        ${formatRunCardSummary('Equipment', card.equipment, 'name')}
+      </div>
+    </div>
+  `).join('');
+  list.querySelectorAll('.run-card-dispatch').forEach(btn => {
+    btn.addEventListener('click', () => runCardDispatch(mission, {
+      id: btn.dataset.id || null,
+      source: btn.dataset.source || 'custom'
+    }));
+  });
+}
+
+async function openRunCardCreator(mission) {
+  const result = await openFormModal({
+    title: `Create Run Card for ${mission.type}`,
+    fields: [
+      { name: 'label', label: 'Run card name', type: 'text', required: true, placeholder: 'Downtown response' },
+      { name: 'units', label: 'Units (comma-separated, e.g., Engine:2, Ladder:1)', type: 'text', placeholder: 'Engine:2, Ladder:1' },
+      { name: 'training', label: 'Training (comma-separated, e.g., ALS:1)', type: 'text', placeholder: 'ALS:1' },
+      { name: 'equipment', label: 'Equipment (comma-separated, e.g., Jaws:1)', type: 'text', placeholder: 'Jaws:1' }
+    ]
+  });
+  if (!result) return;
+  const payload = {
+    mission_name: mission.type,
+    label: result.label.trim(),
+    units: parseRunCardEntries(result.units, 'type'),
+    training: parseRunCardEntries(result.training, 'training'),
+    equipment: parseRunCardEntries(result.equipment, 'equipment')
+  };
+  try {
+    const res = await fetch('/api/run-cards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(msg || 'Failed to save run card.');
+    }
+    await refreshRunCardList(mission);
+  } catch (err) {
+    console.error(err);
+    notifyError('Failed to save run card.');
+  }
+}
+
+async function updateMissionHeader(mission) {
+  const titleEl = document.getElementById('missionTitle');
+  const addressEl = document.getElementById('missionAddress');
+  const zonesEl = document.getElementById('missionZones');
+  if (titleEl) titleEl.textContent = mission.type;
+  if (addressEl) {
+    let address = mission.address || missionAddressCache[mission.id] || '';
+    if (!address && Number.isFinite(mission.lat) && Number.isFinite(mission.lon)) {
+      address = await reverseGeocode(mission.lat, mission.lon, mission.id);
+    }
+    addressEl.textContent = address || `${mission.lat?.toFixed(4) ?? ''}, ${mission.lon?.toFixed(4) ?? ''}`;
+  }
+  if (zonesEl) {
+    const zones = missionZonesFor(mission);
+    zonesEl.textContent = zones.length ? `Zones: ${zones.join(', ')}` : 'NO ZONE DATA';
+  }
+}
+
+async function refreshMissionUnitRoster(mission) {
+  const [stations, units] = await Promise.all([
+    fetch('/api/stations').then(r => r.json()),
+    fetch('/api/units').then(r => r.json())
+  ]);
+  cacheStations(stations);
+  cacheUnits(units);
+  const stationMap = new Map(stations.map(s => [s.id, s]));
+  const missionDepts = await missionDepartmentsFor(mission);
+  const rows = (units || []).map(u => {
+    const station = stationMap.get(u.station_id);
+    const dist = station ? haversineKm(station.lat, station.lon, mission.lat, mission.lon) : Infinity;
+    return {
+      unit: normalizeUnitRecord(u),
+      station,
+      distance: dist
+    };
+  }).filter(row => {
+    if (!row.station) return false;
+    if (!missionDepts.length) return true;
+    return missionDepts.includes(row.station.department);
+  });
+  missionRosterCache = { missionId: mission.id, rows };
+}
+
+function formatDistance(distance) {
+  if (!Number.isFinite(distance)) return '—';
+  return `${distance.toFixed(1)} km`;
+}
+
+function estimateEta(distanceKm, unit) {
+  if (!Number.isFinite(distanceKm)) return '—';
+  const speed = TRAVEL_SPEED[unit.type] || CLASS_SPEED[unit.class] || 56;
+  const seconds = (distanceKm / speed) * 3600;
+  return formatEta(seconds);
+}
+
+function setMissionDistanceFilter(value) {
+  missionMaxDistance = value;
+  const buttons = document.querySelectorAll('.distance-filter-btn');
+  buttons.forEach(btn => {
+    btn.classList.toggle('active', Number(btn.dataset.value) === value);
+  });
+}
+
+function renderMissionDistanceFilter(mission) {
+  const container = document.getElementById('missionDistanceFilter');
+  if (!container) return;
+  const options = [1, 5, 10, 20, 40, 50, 100, 200, 300, 400];
+  container.innerHTML = `
+    <div class="mission-distance-title">Maximum distance from vehicle:</div>
+    <div class="mission-distance-buttons">
+      ${options.map(opt => `<button class="distance-filter-btn${opt === missionMaxDistance ? ' active' : ''}" data-value="${opt}">${opt} km</button>`).join('')}
+    </div>
+  `;
+  container.querySelectorAll('.distance-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setMissionDistanceFilter(Number(btn.dataset.value));
+      renderMissionUnitList(mission);
+    });
+  });
+}
+
+async function renderMissionUnitList(mission) {
+  const list = document.getElementById('missionUnitList');
+  if (!list) return;
+  if (!missionRosterCache || missionRosterCache.missionId !== mission.id) {
+    list.innerHTML = 'Loading units…';
+    await refreshMissionUnitRoster(mission);
+  }
+  const rows = (missionRosterCache?.rows || []).filter(row => {
+    if (row.distance > missionMaxDistance) return false;
+    if (missionUnitTab === 'available') return (row.unit.status || 'available') === 'available';
+    return (row.unit.status || 'available') !== 'available';
+  });
+  rows.sort((a, b) => a.distance - b.distance || a.unit.priority - b.unit.priority);
+
+  if (!rows.length) {
+    list.innerHTML = '<em>No units match the current filters.</em>';
+    return;
+  }
+
+  list.innerHTML = `
+    <table class="mission-units-table">
+      <thead>
+        <tr>
+          <th>${missionUnitTab === 'available' ? '' : ''}</th>
+          <th>Unit</th>
+          <th>Type</th>
+          <th>Station</th>
+          <th>Distance</th>
+          <th>${missionUnitTab === 'available' ? 'ETA' : 'Status'}</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(row => `
+          <tr>
+            <td>${missionUnitTab === 'available' ? `<input type="checkbox" value="${row.unit.id}">` : ''}</td>
+            <td><span class="unit-link" data-unitid="${row.unit.id}">${row.unit.name}</span></td>
+            <td>${row.unit.type || row.unit.class || ''}</td>
+            <td>${row.station?.name || 'Unknown'}</td>
+            <td>${formatDistance(row.distance)}</td>
+            <td>${missionUnitTab === 'available'
+              ? estimateEta(row.distance, row.unit)
+              : formatStatus(row.unit.status || 'unknown', row.unit.responding)}</td>
+            <td>${missionUnitTab === 'oncall'
+              ? `<button class="queue-unit-btn" data-unitid="${row.unit.id}">Queue</button>`
+              : ''}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+  list.querySelectorAll('.unit-link').forEach(span => {
+    span.addEventListener('click', () => showUnitDetails(parseInt(span.dataset.unitid, 10)));
+  });
+  list.querySelectorAll('.queue-unit-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const unitId = parseInt(btn.dataset.unitid, 10);
+      if (!Number.isFinite(unitId)) return;
+      try {
+        await sendUnitsToMission(mission, [unitId], null, true);
+        await refreshAssignedUnitsUI(mission.id);
+        await refreshMissionUnitRoster(mission);
+        renderMissionUnitList(mission);
+      } catch (err) {
+        console.error(err);
+        notifyError('Failed to queue unit.');
+      }
+    });
+  });
+}
+
+async function dispatchSelectedFromList(mission, showNext = false) {
+  const list = document.getElementById('missionUnitList');
+  if (!list) return;
+  const ids = Array.from(list.querySelectorAll('input[type="checkbox"]:checked')).map(cb => parseInt(cb.value, 10));
+  if (!ids.length) { notifyError('Select at least one unit to dispatch.'); return; }
+  try {
+    await sendUnitsToMission(mission, ids, null, false);
+    await refreshAssignedUnitsUI(mission.id);
+    await refreshMissionUnitRoster(mission);
+    renderMissionUnitList(mission);
+    if (showNext) showNextMission();
+  } catch (err) {
+    console.error(err);
+    notifyError('Failed to dispatch one or more units.');
+  }
+}
+
 // ===== Mission details =====
-function showMissionDetails(mission) {
+async function showMissionDetails(mission) {
   openMissionId = mission.id;
-  const container = document.getElementById("missionDetailsContent");
+  await updateMissionHeader(mission);
+
   const patientHtml = renderPatientInfo(mission);
   const prisonerHtml = renderPrisonerInfo(mission);
-  container.innerHTML = `
-    <h3><span class="focus-mission"
-             data-lat="${mission.lat}"
-             data-lon="${mission.lon}"
-             style="cursor:pointer;">${mission.type}</span></h3>
-    <p><strong>Status:</strong> ${mission.status}</p>
-    <div id="reqDynamic">Loading…</div>
-    ${patientHtml ? '<p><strong>Patients:</strong></p>' + patientHtml : ''}
-    ${prisonerHtml ? '<p><strong>Prisoners:</strong></p>' + prisonerHtml : ''}
-    <div id="assignedUnitsArea" style="margin-top:8px;"></div>
-    <div style="margin-top:10px;"><button id="manualDispatchBtn">Manual Dispatch</button> <button id="autoDispatchBtn">Auto Dispatch</button> <button id="runCardDispatchBtn">Run Card Dispatch</button> <button id="unitTypeDispatchBtn">Unit Type Dispatch</button></div>
-    <div id="manualDispatchArea" style="margin-top:8px;"></div>
-    <div id="unitTypeDispatchArea" style="margin-top:8px;"></div>
-    <div id="missionTimerArea" style="margin-top:8px;"></div>
-  `;
+  const meta = document.getElementById('missionMeta');
+  if (meta) {
+    meta.innerHTML = `
+      <div><strong>Status:</strong> ${mission.status}</div>
+      ${patientHtml ? `<div class="mission-meta-section"><strong>Patients:</strong>${patientHtml}</div>` : ''}
+      ${prisonerHtml ? `<div class="mission-meta-section"><strong>Prisoners:</strong>${prisonerHtml}</div>` : ''}
+    `;
+  }
+
+  renderMissionDistanceFilter(mission);
+  await refreshRunCardList(mission);
+  await refreshMissionUnitRoster(mission);
+  missionUnitTab = 'available';
+  document.querySelectorAll('.mission-units-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === 'available');
+  });
+  renderMissionUnitList(mission);
+
   document.getElementById('nextMissionBtn').onclick = showNextMission;
-  document.getElementById('manualDispatchBtn').onclick = () => openManualDispatch(mission);
+  document.getElementById('prevMissionBtn').onclick = showPrevMission;
+  document.getElementById('nextMissionBtnFooter').onclick = showNextMission;
+  document.getElementById('prevMissionBtnFooter').onclick = showPrevMission;
   document.getElementById('autoDispatchBtn').onclick = () => autoDispatch(mission);
-  document.getElementById('runCardDispatchBtn').onclick = () => runCardDispatch(mission);
-  document.getElementById('unitTypeDispatchBtn').onclick = () => openUnitTypeDispatch(mission);
+  document.getElementById('createRunCardBtn').onclick = () => openRunCardCreator(mission);
+  document.getElementById('dispatchSelectedBtn').onclick = () => dispatchSelectedFromList(mission, false);
+  document.getElementById('dispatchNextBtn').onclick = () => dispatchSelectedFromList(mission, true);
+
+  document.querySelectorAll('.mission-units-tab').forEach(btn => {
+    btn.onclick = () => {
+      document.querySelectorAll('.mission-units-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      missionUnitTab = btn.dataset.tab;
+      renderMissionUnitList(mission);
+    };
+  });
+
   refreshAssignedUnitsUI(mission.id).then(assigned => {
     const reqDiv = document.getElementById('reqDynamic');
     if (reqDiv) { reqDiv.innerHTML = renderRequirementsDynamic(mission, assigned); attachPenaltyHandlers(mission); }
   });
-  document.getElementById("missionDetails").style.display = "block";
+  document.getElementById("missionDetails").style.display = "flex";
   const active = activeWorkTimers.get(mission.id);
   if (active && active.endTime) {
     startMissionCountdown(mission.id, active.endTime);
@@ -4460,7 +4818,8 @@ function renderManualList(stations, unitsByStation, busyIds, mission) {
 }
 
 async function openManualDispatch(mission) {
-  const area = document.getElementById('manualDispatchArea');
+  const { area } = ensureDispatchArea();
+  area.style.display = 'block';
   area.innerHTML = 'Loading units…';
 
   try {
@@ -4611,6 +4970,7 @@ async function openManualDispatch(mission) {
 
 async function dispatchSelectedUnits(missionId) {
   const area = document.getElementById('manualDispatchArea');
+  if (!area) { notifyError('No dispatch list available.'); return; }
   const ids = Array.from(area.querySelectorAll('input[type="checkbox"]:checked')).map(cb=>parseInt(cb.value,10));
   if (!ids.length){ notifyError('Select at least one unit to dispatch.'); return; }
   try {
@@ -4706,8 +5066,21 @@ function pointInPolygon(lat, lon, poly) {
   return inside;
 }
 
+function ensureDispatchArea() {
+  let area = document.getElementById('manualDispatchArea');
+  let tempArea = false;
+  if (!area) {
+    area = document.createElement('div');
+    area.id = 'manualDispatchArea';
+    area.style.display = 'none';
+    document.body.appendChild(area);
+    tempArea = true;
+  }
+  return { area, tempArea };
+}
+
 async function autoDispatch(mission) {
-  const area = document.getElementById('manualDispatchArea');
+  const { area, tempArea } = ensureDispatchArea();
   area.innerHTML = 'Selecting units…';
   try {
     const [stations, allUnitsRaw] = await Promise.all([
@@ -4831,21 +5204,16 @@ async function autoDispatch(mission) {
   } catch (e) {
     console.error(e);
     area.innerHTML = '<span style="color:#b00;">Auto dispatch failed.</span>';
+  } finally {
+    if (tempArea) area.remove();
   }
 }
 
-async function runCardDispatch(mission) {
-  let area = document.getElementById('manualDispatchArea');
-  let tempArea = false;
-  if (!area) {
-    area = document.createElement('div');
-    area.id = 'manualDispatchArea';
-    area.style.display = 'none';
-    document.body.appendChild(area);
-    tempArea = true;
-  }
+async function runCardDispatch(mission, card = null) {
+  const { area, tempArea } = ensureDispatchArea();
   try {
-    const res = await fetch(`/api/run-cards/${encodeURIComponent(mission.type)}`);
+    const query = card?.id ? `?id=${encodeURIComponent(card.id)}` : '';
+    const res = await fetch(`/api/run-cards/${encodeURIComponent(mission.type)}${query}`);
     if (!res.ok) { notifyError('No run card for this mission.'); return; }
     const rc = await res.json();
     const rcMission = {

@@ -420,3 +420,325 @@ h3 {
   border-radius: 6px;
   font-weight: 600;
 }
+
+/* Mission overlay revamp */
+.mission-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.mission-overlay__panel {
+  background: #3a3a3a;
+  color: #f5f5f5;
+  width: min(1400px, 100%);
+  height: min(90vh, 100%);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.mission-overlay__header {
+  background: #4b4b4b;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #2d2d2d;
+}
+
+.mission-overlay__title {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.mission-overlay__title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mission-overlay__address {
+  color: #d6d6d6;
+  margin-top: 4px;
+}
+
+.mission-overlay__zones {
+  color: #ffd66b;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.mission-overlay__header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.mission-overlay__run-cards {
+  background: #353535;
+  padding: 12px 20px;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.mission-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.mission-section-title h4 {
+  margin: 0;
+}
+
+.mission-section-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.run-card-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.run-card {
+  background: #2f2f2f;
+  border: 1px solid #4a4a4a;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.run-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.run-card__summary div {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.run-card-dispatch {
+  background: #2e7d32;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.mission-overlay__body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 16px;
+  padding: 16px 20px;
+  overflow: hidden;
+  background: #3d3d3d;
+}
+
+.mission-overlay__left,
+.mission-overlay__right {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.mission-subsection {
+  background: #2f2f2f;
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid #444;
+}
+
+.mission-meta-section ul {
+  margin: 6px 0 0 16px;
+}
+
+.mission-distance-filter {
+  background: #2f2f2f;
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid #444;
+}
+
+.mission-distance-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.mission-distance-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.distance-filter-btn {
+  background: #444;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.distance-filter-btn.active {
+  background: #2e7d32;
+  border-color: #2e7d32;
+}
+
+.mission-assigned-list {
+  background: #2f2f2f;
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid #444;
+  overflow-y: auto;
+}
+
+.assigned-units-header {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.assigned-units-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assigned-unit-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px;
+  background: #262626;
+  border-radius: 8px;
+  border: 1px solid #3f3f3f;
+}
+
+.assigned-unit-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.assigned-unit-type {
+  color: #d0d0d0;
+  font-size: 13px;
+}
+
+.assigned-unit-station {
+  color: #b5b5b5;
+  font-size: 12px;
+}
+
+.assigned-unit-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assigned-unit-row .unit-link {
+  color: #8ab4ff;
+  cursor: pointer;
+}
+
+.assigned-unit-meta button {
+  background: #9b1c1c;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.mission-units-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.mission-units-tab {
+  background: #4b4b4b;
+  border: 1px solid #666;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.mission-units-tab.active {
+  background: #c0392b;
+  border-color: #c0392b;
+}
+
+.mission-unit-list {
+  flex: 1;
+  overflow-y: auto;
+  background: #2f2f2f;
+  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid #444;
+}
+
+.mission-units-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.mission-units-table th,
+.mission-units-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid #444;
+  text-align: left;
+}
+
+.mission-units-table th {
+  color: #ddd;
+  font-weight: 600;
+}
+
+.mission-unit-list .unit-link {
+  color: #8ab4ff;
+  cursor: pointer;
+}
+
+.queue-unit-btn {
+  background: #2e7d32;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.mission-overlay__footer {
+  background: #b02a2a;
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mission-footer-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mission-overlay__timer {
+  color: #ffd66b;
+  font-weight: 600;
+}
