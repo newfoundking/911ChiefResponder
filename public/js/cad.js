@@ -720,99 +720,28 @@ async function openMission(id) {
   const mission = cachedMissions.find(m=>String(m.id)===String(id));
   if (!mission) return;
   showMissionOnMap(mission);
-  const pane = document.getElementById('cadDetail');
-  const assigned = await fetchNoCache(`/api/missions/${id}/units`).then(r=>r.json()).catch(()=>[]);
-  let time = '';
-  if (mission.resolve_at) {
-    const sec = Math.max(0,(mission.resolve_at - Date.now())/1000);
-    time = `<div>Time Remaining: ${formatTime(sec)}</div>`;
-  }
-  const assignedCounts = {};
-  const equipCounts = {};
-  const trainCounts = {};
-  assigned.forEach(u => {
-    assignedCounts[u.type] = (assignedCounts[u.type] || 0) + 1;
-    (Array.isArray(u.equipment) ? u.equipment : []).forEach(e => {
-      equipCounts[e] = (equipCounts[e] || 0) + 1;
-    });
-    (Array.isArray(u.personnel) ? u.personnel : []).forEach(p => {
-      (Array.isArray(p.training) ? p.training : []).forEach(t => {
-        trainCounts[t] = (trainCounts[t] || 0) + 1;
-      });
-    });
-  });
-  let reqHtml = '';
-  if (Array.isArray(mission.required_units) && mission.required_units.length) {
-    reqHtml = '<div><strong>Required Units:</strong><ul>' + mission.required_units.map(r=>{
-      const need = r.quantity ?? r.count ?? r.qty ?? 1;
-      const types = Array.isArray(r.types) ? r.types : [r.type];
-      const have = types.reduce((s,t)=>s+(assignedCounts[t]||0),0);
-      return `<li>${need} ${types.join(' or ')} (${have}/${need})</li>`;
-    }).join('') + '</ul></div>';
-  }
-  let reqEquipHtml = '';
-  if (Array.isArray(mission.equipment_required) && mission.equipment_required.length) {
-    reqEquipHtml = '<div><strong>Required Equipment:</strong><ul>' + mission.equipment_required.map(r=>{
-      const name = r.name || r.type || r;
-      const need = r.qty ?? r.quantity ?? r.count ?? 1;
-      const have = equipCounts[name] || 0;
-      return `<li>${need} ${name} (${have}/${need})</li>`;
-    }).join('') + '</ul></div>';
-  }
-  let reqTrainHtml = '';
-  if (Array.isArray(mission.required_training) && mission.required_training.length) {
-    reqTrainHtml = '<div><strong>Required Training:</strong><ul>' + mission.required_training.map(r=>{
-      const name = r.training || r.name || r;
-      const need = r.qty ?? r.quantity ?? r.count ?? 1;
-      const have = trainCounts[name] || 0;
-      return `<li>${need} ${name} (${have}/${need})</li>`;
-    }).join('') + '</ul></div>';
-  }
-  let assignedHtml = '';
-  if (assigned.length) {
-    assignedHtml = '<div style="margin-top:8px;"><strong>Assigned Units:</strong><ul>' + assigned.map(u=>{
-      let etaText = '';
-      if (u.eta) {
-        const sec = Math.max(0, (u.eta - Date.now()) / 1000);
-        etaText = ` (${formatTime(sec)})`;
-      }
-      const statusText = formatStatus(u.status, u.responding);
-      return `<li>${u.name} - ${statusText}${etaText} <button class="cancel-unit" data-unit="${u.id}">Cancel</button></li>`;
-    }).join('') + '</ul></div>';
-  }
-  pane.innerHTML = `<div class="cad-detail-header">
-      <button id="closeDetail">Close</button>
-      <button id="manualDispatch">Manual Dispatch</button>
-      <button id="autoDispatch">Auto Dispatch</button>
-      <button id="runCardDispatch">Run Card</button>
-      <button id="unitTypeDispatchBtn">Unit Type Dispatch</button>
-    </div>
-    <h3>${mission.type}</h3>
-    ${time}
-    <div>${mission.address||''}</div>
-    ${reqHtml}
-    ${reqEquipHtml}
-    ${reqTrainHtml}
-    ${assignedHtml}`;
-  pane.classList.remove('hidden');
-  document.getElementById('closeDetail').onclick = ()=>{
-    pane.classList.add('hidden');
+  const modal = document.getElementById('cadMissionModal');
+  const titleEl = document.getElementById('cadMissionTitle');
+  const addressEl = document.getElementById('cadMissionAddress');
+  if (!modal || !titleEl || !addressEl) return;
+
+  const addressText = mission.address || `${mission.lat?.toFixed(4) ?? ''}, ${mission.lon?.toFixed(4) ?? ''}`;
+  titleEl.textContent = mission.type || 'Mission';
+  addressEl.textContent = addressText;
+
+  modal.classList.remove('hidden');
+  document.getElementById('cadDetail').classList.add('hidden');
+
+  document.getElementById('cadMissionClose').onclick = () => {
+    modal.classList.add('hidden');
     document.getElementById('cadUnits').classList.add('hidden');
     selectedMissionId = null;
     fitMapToMarkers();
   };
-  document.getElementById('manualDispatch').onclick = ()=>openManualDispatch(mission);
-  document.getElementById('autoDispatch').onclick = ()=>autoDispatch(mission);
-  document.getElementById('runCardDispatch').onclick = ()=>runCardDispatch(mission);
-  document.getElementById('unitTypeDispatchBtn').onclick = ()=>openUnitTypeDispatch(mission);
-  pane.querySelectorAll('.cancel-unit').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const uid = Number(btn.dataset.unit);
-      await cancelUnit(uid);
-      await loadMissions();
-      await openMission(mission.id);
-    });
-  });
+  document.getElementById('cadMissionManualDispatch').onclick = () => openManualDispatch(mission);
+  document.getElementById('cadMissionAutoDispatch').onclick = () => autoDispatch(mission);
+  document.getElementById('cadMissionRunCardDispatch').onclick = () => runCardDispatch(mission);
+  document.getElementById('cadMissionUnitTypeDispatch').onclick = () => openUnitTypeDispatch(mission);
 }
 
 async function missionDepartmentsFor(mission) {

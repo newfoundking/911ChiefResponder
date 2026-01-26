@@ -38,6 +38,25 @@
     <div id="cadUnits" class="hidden"></div>
   </div>
 
+  <div id="cadMissionModal" class="cad-mission-modal hidden" role="dialog" aria-modal="true">
+    <div class="cad-mission-modal__panel">
+      <header class="cad-mission-modal__header">
+        <div class="cad-mission-modal__title-block">
+          <h2 id="cadMissionTitle" class="cad-mission-modal__title">Mission</h2>
+          <div id="cadMissionAddress" class="cad-mission-modal__address"></div>
+        </div>
+        <button id="cadMissionClose" class="cad-mission-modal__close" type="button">Close</button>
+      </header>
+      <div class="cad-mission-modal__body" aria-hidden="true"></div>
+      <footer class="cad-mission-modal__footer">
+        <button id="cadMissionManualDispatch" class="cad-mission-modal__action" type="button">Manual Dispatch</button>
+        <button id="cadMissionAutoDispatch" class="cad-mission-modal__action" type="button">Auto Dispatch</button>
+        <button id="cadMissionRunCardDispatch" class="cad-mission-modal__action" type="button">Run Card</button>
+        <button id="cadMissionUnitTypeDispatch" class="cad-mission-modal__action" type="button">Unit Type Dispatch</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- Edit Personnel Modal -->
   <div id="editPersonnelModal" class="cad-modal">
         <h3>Edit Personnel</h3>

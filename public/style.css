@@ -244,6 +244,92 @@ h3 {
     overflow-y: auto;
 }
 
+.cad-mission-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20000;
+    padding: 2rem;
+}
+
+.cad-mission-modal.hidden {
+    display: none;
+}
+
+.cad-mission-modal__panel {
+    width: 90vw;
+    height: 90vh;
+    background: #2f2f2f;
+    color: #f5f5f5;
+    border-radius: 18px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+    border: 1px solid #3f3f3f;
+    overflow: hidden;
+}
+
+.cad-mission-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 24px;
+    background: #3a3a3a;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.cad-mission-modal__title {
+    margin: 0;
+    font-size: 30px;
+    font-weight: 800;
+}
+
+.cad-mission-modal__address {
+    margin-top: 6px;
+    color: #d6d6d6;
+}
+
+.cad-mission-modal__close {
+    background: #1f2937;
+    color: #f5f5f5;
+    border: 1px solid #4b5563;
+    border-radius: 999px;
+    padding: 6px 14px;
+    cursor: pointer;
+}
+
+.cad-mission-modal__body {
+    flex: 1;
+}
+
+.cad-mission-modal__footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px 24px 22px;
+    background: #353535;
+    border-top: 1px solid #2a2a2a;
+}
+
+.cad-mission-modal__action {
+    background: #2b2b2b;
+    color: #f5f5f5;
+    border: 1px solid #4b4b4b;
+    border-radius: 10px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.cad-mission-modal__action:hover {
+    border-color: #ffd66b;
+    color: #ffd66b;
+}
+
 /* Toast notifications */
 #notification-container {
   position: fixed;
@@ -426,7 +512,7 @@ h3 {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.65);
-  z-index: 9999;
+  z-index: 20000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -436,8 +522,8 @@ h3 {
 .mission-overlay__panel {
   background: #3a3a3a;
   color: #f5f5f5;
-  width: min(95vw, 1600px);
-  height: min(92vh, 100%);
+  width: 90vw;
+  height: 90vh;
   border-radius: 16px;
   display: flex;
   flex-direction: column;
