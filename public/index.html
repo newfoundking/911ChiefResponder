@@ -348,33 +348,30 @@
                         color: #fde68a;
                         font-weight: 600;
                 }
-                .mission-overlay__run-cards {
-                        background: rgba(15, 23, 42, 0.55);
-                        padding: 12px 20px;
-                        border-top: 1px solid var(--border-soft);
-                        border-bottom: 1px solid var(--border-soft);
-                }
                 .mission-overlay__body {
                         flex: 1;
                         display: grid;
-                        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
+                        grid-template-rows: repeat(2, minmax(0, 1fr));
                         gap: 16px;
                         padding: 16px 20px;
                         overflow: hidden;
                         background: rgba(15, 23, 42, 0.35);
                 }
-                .mission-overlay__column {
+                .mission-overlay__quadrant {
+                        background: rgba(15, 23, 42, 0.55);
+                        border: 1px solid var(--border-soft);
+                        border-radius: var(--radius-md);
+                        padding: 12px;
                         display: flex;
                         flex-direction: column;
                         gap: 12px;
                         min-height: 0;
-                        overflow-y: auto;
+                        overflow: hidden;
                 }
                 .mission-overlay__right {
                         background: rgba(15, 23, 42, 0.65);
-                        border: 1px solid rgba(148, 163, 184, 0.35);
-                        border-radius: var(--radius-md);
-                        padding: 16px;
+                        border-color: rgba(148, 163, 184, 0.35);
                         box-shadow: var(--shadow-soft);
                 }
                 .mission-overlay__footer {
@@ -709,25 +706,29 @@
                         <button id="closeMissionBtn" class="incident-modal__close" onclick="closeMissionDetails()">Close</button>
                 </header>
 
-                <section class="mission-overlay__run-cards hidden">
-                        <div class="mission-section-title">
-                                <h4>Run Cards</h4>
-                                <div class="mission-section-actions">
-                                        <button id="createRunCardBtn">Create Run Card</button>
-                                </div>
-                        </div>
-                        <div id="runCardList" class="run-card-list">Loading run cards…</div>
-                </section>
-
                 <section class="mission-overlay__body hidden">
-                        <div class="mission-overlay__left mission-overlay__column">
+                        <div class="mission-overlay__quadrant mission-overlay__run-cards">
+                                <div class="mission-section-title">
+                                        <h4>Run Cards</h4>
+                                        <div class="mission-section-actions">
+                                                <button id="createRunCardBtn" class="button">Create Run Card</button>
+                                        </div>
+                                </div>
+                                <div id="runCardList" class="run-card-list">Loading run cards…</div>
+                        </div>
+                        <div class="mission-overlay__quadrant mission-overlay__requirements">
+                                <div class="mission-section-title">
+                                        <h4>Mission Requirements</h4>
+                                </div>
                                 <div class="mission-subsection">
                                         <div id="reqDynamic"></div>
                                         <div id="missionMeta"></div>
                                 </div>
+                        </div>
+                        <div class="mission-overlay__quadrant mission-overlay__assigned">
                                 <div id="assignedUnitsArea" class="mission-assigned-list"></div>
                         </div>
-                        <div class="mission-overlay__right mission-overlay__column hidden">
+                        <div class="mission-overlay__quadrant mission-overlay__dispatch mission-overlay__right">
                                 <div class="mission-dispatch-header">
                                         <h4 class="mission-dispatch-title">Dispatch Panel</h4>
                                         <button id="closeDispatchPanelBtn" class="close-btn" type="button">Close</button>
@@ -2315,6 +2316,19 @@ function formatRunCardSummary(title, items, labelKey) {
   return `<div><strong>${title}:</strong> ${lines.join(', ')}</div>`;
 }
 
+function formatRunCardEntriesInput(items, labelKey) {
+  if (!items?.length) return '';
+  return items
+    .map((i) => {
+      const qty = i.quantity ?? i.qty ?? i.count ?? 1;
+      const label = i[labelKey] || i.type || i.name || i.training || i;
+      if (!label) return null;
+      return qty > 1 ? `${label}:${qty}` : `${label}`;
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
 function parseRunCardEntries(input, labelKey) {
   if (!input || !input.trim()) return [];
   return input
@@ -2344,33 +2358,29 @@ async function refreshRunCardList(mission) {
   if (!list) return;
   list.innerHTML = 'Loading run cards…';
   const cards = await fetchRunCardsForMission(mission.type);
-  const createCardHtml = `
-    <div class="run-card run-card--create">
-      <div class="run-card__header">
-        <button class="run-card-dispatch run-card-create-btn" type="button">
-          + Create New Run Card
-        </button>
-      </div>
-      <div class="run-card__summary">Build a new run card template for this mission type.</div>
-    </div>
-  `;
+  const createBtn = document.getElementById('createRunCardBtn');
+  if (createBtn) {
+    createBtn.onclick = () => openRunCardCreator(mission);
+  }
+  const cardKey = (card) => `${card.source || 'custom'}:${card.id ?? card.label ?? 'default'}`;
+  const cardMap = new Map(cards.map(card => [cardKey(card), card]));
   if (!cards.length) {
     list.innerHTML = `
-      ${createCardHtml}
       <div class="run-card">
         <div class="run-card__summary"><em>No run cards saved for this call type.</em></div>
       </div>
     `;
   } else {
-    list.innerHTML = [
-      createCardHtml,
-      ...cards.map(card => `
+    list.innerHTML = cards.map(card => {
+      const isDefault = card.source === 'legacy' || card.source === 'default';
+      return `
         <div class="run-card">
           <div class="run-card__header">
             <button class="run-card-dispatch run-card-title-btn" data-id="${card.id ?? ''}" data-source="${card.source || 'custom'}">
-              ${card.label || 'Run Card'}
+              <span class="run-card-label">${card.label || 'Run Card'}</span>
+              ${isDefault ? '<span class="run-card-badge">Default</span>' : ''}
             </button>
-            ${card.source === 'default' ? '<span class="run-card-badge">Default</span>' : ''}
+            <button class="run-card-edit-btn" type="button" data-key="${cardKey(card)}" aria-label="Edit run card">✏️</button>
           </div>
           <div class="run-card__summary">
             ${formatRunCardSummary('Units', card.units, 'type')}
@@ -2378,18 +2388,21 @@ async function refreshRunCardList(mission) {
             ${formatRunCardSummary('Equipment', card.equipment, 'name')}
           </div>
         </div>
-      `)
-    ].join('');
+      `;
+    }).join('');
   }
-  list.querySelectorAll('.run-card-create-btn').forEach(btn => {
-    btn.addEventListener('click', () => openRunCardCreator(mission));
-  });
   list.querySelectorAll('.run-card-dispatch').forEach(btn => {
-    if (btn.classList.contains('run-card-create-btn')) return;
     btn.addEventListener('click', () => runCardDispatch(mission, {
       id: btn.dataset.id || null,
       source: btn.dataset.source || 'custom'
     }));
+  });
+  list.querySelectorAll('.run-card-edit-btn').forEach(btn => {
+    btn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const card = cardMap.get(btn.dataset.key);
+      if (card) openRunCardEditor(mission, card);
+    });
   });
 }
 
@@ -2425,6 +2438,50 @@ async function openRunCardCreator(mission) {
   } catch (err) {
     console.error(err);
     notifyError('Failed to save run card.');
+  }
+}
+
+async function openRunCardEditor(mission, card) {
+  const isDefault = card.source === 'legacy' || card.source === 'default';
+  const fields = [];
+  if (!isDefault) {
+    fields.push({ name: 'label', label: 'Run card name', type: 'text', required: true, value: card.label || '' });
+  }
+  fields.push(
+    { name: 'units', label: 'Units (comma-separated, e.g., Engine:2, Ladder:1)', type: 'text', value: formatRunCardEntriesInput(card.units, 'type') },
+    { name: 'training', label: 'Training (comma-separated, e.g., ALS:1)', type: 'text', value: formatRunCardEntriesInput(card.training, 'training') },
+    { name: 'equipment', label: 'Equipment (comma-separated, e.g., Jaws:1)', type: 'text', value: formatRunCardEntriesInput(card.equipment, 'name') }
+  );
+  const result = await openFormModal({
+    title: isDefault ? `Edit Default Run Card for ${mission.type}` : `Edit Run Card for ${mission.type}`,
+    fields
+  });
+  if (!result) return;
+  const payload = {
+    units: parseRunCardEntries(result.units, 'type'),
+    training: parseRunCardEntries(result.training, 'training'),
+    equipment: parseRunCardEntries(result.equipment, 'equipment')
+  };
+  try {
+    if (isDefault) {
+      const res = await fetch(`/api/run-cards/${encodeURIComponent(mission.type)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } else {
+      const res = await fetch('/api/run-cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, mission_name: mission.type, label: result.label.trim() })
+      });
+      if (!res.ok) throw new Error(await res.text());
+    }
+    await refreshRunCardList(mission);
+  } catch (err) {
+    console.error(err);
+    notifyError('Failed to update run card.');
   }
 }
 
@@ -5400,12 +5457,22 @@ async function autoDispatch(mission) {
 
     // subtract already assigned units (enroute/on_scene)
     const assigned = await fetchNoCache(`/api/missions/${mission.id}/units`).then(r=>r.json()).catch(()=>[]);
-    const assignedCounts = {};
-    for (const a of assigned) {
-      if (!['enroute','on_scene'].includes(a.status)) continue;
-      assignedCounts[a.type] = (assignedCounts[a.type] || 0) + 1;
+    const assignedActive = (assigned || []).filter(a => ['enroute', 'on_scene'].includes(a.status));
+    for (const a of assignedActive) {
       applyNeeds(a);
     }
+
+    const normalizeType = value => String(value || '').toLowerCase();
+    const unitMatchesTypes = (unit, types) => {
+      const unitType = normalizeType(unit.type);
+      const unitClass = normalizeType(unit.class);
+      return types.some(t => {
+        const normalized = normalizeType(t);
+        return normalized && (normalized === unitType || normalized === unitClass);
+      });
+    };
+    const countAssignedForTypes = types =>
+      assignedActive.filter(u => unitMatchesTypes(u, types)).length;
 
     function unitMatchesNeed(u) {
       return trainingNeeds.some(n=>n.qty>0 && trainingCount(u,n.name)>0) ||
@@ -5426,9 +5493,9 @@ async function autoDispatch(mission) {
     const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
     for (const r of reqUnits) {
       const types = Array.isArray(r.types) ? r.types : [r.type];
-      let need = (r.quantity ?? r.count ?? r.qty ?? 1) - types.reduce((s,t)=>s+(assignedCounts[t]||0),0);
+      let need = (r.quantity ?? r.count ?? r.qty ?? 1) - countAssignedForTypes(types);
       for (let i=0; i<need; i++) {
-        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && types.includes(u.type))
+        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && unitMatchesTypes(u, types))
                                  .sort(sortUnits);
         if (!candidates.length) break;
         const chosen = candidates.find(unitMatchesAllNeeds) ||
@@ -5456,12 +5523,22 @@ async function autoDispatch(mission) {
       }
     }
 
-    if (!selected.length) { area.innerHTML = '<em>No additional units available.</em>'; return; }
+    if (!selected.length) {
+      area.innerHTML = '<em>No additional units available.</em>';
+      if (typeof notifyError === 'function') notifyError('No additional units available for dispatch.');
+      return;
+    }
     const ids = selected.map(u=>u.id);
     await sendUnitsToMission(mission, ids, area);
+    if (typeof notifySuccess === 'function') {
+      notifySuccess(`Auto dispatched ${ids.length} unit${ids.length === 1 ? '' : 's'}.`);
+    }
+    await refreshMissionUnitRoster(mission);
+    renderMissionUnitList(mission);
   } catch (e) {
     console.error(e);
     area.innerHTML = '<span style="color:#b00;">Auto dispatch failed.</span>';
+    if (typeof notifyError === 'function') notifyError('Auto dispatch failed.');
   } finally {
     if (tempArea) area.remove();
   }
