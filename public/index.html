@@ -289,6 +289,108 @@
                         overflow: auto;
                         backdrop-filter: blur(6px);
                 }
+                .mission-overlay {
+                        position: fixed;
+                        inset: 0;
+                        background: rgba(2, 6, 23, 0.75);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 24px;
+                        z-index: 20000;
+                        backdrop-filter: blur(8px);
+                }
+                .mission-overlay.hidden {
+                        display: none;
+                }
+                .mission-overlay__panel {
+                        width: min(1200px, 92vw);
+                        height: min(820px, 90vh);
+                        background: var(--bg-panel);
+                        border-radius: var(--radius-lg);
+                        border: 1px solid var(--border-soft);
+                        display: flex;
+                        flex-direction: column;
+                        overflow: hidden;
+                        box-shadow: var(--shadow-strong);
+                }
+                .mission-overlay__header {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        gap: 16px;
+                        padding: 16px 20px;
+                        background: var(--bg-panel-alt);
+                        border-bottom: 1px solid var(--border-soft);
+                }
+                .mission-overlay__title {
+                        font-size: 1.8rem;
+                        font-weight: 700;
+                }
+                .mission-overlay__title-row {
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                        justify-content: space-between;
+                        width: 100%;
+                }
+                .mission-overlay__meta-row {
+                        display: flex;
+                        gap: 12px;
+                        flex-wrap: wrap;
+                        color: var(--text-muted);
+                        font-size: 0.9rem;
+                }
+                .mission-overlay__address {
+                        color: var(--text-muted);
+                }
+                .mission-overlay__zones {
+                        color: #fde68a;
+                        font-weight: 600;
+                }
+                .mission-overlay__run-cards {
+                        background: rgba(15, 23, 42, 0.55);
+                        padding: 12px 20px;
+                        border-top: 1px solid var(--border-soft);
+                        border-bottom: 1px solid var(--border-soft);
+                }
+                .mission-overlay__body {
+                        flex: 1;
+                        display: grid;
+                        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                        gap: 16px;
+                        padding: 16px 20px;
+                        overflow: hidden;
+                        background: rgba(15, 23, 42, 0.35);
+                }
+                .mission-overlay__column {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                        min-height: 0;
+                        overflow-y: auto;
+                }
+                .mission-overlay__right {
+                        background: rgba(15, 23, 42, 0.65);
+                        border: 1px solid rgba(148, 163, 184, 0.35);
+                        border-radius: var(--radius-md);
+                        padding: 16px;
+                        box-shadow: var(--shadow-soft);
+                }
+                .mission-overlay__footer {
+                        padding: 12px 20px;
+                        border-top: 1px solid var(--border-soft);
+                        background: var(--bg-panel-alt);
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        flex-wrap: wrap;
+                        gap: 12px;
+                }
+                .mission-overlay__timer {
+                        color: #fde68a;
+                        font-weight: 600;
+                }
                 .modal-content {
                         background: var(--bg-panel);
                         padding: 2rem;
@@ -588,7 +690,7 @@
 </div>
 
 <!-- Mission Details Overlay -->
-<div id="missionDetails" class="mission-overlay" style="display: none;">
+<div id="missionDetails" class="mission-overlay hidden">
         <div class="mission-overlay__panel">
                 <header class="mission-overlay__header">
                         <div class="mission-overlay__title-block">
