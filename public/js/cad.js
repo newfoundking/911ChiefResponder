@@ -1176,7 +1176,8 @@ export async function generateMission(retry = false, excludeIndex = null) {
     modifiers: template.modifiers || [],
     penalty_options: template.penalty_options || [],
     penalties: [],
-    timing: template.timing ?? 10
+    timing: template.timing ?? 10,
+    non_emergency: template.non_emergency ? 1 : null
   };
   try {
     const res = await fetch('/api/missions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(missionData) });
