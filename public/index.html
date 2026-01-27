@@ -1357,6 +1357,39 @@ function cacheUnits(units){
   }
 }
 
+async function markUnitAtStation(unitId) {
+  try {
+    await fetch(`/api/units/${unitId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'at_station' })
+    });
+  } catch (err) {
+    console.warn('Failed to update unit status to at_station:', err);
+  }
+  const unit = _unitById.get(unitId);
+  if (unit) {
+    unit.status = 'at_station';
+    unit.responding = false;
+    _unitById.set(unitId, unit);
+    ensureUnitMarker(unit);
+  }
+  if (document.getElementById('tab-units')?.classList.contains('active')) {
+    renderUnitList();
+  }
+  if (window.currentStation && unit && window.currentStation.id === unit.station_id) {
+    refreshStationPanelNoCache(unit.station_id);
+  }
+}
+
+async function handleReturnArrival(unitId) {
+  await markUnitAtStation(unitId);
+  const rp = unitRoutes.get(unitId);
+  if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(unitId); }
+  clearUnitEta(unitId);
+  fetch(`/api/unit-travel/${unitId}`, { method: 'DELETE' }).catch(()=>{});
+}
+
 function centerOnUnit(unitId) {
   const unit = _unitById.get(unitId);
   if (!unit) return;
@@ -4979,10 +5012,8 @@ async function cancelUnit(unitId, stationId) {
         [current.lat, current.lng],
         [st.lat, st.lon],
           TRAVEL_SPEED[unit.type] || CLASS_SPEED[unit.class] || 56,
-        () => {
-          const rp = unitRoutes.get(unit.id);
-          if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(unit.id); }
-          fetch(`/api/unit-travel/${unit.id}`, { method:'DELETE' }).catch(()=>{});
+        async () => {
+          await handleReturnArrival(unit.id);
         },
         { phase: 'return' }
       );
@@ -5756,7 +5787,9 @@ async function clearAssignedUnit(missionId, unitId) {
     const to   = [st.lat, st.lon];
     routeAndAnimateUnit(
         u.id, from, to, TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56,
-      () => { const rp = unitRoutes.get(u.id); if (rp){ try{ map.removeLayer(rp); }catch{} unitRoutes.delete(u.id); } fetch(`/api/unit-travel/${u.id}`,{method:'DELETE'}).catch(()=>{}); },
+      async () => {
+        await handleReturnArrival(u.id);
+      },
       { phase: 'return' }
     );
   }
@@ -5861,10 +5894,8 @@ function setupTimerForMission(mission, endTime) {
         [current.lat, current.lng],
         [st.lat, st.lon],
           TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56,
-        () => {
-          const rp = unitRoutes.get(u.id);
-          if (rp) { try { map.removeLayer(rp); } catch {} unitRoutes.delete(u.id); }
-          fetch(`/api/unit-travel/${u.id}`, { method:'DELETE' }).catch(()=>{});
+        async () => {
+          await handleReturnArrival(u.id);
         },
         { phase: 'return' }
       );
@@ -5929,6 +5960,10 @@ async function rebuildEnrouteMarkers() {
       routeAndAnimateUnit(
           t.unit_id, t.from, t.to, TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56,
         async () => {
+          if (t.phase === 'return') {
+            await handleReturnArrival(t.unit_id);
+            return;
+          }
           if (t.phase === 'to_scene') {
             await fetch(`/api/units/${t.unit_id}/status`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'on_scene' }) });
           }

@@ -2158,7 +2158,7 @@ app.post('/api/unit-travel', (req, res) => {
           db.run('UPDATE missions SET status=? WHERE id=?', ['on_scene', mission_id], () => {});
         }
       } else if (phase === 'return') {
-        db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', unit_id], () => {});
+        db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['at_station', unit_id], () => {});
         db.run('DELETE FROM unit_travel WHERE unit_id=?', [unit_id], () => {});
       } else {
         // Unknown phase (e.g., transport to facility). Default to available and clear travel
@@ -2205,7 +2205,7 @@ function processUnitTravels(rows) {
         }));
       } else if (r.phase === 'return') {
         afterOps.push(new Promise(resolve => {
-          db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['available', r.unit_id], () => {
+          db.run('UPDATE units SET status=?, responding=0 WHERE id=?', ['at_station', r.unit_id], () => {
             db.run('DELETE FROM unit_travel WHERE unit_id=?', [r.unit_id], () => resolve());
           });
         }));
