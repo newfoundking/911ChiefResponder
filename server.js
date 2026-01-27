@@ -2049,6 +2049,7 @@ app.post('/api/mission-units', (req, res) => {
                       if (err5) return res.status(500).json({ error: err5.message });
                       try { updated.personnel = JSON.parse(updated.personnel || '[]'); } catch { updated.personnel = []; }
                       try { updated.equipment = JSON.parse(updated.equipment || '[]'); } catch { updated.equipment = []; }
+                      updated.responding = Number(updated.responding ?? responding);
                       res.json({ ok: true, id: linkId, unit: updated });
                     }
                   );
