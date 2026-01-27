@@ -94,7 +94,7 @@ function getUnitMission(req, res) {
         prisoners: parseArrayField(row.prisoners),
         modifiers: parseArrayField(row.modifiers),
         timing: typeof row.timing === 'number' ? row.timing : 10,
-        non_emergency: row.non_emergency === 1 || row.non_emergency === true,
+        non_emergency: Number(row.non_emergency) === 1,
       };
       res.json(mission);
     }
