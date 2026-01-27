@@ -1109,6 +1109,33 @@ let missionSearchFilter = '';
     }
   });
 
+  // Mission modal shortcuts: ←/→ cycle missions, A auto-dispatch, D dispatch selected, N dispatch selected + next.
+  document.addEventListener('keydown', e => {
+    const missionDetails = document.getElementById('missionDetails');
+    if (!missionDetails || missionDetails.classList.contains('hidden') || openMissionId === null) return;
+    const activeElement = document.activeElement;
+    if (activeElement?.matches('input, textarea, select') || activeElement?.closest('[contenteditable="true"]')) return;
+    const mission = missionsCache.find(item => item.id === openMissionId);
+    if (!mission) return;
+
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      showNextMission();
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      showPrevMission();
+    } else if (e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      autoDispatch(mission);
+    } else if (e.key.toLowerCase() === 'd') {
+      e.preventDefault();
+      dispatchSelectedFromList(mission, false);
+    } else if (e.key.toLowerCase() === 'n') {
+      e.preventDefault();
+      dispatchSelectedFromList(mission, true);
+    }
+  });
+
 const map = L.map("map").setView([47.5646, -52.7002], 13);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap contributors" }).addTo(map);
 
