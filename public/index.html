@@ -692,7 +692,10 @@
                 <header class="mission-overlay__header">
                         <div class="mission-overlay__title-block">
 				<div class="mission-overlay__title-row">
-					<span id="missionTitle" class="mission-overlay__title">Mission</span>
+					<span class="mission-overlay__title">
+						<img id="missionTitleIcon" class="mission-overlay__title-icon" alt="" />
+						<span id="missionTitleText">Mission</span>
+					</span>
 					<span id="missionTimerArea" class="mission-overlay__timer"></span>
 				</div>
 				<div class="mission-overlay__meta-row">
@@ -2031,9 +2034,13 @@ async function refreshAssignedUnitsUI(missionId, missionData = null) {
       div.innerHTML = '<em>No units assigned yet.</em>';
       assignedUnitsCache.set(missionId, []);
       await refreshRequirementsUI(missionId, [], missionData);
+      const mission = missionData || missionsCache.find(m => m.id === missionId);
+      if (mission) await updateMissionHeader(mission, []);
       return [];
     }
     assignedUnitsCache.set(missionId, assigned);
+    const mission = missionData || missionsCache.find(m => m.id === missionId);
+    if (mission) await updateMissionHeader(mission, assigned);
     div.innerHTML = `
       <div class="assigned-units-header">Assigned Units</div>
       <div class="assigned-units-table-wrapper">
@@ -2676,11 +2683,17 @@ async function openRunCardEditor(mission, card) {
   }
 }
 
-async function updateMissionHeader(mission) {
-  const titleEl = document.getElementById('missionTitle');
+async function updateMissionHeader(mission, assignedUnits = null) {
+  const titleTextEl = document.getElementById('missionTitleText');
+  const titleIconEl = document.getElementById('missionTitleIcon');
   const addressEl = document.getElementById('missionAddress');
   const zonesEl = document.getElementById('missionZones');
-  if (titleEl) titleEl.textContent = mission.type;
+  if (titleTextEl) titleTextEl.textContent = mission.type;
+  if (titleIconEl) {
+    const assigned = assignedUnits || assignedUnitsCache.get(mission.id) || [];
+    titleIconEl.src = missionIconUrl(mission, assigned);
+    titleIconEl.alt = `${mission.type} status icon`;
+  }
   if (addressEl) {
     let address = mission.address || missionAddressCache[mission.id] || '';
     if (!address && Number.isFinite(mission.lat) && Number.isFinite(mission.lon)) {
@@ -2924,7 +2937,7 @@ function closeDispatchPanel() {
 // ===== Mission details =====
 async function showMissionDetails(mission) {
   openMissionId = mission.id;
-  await updateMissionHeader(mission);
+  await updateMissionHeader(mission, assignedUnitsCache.get(mission.id) || []);
   missionDeptFilter = 'all';
   missionTypeFilter = 'all';
   missionSortFilter = 'distance';

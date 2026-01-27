@@ -544,6 +544,15 @@ h3 {
 .mission-overlay__title {
   font-size: 32px;
   font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mission-overlay__title-icon {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
 }
 
 .mission-overlay__title-row {
