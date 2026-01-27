@@ -464,7 +464,7 @@ function pointInPolygon(lat, lon, polygon) {
 async function fetchAvailableUnitsForMission(mission, { ignoreDepartments = false } = {}) {
   const [stations, unitsRaw] = await Promise.all([
     fetchJson('/api/stations'),
-    fetchJson('/api/units?status=available')
+    fetchJson('/api/units')
   ]);
 
   const stationMap = new Map(stations.map((station) => [station.id, station]));
@@ -472,6 +472,7 @@ async function fetchAvailableUnitsForMission(mission, { ignoreDepartments = fals
   const restrictByDept = missionDepts.length > 0 && !ignoreDepartments;
 
   const units = unitsRaw
+    .filter((unit) => ['available', 'at_station'].includes(unit.status))
     .filter((unit) => {
       const station = stationMap.get(unit.station_id);
       const dept = station?.department;
@@ -503,9 +504,10 @@ async function fetchAvailableUnitsForMission(mission, { ignoreDepartments = fals
 const UNIT_STATUS_ORDER = {
   on_scene: 0,
   enroute: 1,
-  returning: 2,
-  transporting: 3,
-  available: 4
+  transporting: 2,
+  returning: 3,
+  available: 4,
+  at_station: 5
 };
 
 
@@ -1056,7 +1058,7 @@ function shouldDisplayUnitOnMap(unit) {
   if (unit.responding) return true;
   const status = String(unit.status || '').toLowerCase();
   if (!status) return false;
-  return status !== 'available';
+  return !['available', 'at_station'].includes(status);
 }
 
 function getUnitCoordinates(unit) {
@@ -1892,7 +1894,7 @@ function getDispatchableUnitsForMission(mission, { ignoreDepartments = false } =
     .filter((unit) => {
       if (assignedIds.has(unit.id)) return false;
       const status = String(unit.status || '').toLowerCase();
-      if (status !== 'available') return false;
+      if (!['available', 'at_station'].includes(status)) return false;
       const station = stationById.get(unit.station_id);
       const dept = station?.department;
       if (restrictByDept) {

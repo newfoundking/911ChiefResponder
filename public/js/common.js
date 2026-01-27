@@ -37,10 +37,14 @@ export function formatStatus(status, responding = false) {
   switch (status) {
     case 'available':
       return 'Status 8';
+    case 'transporting':
+      return 'Status 9';
     case 'enroute':
       return responding ? 'Status 11' : 'Status 10';
     case 'on_scene':
       return 'Status 12';
+    case 'at_station':
+      return 'Status 19';
     default:
       return status;
   }
