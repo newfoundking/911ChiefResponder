@@ -550,8 +550,10 @@ h3 {
 }
 
 .mission-overlay__title-icon {
-  width: 28px;
-  height: 28px;
+  width: auto;
+  height: 1em;
+  max-height: 1em;
+  max-width: 1em;
   object-fit: contain;
 }
 
