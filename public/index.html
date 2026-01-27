@@ -2091,12 +2091,20 @@ async function refreshAssignedUnitsUI(missionId, missionData = null) {
           <tbody>
             ${assigned.map(u => {
               const station = _stationById.get(u.station_id);
+              const toggleLabel = u.status === 'enroute'
+                ? (u.responding ? 'Set Status 10' : 'Set Status 11')
+                : '';
               return `
                 <tr>
                   <td><span class="unit-link" data-unitid="${u.id}">${u.name}</span></td>
                   <td>${u.type}</td>
                   <td>${station?.name || 'Unknown Station'}</td>
-                  <td><span id="unit-status-${u.id}">${formatStatus(u.status || 'enroute', u.responding)}</span></td>
+                  <td>
+                    <span data-unit-status="${u.id}">${formatStatus(u.status || 'enroute', u.responding)}</span>
+                    ${u.status === 'enroute'
+                      ? `<button class="toggle-status-btn" data-unitid="${u.id}">${toggleLabel}</button>`
+                      : ''}
+                  </td>
                   <td><button data-unitid="${u.id}" data-missionid="${missionId}" class="clear-unit-btn">Cancel</button></td>
                 </tr>
               `;
@@ -2114,9 +2122,23 @@ async function refreshAssignedUnitsUI(missionId, missionData = null) {
         finally { btn.disabled = false; }
       };
     });
+    div.querySelectorAll('.toggle-status-btn').forEach(btn => {
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try {
+          await toggleUnitStatusTenEleven(parseInt(btn.dataset.unitid, 10));
+          const updated = _unitById.get(parseInt(btn.dataset.unitid, 10));
+          if (updated?.status === 'enroute') {
+            btn.textContent = updated.responding ? 'Set Status 10' : 'Set Status 11';
+          }
+        } finally {
+          btn.disabled = false;
+        }
+      };
+    });
     assigned.forEach(u => {
       const travel = travelMap.get(u.id);
-      const statusEl = div.querySelector(`#unit-status-${u.id}`);
+      const statusEl = div.querySelector(`[data-unit-status="${u.id}"]`);
       if (u.status === 'enroute' && travel && statusEl) {
         setUnitEta(u.id, statusEl, travel.started_at, travel.total_duration);
       } else {
@@ -2912,7 +2934,14 @@ async function renderMissionUnitList(mission) {
             <td>${formatDistance(row.distance)}</td>
             <td>${missionUnitTab === 'available'
               ? estimateEta(row.distance, row.unit)
-              : formatStatus(row.unit.status || 'unknown', row.unit.responding)}</td>
+              : `
+                <span data-unit-status="${row.unit.id}">${formatStatus(row.unit.status || 'unknown', row.unit.responding)}</span>
+                ${row.unit.status === 'enroute'
+                  ? `<button class="toggle-status-btn" data-unitid="${row.unit.id}">
+                      ${row.unit.responding ? 'Set Status 10' : 'Set Status 11'}
+                    </button>`
+                  : ''}
+              `}</td>
             <td>${missionUnitTab === 'oncall'
               ? `<button class="queue-unit-btn" data-unitid="${row.unit.id}">Queue</button>`
               : ''}</td>
@@ -2936,6 +2965,22 @@ async function renderMissionUnitList(mission) {
       } catch (err) {
         console.error(err);
         notifyError('Failed to queue unit.');
+      }
+    });
+  });
+  list.querySelectorAll('.toggle-status-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const unitId = parseInt(btn.dataset.unitid, 10);
+      if (!Number.isFinite(unitId)) return;
+      btn.disabled = true;
+      try {
+        await toggleUnitStatusTenEleven(unitId);
+        const updated = _unitById.get(unitId);
+        if (updated?.status === 'enroute') {
+          btn.textContent = updated.responding ? 'Set Status 10' : 'Set Status 11';
+        }
+      } finally {
+        btn.disabled = false;
       }
     });
   });
@@ -5031,6 +5076,53 @@ async function cancelUnit(unitId, stationId) {
   }
 }
 
+function updateUnitStatusDisplay(unitId, status, responding) {
+  const statusText = formatStatus(status || 'unknown', responding);
+  document.querySelectorAll(`[data-unit-status="${unitId}"]`).forEach((el) => {
+    el.textContent = statusText;
+  });
+}
+
+async function toggleUnitStatusTenEleven(unitId) {
+  const unit = _unitById.get(unitId);
+  if (!unit || unit.status !== 'enroute') return;
+  const responding = !unit.responding;
+  const res = await fetch(`/api/units/${unitId}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'enroute', responding })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.error) {
+    notifyError(`Failed: ${data?.error || res.statusText}`);
+    return;
+  }
+  const updated = { ...unit, status: 'enroute', responding };
+  _unitById.set(unitId, updated);
+  updateUnitStatusDisplay(unitId, updated.status, updated.responding);
+  const markerEntry = unitMarkers.get(unitId);
+  if (markerEntry) {
+    markerEntry.marker.setIcon(unitIconFor(updated));
+  }
+  if (missionRosterCache?.rows) {
+    missionRosterCache.rows.forEach((row) => {
+      if (row.unit?.id === unitId) {
+        row.unit = { ...row.unit, status: updated.status, responding: updated.responding };
+      }
+    });
+  }
+  assignedUnitsCache.forEach((units, missionId) => {
+    const idx = units.findIndex((u) => u.id === unitId);
+    if (idx !== -1) {
+      units[idx] = { ...units[idx], status: updated.status, responding: updated.responding };
+      assignedUnitsCache.set(missionId, units);
+    }
+  });
+  if (document.getElementById('tab-units')?.classList.contains('active')) {
+    renderUnitList();
+  }
+}
+
 async function showUnitDetails(unitId) {
   const modal = document.getElementById("unitDetailModal");
   const content = document.getElementById("unitDetailContent");
@@ -5077,6 +5169,13 @@ async function showUnitDetails(unitId) {
     ? `<p><strong>Current Mission:</strong> <span class="mission-link" data-missionid="${mission.id}" style="cursor:pointer; color:blue;">#${mission.id} ${mission.type}</span> <button id="cancel-mission-btn" data-missionid="${mission.id}">Cancel</button></p>`
     : '<p><strong>Current Mission:</strong> None</p>';
   const patrolHtml = `<p><label><input type="checkbox" id="patrol-toggle" ${unit?.patrol ? 'checked' : ''}/> Patrol</label></p>`;
+  const statusLabel = formatStatus(unit?.status || 'unknown', unit?.responding);
+  const statusToggleLabel = unit?.status === 'enroute'
+    ? `${unit?.responding ? 'Set Status 10' : 'Set Status 11'}`
+    : '';
+  const statusToggleHtml = unit?.status === 'enroute'
+    ? `<button id="toggle-status-btn" data-unitid="${unitId}">${statusToggleLabel}</button>`
+    : '';
   const cancelUnitHtml = !['available', 'at_station'].includes(unit?.status)
     ? '<p><button id="cancel-unit-btn">Cancel Unit</button></p>'
     : '';
@@ -5087,6 +5186,7 @@ async function showUnitDetails(unitId) {
     <p><strong>Seats:</strong> ${seatDetails}</p>
     <p><strong>Station:</strong> ${station?.name || 'Unknown'}</p>
     <p><strong>Vehicle Class:</strong> ${unit?.class || 'Unknown'} (${unit?.type || ''})</p>
+    <p><strong>Status:</strong> <span data-unit-status="${unitId}">${statusLabel}</span> ${statusToggleHtml}</p>
     ${missionHtml}
     ${patrolHtml}
     ${cancelUnitHtml}
@@ -5127,6 +5227,20 @@ async function showUnitDetails(unitId) {
   cancelUnitBtn?.addEventListener('click', async () => {
     await cancelUnit(unitId, unit?.station_id);
     modal.style.display = 'none';
+  });
+
+  const toggleStatusBtn = content.querySelector('#toggle-status-btn');
+  toggleStatusBtn?.addEventListener('click', async () => {
+    toggleStatusBtn.disabled = true;
+    try {
+      await toggleUnitStatusTenEleven(unitId);
+      const updatedUnit = _unitById.get(unitId);
+      if (updatedUnit?.status === 'enroute') {
+        toggleStatusBtn.textContent = updatedUnit.responding ? 'Set Status 10' : 'Set Status 11';
+      }
+    } finally {
+      toggleStatusBtn.disabled = false;
+    }
   });
 
   content.querySelectorAll('.unassign-btn').forEach(btn => {
