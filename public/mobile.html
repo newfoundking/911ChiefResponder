@@ -738,18 +738,23 @@
     }
 
     .unit-tag-icon {
-      display: inline-flex;
+      display: flex;
       align-items: center;
       justify-content: center;
+      flex-direction: column;
       border-radius: 6px;
       color: #ffffff;
       font-size: 0.75rem;
       font-weight: 700;
       min-width: var(--tag-width, 36px);
       height: var(--tag-height, 24px);
+      line-height: 1.05;
       background: #ef4444;
       border: 2px solid transparent;
       box-sizing: border-box;
+    }
+    .unit-tag-icon.multiline {
+      --tag-height: 30px;
     }
 
     .unit-tag-icon.fire { background: #ef4444; }

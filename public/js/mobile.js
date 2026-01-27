@@ -1078,22 +1078,35 @@ function makeTagIcon(tag, unitClass, responding, width = 36, height = 24) {
   const classes = ['unit-tag-icon'];
   if (unitClass) classes.push(unitClass);
   if (responding) classes.push('responding');
-  const html = `<span class="${classes.join(' ')}" style="--tag-width:${width}px;--tag-height:${height}px;">${tag || ''}</span>`;
+  const multiline = /<br\s*\/?>/i.test(tag || '');
+  if (multiline) classes.push('multiline');
+  const multilineHeight = 30;
+  const effectiveHeight = multiline ? Math.max(height, multilineHeight) : height;
+  const html = `<div class="${classes.join(' ')}" style="--tag-width:${width}px;--tag-height:${effectiveHeight}px;">${tag || ''}</div>`;
   return L.divIcon({
     html,
-    iconSize: [width, height],
-    iconAnchor: [width / 2, height],
+    iconSize: [width, effectiveHeight],
+    iconAnchor: [width / 2, effectiveHeight],
     className: ''
   });
+}
+
+function formatUnitTagLabel(rawTag) {
+  const tag = String(rawTag || '').trim().toUpperCase();
+  if (!tag) return '';
+  if (tag.length <= 4) return tag;
+  if (tag.length <= 8) return `${tag.slice(0, 4)}<br>${tag.slice(4)}`;
+  // Fallback: keep the first 8 characters to avoid overflowing the marker.
+  const trimmed = tag.slice(0, 8);
+  return `${trimmed.slice(0, 4)}<br>${trimmed.slice(4)}`;
 }
 
 function unitIconFor(unit) {
   const url = pickUnitIconUrl(unit);
   if (!url) {
-    const label = (unit?.tag || unit?.name || unit?.type || 'UNIT')
-      .split(/\s+/)[0]
-      .slice(0, 4)
-      .toUpperCase();
+    const rawTag = (unit?.tag || unit?.name || unit?.type || 'UNIT')
+      .split(/\s+/)[0];
+    const label = formatUnitTagLabel(rawTag);
     return makeTagIcon(label, unit?.class, unit?.responding);
   }
   return makeIcon(url, 28);
