@@ -2421,6 +2421,25 @@ setInterval(() => {
   db.run('DELETE FROM facility_load WHERE expires_at <= ?', [now]);
 }, 60000);
 
+const resolvingMissions = new Set();
+function resolveMissionSafely(missionId) {
+  if (resolvingMissions.has(missionId)) return;
+  resolvingMissions.add(missionId);
+  resolveMissionById(missionId, () => resolvingMissions.delete(missionId));
+}
+
+setInterval(() => {
+  const now = Date.now();
+  db.all(
+    `SELECT id FROM missions WHERE resolve_at IS NOT NULL AND resolve_at <= ? AND status != 'resolved'`,
+    [now],
+    (err, rows) => {
+      if (err || !rows?.length) return;
+      rows.forEach(row => resolveMissionSafely(row.id));
+    }
+  );
+}, 2000);
+
 setInterval(() => {
   if (missionClocks.size === 0) return;
   const now = Date.now();
@@ -2429,9 +2448,7 @@ setInterval(() => {
     if (clk && now >= clk.endAt) due.push(id);
   }
   if (!due.length) return;
-  due.forEach(id => {
-    resolveMissionById(id, () => clearMissionClock(id));
-  });
+  due.forEach(id => resolveMissionSafely(id));
 }, 1000);
 
 app.listen(PORT, () => {
