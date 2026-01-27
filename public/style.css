@@ -626,6 +626,17 @@ h3 {
 .incident-modal__title {
   font-size: 32px;
   font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.incident-modal__title img {
+  width: auto;
+  height: 1em;
+  max-height: 1em;
+  max-width: 1em;
+  object-fit: contain;
 }
 
 .incident-modal__address {
