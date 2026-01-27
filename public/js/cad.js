@@ -386,7 +386,7 @@ async function showStation(id) {
   unassigned.forEach(p => personnel.push({ ...p, rank: cleanRank(p.rank), unit: 'Unassigned' }));
   let html = `<div class="cad-station-detail"><div class="cad-station-header"><button id="closeStationDetail">Close</button><button id="newPersonnel">New Personnel</button> <button id="newUnit">New Unit</button> <button id="newEquipment">New Equipment</button> <button id="editStation">Edit Station</button> <button id="deleteStation">Delete Station</button></div><h3>${st.name}</h3><p>Type: ${st.type}</p><p>Department: ${st.department||''}</p>`;
   html += `<div style="display:flex; gap:20px;"><div><h4>Units</h4><ul>`;
-  html += units.map(u => `<li class="cad-unit" data-id="${u.id}">${u.name}${u.status !== 'available' ? ` <button class="cancel-unit" data-id="${u.id}">Cancel</button>` : ''}</li>`).join('');
+  html += units.map(u => `<li class="cad-unit" data-id="${u.id}">${u.name}${!['available', 'at_station'].includes(u.status) ? ` <button class="cancel-unit" data-id="${u.id}">Cancel</button>` : ''}</li>`).join('');
   html += `</ul></div><div><h4>Personnel</h4><ul>`;
   html += personnel.map(p => {
     const rank = cleanRank(p.rank);
@@ -637,7 +637,7 @@ async function showUnitDetail(unitId) {
     const missionHtml = mission && mission.id
       ? `<p><strong>Current Mission:</strong> #${mission.id} ${mission.type}</p>`
       : '<p><strong>Current Mission:</strong> None</p>';
-    const cancelUnitHtml = unit.status !== 'available'
+    const cancelUnitHtml = !['available', 'at_station'].includes(unit.status)
       ? '<p><button id="cad-cancel-unit-btn">Cancel Unit</button></p>'
       : '';
     content.innerHTML = `
@@ -777,11 +777,12 @@ async function autoDispatch(mission) {
   try {
     const [stations, allUnitsRaw] = await Promise.all([
       getStations(),
-      fetchNoCache('/api/units?status=available').then(r=>r.json())
+      fetchNoCache('/api/units').then(r=>r.json())
     ]);
     const stMap = new Map(stations.map(s=>[s.id,s]));
     const missionDepts = await missionDepartmentsFor(mission);
     const allUnits = allUnitsRaw
+      .filter(u => ['available', 'at_station'].includes(u.status))
       .filter(u=>{
         const st = stMap.get(u.station_id);
         return missionDepts.length===0 || (st && missionDepts.includes(st.department));
@@ -982,7 +983,7 @@ async function openManualDispatch(mission) {
     fetchNoCache('/api/units').then(r=>r.json())
   ]);
   const stMap = new Map(stations.map(s=>[s.id,s]));
-  const available = units.filter(u=>u.status==='available').map(u=>{
+  const available = units.filter(u=>['available', 'at_station'].includes(u.status)).map(u=>{
     const st = stMap.get(u.station_id);
     const dist = st ? haversine(mission.lat, mission.lon, st.lat, st.lon) : Infinity;
     return { ...u, department: st?.department || 'Unknown', distance: dist };
@@ -1024,7 +1025,7 @@ async function openUnitTypeDispatch(mission) {
   const unitsPane = document.getElementById('cadUnits');
   const [stations, units] = await Promise.all([
     getStations(),
-    fetchNoCache('/api/units?status=available').then(r=>r.json())
+    fetchNoCache('/api/units').then(r=>r.json())
   ]);
   const stMap = new Map(stations.map(s=>[s.id,s]));
   const missionDepts = Array.isArray(mission.departments) ? mission.departments : [];

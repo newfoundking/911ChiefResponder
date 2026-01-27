@@ -1382,7 +1382,7 @@ function renderUnitList() {
   } else if (sort === 'priority') {
     units.sort((a,b) => (b.priority || 0) - (a.priority || 0));
   } else {
-    const order = { on_scene: 0, enroute: 1, available: 2 };
+    const order = { on_scene: 0, enroute: 1, transporting: 2, returning: 3, available: 4, at_station: 5 };
     units.sort((a,b) => (order[a.status] ?? 3) - (order[b.status] ?? 3) ||
       (a.name || '').localeCompare(b.name || ''));
   }
@@ -1391,7 +1391,7 @@ function renderUnitList() {
       <span class="unit-link" data-unitid="${u.id}" style="cursor:pointer;color:blue;">${u.name}</span>
       (${u.type}) - <span>${formatStatus(u.status, u.responding)}</span>
       <button class="center-unit" data-unitid="${u.id}">Center</button>
-      ${u.status !== 'available' ? `<button class="cancel-unit" data-unitid="${u.id}" data-stationid="${u.station_id}">Cancel</button>` : ''}
+      ${!['available', 'at_station'].includes(u.status) ? `<button class="cancel-unit" data-unitid="${u.id}" data-stationid="${u.station_id}">Cancel</button>` : ''}
     </div>`).join('');
   list.querySelectorAll('.unit-link').forEach(el => {
     el.addEventListener('click', () => showUnitDetails(parseInt(el.dataset.unitid, 10)));
@@ -2821,8 +2821,8 @@ async function renderMissionUnitList(mission) {
   const searchValue = missionSearchFilter.trim().toLowerCase();
   const rows = baseRows.filter(row => {
     if (row.distance > missionMaxDistance) return false;
-    if (missionUnitTab === 'available') return (row.unit.status || 'available') === 'available';
-    return (row.unit.status || 'available') !== 'available';
+    if (missionUnitTab === 'available') return ['available', 'at_station'].includes(row.unit.status || 'available');
+    return !['available', 'at_station'].includes(row.unit.status || 'available');
   }).filter(row => {
     if (missionDeptFilter !== 'all' && row.station?.department !== missionDeptFilter) return false;
     if (missionTypeFilter !== 'all' && row.unit.type !== missionTypeFilter) return false;
@@ -3205,7 +3205,7 @@ async function showStationDetails(station) {
         <li>
           <strong style="cursor:pointer; color:blue;" onclick="showUnitDetails(${u.id})">${u.name}</strong> (${u.type}) [P${u.priority}] - ${formatStatus(u.status, u.responding)}
           <button onclick="openAssignModal(${u.id}, ${station.id})">Assign</button>
-          ${u.status !== 'available' ? `<button onclick="cancelUnit(${u.id}, ${station.id})">Cancel</button>` : ''}
+          ${!['available', 'at_station'].includes(u.status) ? `<button onclick="cancelUnit(${u.id}, ${station.id})">Cancel</button>` : ''}
           <button class="edit-unit-btn" data-unitid="${u.id}">Edit</button>
         </li>`).join('')}
     </ul>`;
@@ -5044,7 +5044,7 @@ async function showUnitDetails(unitId) {
     ? `<p><strong>Current Mission:</strong> <span class="mission-link" data-missionid="${mission.id}" style="cursor:pointer; color:blue;">#${mission.id} ${mission.type}</span> <button id="cancel-mission-btn" data-missionid="${mission.id}">Cancel</button></p>`
     : '<p><strong>Current Mission:</strong> None</p>';
   const patrolHtml = `<p><label><input type="checkbox" id="patrol-toggle" ${unit?.patrol ? 'checked' : ''}/> Patrol</label></p>`;
-  const cancelUnitHtml = unit?.status !== 'available'
+  const cancelUnitHtml = !['available', 'at_station'].includes(unit?.status)
     ? '<p><button id="cancel-unit-btn">Cancel Unit</button></p>'
     : '';
 
@@ -5231,7 +5231,7 @@ async function assignPersonnelToUnit(unitId, stationId) {
 // ===== manual dispatch with busy lockout + sort/filter =====
 async function getBusyUnitIds() {
   const units = await (await fetch('/api/units')).json();
-  return new Set(units.filter(u => u.status && u.status !== 'available').map(u => u.id));
+  return new Set(units.filter(u => u.status && !['available', 'at_station'].includes(u.status)).map(u => u.id));
 }
 
 function renderManualList(stations, unitsByStation, busyIds, mission) {
@@ -5325,7 +5325,7 @@ async function openManualDispatch(mission) {
     cacheUnits(allUnits);
 
     const busyIds = new Set(
-      allUnits.filter(u => u.status && u.status !== 'available').map(u => u.id)
+      allUnits.filter(u => u.status && !['available', 'at_station'].includes(u.status)).map(u => u.id)
     );
 
     const unitsByStation = allUnits.reduce((acc,u)=>{
@@ -5402,7 +5402,7 @@ async function openManualDispatch(mission) {
     if (!u) continue;
     const st = _stationById.get(u.station_id);
     if (!st) continue;
-    u.responding = true;
+    u.responding = !mission.non_emergency;
     u.status = 'enroute';
     _unitById.set(uid, u);
     const marker = ensureUnitMarker(u);
@@ -5464,11 +5464,13 @@ async function openUnitTypeDispatch(mission) {
   try {
     const [stations, units] = await Promise.all([
       fetch('/api/stations').then(r=>r.json()),
-      fetch('/api/units?status=available').then(r=>r.json())
+      fetch('/api/units').then(r=>r.json())
     ]);
     const stMap = new Map(stations.map(s=>[s.id,s]));
     const groups = new Map();
-    units.forEach(u=>{
+    units
+      .filter(u => ['available', 'at_station'].includes(u.status))
+      .forEach(u=>{
       const st = stMap.get(u.station_id);
       const dist = st ? haversineKm(mission.lat, mission.lon, st.lat, st.lon) : Infinity;
       const arr = groups.get(u.type) || [];
@@ -5558,12 +5560,13 @@ async function autoDispatch(mission) {
   try {
     const [stations, allUnitsRaw] = await Promise.all([
     fetch('/api/stations').then(r=>r.json()),
-    fetch('/api/units?status=available').then(r=>r.json())
+    fetch('/api/units').then(r=>r.json())
   ]);
   cacheStations(stations);
   const stMap = new Map(stations.map(s=>[s.id,s]));
   const missionDepts = await missionDepartmentsFor(mission);
   const allUnits = allUnitsRaw
+    .filter(u => ['available', 'at_station'].includes(u.status))
     .filter(u=>{
       const st = stMap.get(u.station_id);
       return missionDepts.length === 0 || (st && missionDepts.includes(st.department));

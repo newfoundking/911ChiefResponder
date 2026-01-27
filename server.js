@@ -1987,7 +1987,9 @@ app.post('/api/mission-units', (req, res) => {
     (e, unitRow) => {
       if (e) return res.status(500).json({ error: e.message });
       if (!unitRow) return res.status(404).json({ error: 'unit not found' });
-      if (unitRow.status !== 'available') return res.status(409).json({ error: 'unit busy' });
+      if (!['available', 'at_station'].includes(unitRow.status)) {
+        return res.status(409).json({ error: 'unit busy' });
+      }
 
       // Prevent duplicates for same mission
       db.get('SELECT id FROM mission_units WHERE mission_id=? AND unit_id=?', [mission_id, unit_id], (err, row) => {
