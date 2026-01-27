@@ -29,7 +29,7 @@ async function getMissions(req, res) {
       penalties: parseArrayField(m.penalties),
       timing: typeof m.timing === 'number' ? m.timing : 10,
       resolve_at: m.resolve_at != null ? Number(m.resolve_at) : null,
-      non_emergency: m.non_emergency === 1 || m.non_emergency === true,
+      non_emergency: Number(m.non_emergency) === 1,
       responding_count: Number(m.responding_count) || 0,
       assigned_count: Number(m.assigned_count) || 0
     }));
@@ -93,7 +93,7 @@ async function createMission(req, res) {
       JSON.stringify(penalties),
       'active',
       timing,
-      non_emergency ? 1 : null
+      Number(non_emergency) === 1 ? 1 : null
     ],
     function (err2) {
       if (err2) return res.status(500).json({ error: err2.message });
