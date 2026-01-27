@@ -952,7 +952,9 @@ async function dispatchUnits(mission, units, force=false) {
 
       const speedMultiplier = { fire: 1.2, police: 1.3, ambulance: 1.25, sar: 1.2 };
       const mult = speedMultiplier[u.class] || 1;
-      const total_duration = Math.max(5, duration / mult);
+      const responding = Number(mission.non_emergency) !== 1;
+      const responseMult = responding ? 1.25 : 1;
+      const total_duration = Math.max(5, duration / (mult * responseMult));
 
       await fetch('/api/unit-travel', {
         method: 'POST',
