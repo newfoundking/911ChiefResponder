@@ -838,7 +838,7 @@ app.get('/api/missions', (req, res) => {
       penalties: JSON.parse(m.penalties || "[]"),
       timing: typeof m.timing === 'number' ? m.timing : 10,
       resolve_at: m.resolve_at != null ? Number(m.resolve_at) : null,
-      non_emergency: m.non_emergency === 1 || m.non_emergency === true,
+      non_emergency: Number(m.non_emergency) === 1,
       responding_count: Number(m.responding_count) || 0,
       assigned_count: Number(m.assigned_count) || 0
     }));
@@ -901,7 +901,7 @@ app.post('/api/missions', async (req, res) => {
       JSON.stringify(penalties),
       'active',
       timing,
-      non_emergency ? 1 : null
+      Number(non_emergency) === 1 ? 1 : null
     ],
     function (err) {
       if (err) return res.status(500).json({ error: err.message });
@@ -1003,7 +1003,7 @@ app.get('/api/missions/:id', (req, res) => {
       penalties: parseArrayField(row.penalties),
       timing: typeof row.timing === 'number' ? row.timing : 10,
       resolve_at: row.resolve_at != null ? Number(row.resolve_at) : null,
-      non_emergency: row.non_emergency === 1 || row.non_emergency === true,
+      non_emergency: Number(row.non_emergency) === 1,
     };
     res.json(mission);
   });
@@ -1077,7 +1077,7 @@ app.post('/api/missions/:id/units', (req, res) => {
     db.get('SELECT non_emergency FROM missions WHERE id=?', [missionId], (err, m) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!m) return res.status(404).json({ error: 'mission not found' });
-        const responding = m.non_emergency ? 0 : 1;
+        const responding = Number(m.non_emergency) === 1 ? 0 : 1;
         db.run(`INSERT INTO mission_units (mission_id, unit_id) VALUES (?, ?)`, [missionId, unitId], function (err2) {
             if (err2) return res.status(500).json({ error: err2.message });
             db.run(`UPDATE units SET status = 'enroute', responding=? WHERE id = ?`, [responding, unitId], function (err3) {
@@ -1201,7 +1201,7 @@ app.get('/api/missions/:id', (req, res) => {
       penalties: parseArrayField(row.penalties),
       timing: typeof row.timing === 'number' ? row.timing : 10,
       resolve_at: row.resolve_at != null ? Number(row.resolve_at) : null,
-      non_emergency: row.non_emergency === 1 || row.non_emergency === true,
+      non_emergency: Number(row.non_emergency) === 1,
     };
     res.json(mission);
   });
@@ -1464,7 +1464,7 @@ app.get('/api/units/:id/mission', (req, res) => {
         prisoners: parseArrayField(row.prisoners),
         modifiers: parseArrayField(row.modifiers),
         timing: typeof row.timing === 'number' ? row.timing : 10,
-        non_emergency: row.non_emergency === 1 || row.non_emergency === true,
+        non_emergency: Number(row.non_emergency) === 1,
       };
       res.json(mission);
     }
@@ -1508,7 +1508,7 @@ app.patch('/api/units/:id/status', (req, res) => {
   if (status === 'enroute') {
     db.get('SELECT m.non_emergency FROM mission_units mu JOIN missions m ON m.id = mu.mission_id WHERE mu.unit_id=?', [id], (err, row) => {
       if (err) return res.status(500).json({ error: err.message });
-      const responding = row && row.non_emergency ? 0 : 1;
+      const responding = Number(row?.non_emergency) === 1 ? 0 : 1;
       db.run('UPDATE units SET status=?, responding=? WHERE id=?', [status, responding, id], function (err2) {
         if (err2) return res.status(500).json({ error: err2.message });
         res.json({ ok: true, status, responding: Boolean(responding) });
@@ -1752,7 +1752,7 @@ app.get('/api/mission-templates', (req, res) => {
       equipment_required: parseArrayField(row.equipment_required),
       penalty_options: parseArrayField(row.penalty_options),
       rewards: Number.isFinite(row.rewards) ? row.rewards : 0,
-      non_emergency: row.non_emergency === 1 || row.non_emergency === true,
+      non_emergency: Number(row.non_emergency) === 1,
       frequency: Number.isFinite(row.frequency) ? row.frequency : 3
     }));
     res.json(parsed);
@@ -1774,7 +1774,7 @@ app.post('/api/mission-templates', express.json(), (req, res) => {
     equipment_required: JSON.stringify(b.equipment_required || []),
     penalty_options: JSON.stringify(b.penalty_options || []),
     rewards: Number(b.rewards) || 0,
-    non_emergency: b.non_emergency ? 1 : null,
+    non_emergency: Number(b.non_emergency) === 1 ? 1 : null,
     frequency: Math.min(5, Math.max(1, Number(b.frequency) || 3))
   };
   db.run(
@@ -1808,7 +1808,7 @@ app.put('/api/mission-templates/:id', express.json(), (req, res) => {
     equipment_required: JSON.stringify(b.equipment_required || []),
     penalty_options: JSON.stringify(b.penalty_options || []),
     rewards: Number(b.rewards) || 0,
-    non_emergency: b.non_emergency ? 1 : null,
+    non_emergency: Number(b.non_emergency) === 1 ? 1 : null,
     frequency: Math.min(5, Math.max(1, Number(b.frequency) || 3))
   };
   db.run(
@@ -1843,7 +1843,7 @@ app.get('/api/mission-templates/id/:id', (req, res) => {
     r.equipment_required = parseArrayField(r.equipment_required);
     r.penalty_options = parseArrayField(r.penalty_options);
     r.rewards = Number.isFinite(r.rewards) ? r.rewards : 0;
-    r.non_emergency = r.non_emergency === 1 || r.non_emergency === true;
+    r.non_emergency = Number(r.non_emergency) === 1;
     r.frequency = Number.isFinite(r.frequency) ? r.frequency : 3;
     res.json(r);
   });
@@ -2005,7 +2005,7 @@ app.post('/api/mission-units', (req, res) => {
             return res.status(403).json({ error: 'department not allowed' });
           }
 
-          const responding = m.non_emergency ? 0 : 1;
+          const responding = Number(m.non_emergency) === 1 ? 0 : 1;
 
           // Determine unit capacities from unitTypes
           const uType = unitTypes.find(t => t.class === unitRow.class && t.type === unitRow.type) || {};
