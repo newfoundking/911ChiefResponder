@@ -169,8 +169,17 @@ function updateUnit(req, res) {
 // PATCH /api/units/:id/status
 function patchStatus(req, res) {
   const id = Number(req.params.id);
-  const status = String(req.body?.status || '').trim();
+  let status = String(req.body?.status || '').trim();
   if (!id || !status) return res.status(400).json({ error: 'Invalid unit id/status' });
+  if (status === 'onscene') status = 'on_scene';
+  if (req.body?.responding !== undefined) {
+    const responding = req.body.responding ? 1 : 0;
+    db.run('UPDATE units SET status=?, responding=? WHERE id=?', [status, responding, id], function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ success: true, status, responding: Boolean(responding) });
+    });
+    return;
+  }
   db.run('UPDATE units SET status=? WHERE id=?', [status, id], function (err) {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ success: true, status });

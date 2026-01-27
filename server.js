@@ -1505,6 +1505,15 @@ app.patch('/api/units/:id/status', (req, res) => {
   // Normalize legacy status value without underscore.
   if (status === 'onscene') status = 'on_scene';
 
+  if (req.body?.responding !== undefined) {
+    const responding = req.body.responding ? 1 : 0;
+    db.run('UPDATE units SET status=?, responding=? WHERE id=?', [status, responding, id], function (err) {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ ok: true, status, responding: Boolean(responding) });
+    });
+    return;
+  }
+
   if (status === 'enroute') {
     db.get('SELECT m.non_emergency FROM mission_units mu JOIN missions m ON m.id = mu.mission_id WHERE mu.unit_id=?', [id], (err, row) => {
       if (err) return res.status(500).json({ error: err.message });
