@@ -79,6 +79,7 @@ function getDefaultTrainingsForStation(stationType, options) {
 const stationTemplate = () => ({
   name: '',
   type: 'fire',
+  latlon: '',
   lat: '',
   lon: '',
   bays: 1,
@@ -230,12 +231,8 @@ function renderStationCard(station, index) {
           </select>
         </label>
         <label>
-          Latitude (decimal)
-          <input type="number" step="any" data-field="lat" data-focus-key="station-${index}-lat" value="${station.lat}" placeholder="40.7128" />
-        </label>
-        <label>
-          Longitude (decimal)
-          <input type="number" step="any" data-field="lon" data-focus-key="station-${index}-lon" value="${station.lon}" placeholder="-74.0060" />
+          Latitude, Longitude (decimal)
+          <input type="text" data-field="latlon" data-focus-key="station-${index}-latlon" value="${getLatLonDisplayValue(station)}" placeholder="43.72166707800811, -79.62026053315279" />
         </label>
         <label>
           Bays
@@ -368,6 +365,25 @@ function parseNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function parseLatLon(value) {
+  const raw = normalizeText(value);
+  if (!raw) return null;
+  const parts = raw.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const lat = Number(parts[0]);
+  const lon = Number(parts[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return { lat, lon };
+}
+
+function getLatLonDisplayValue(station) {
+  if (normalizeText(station.latlon)) return station.latlon;
+  if (station.lat !== '' && station.lon !== '') {
+    return `${station.lat}, ${station.lon}`;
+  }
+  return '';
+}
+
 function parseCount(value, fallback = 1, max = 50) {
   const num = Math.floor(Number(value));
   if (!Number.isFinite(num)) return fallback;
@@ -447,6 +463,17 @@ stationListEl.addEventListener('change', (event) => {
       station.equipment = [];
       station.units = [];
       render();
+      return;
+    } else if (field === 'latlon') {
+      station.latlon = event.target.value;
+      const parsed = parseLatLon(event.target.value);
+      if (parsed) {
+        station.lat = parsed.lat;
+        station.lon = parsed.lon;
+      } else {
+        station.lat = '';
+        station.lon = '';
+      }
       return;
     } else if (['bays', 'equipment_slots', 'holding_cells', 'bed_capacity'].includes(field)) {
       station[field] = parseNumber(event.target.value, 0);
