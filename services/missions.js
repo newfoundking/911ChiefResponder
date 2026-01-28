@@ -50,8 +50,8 @@ function addFacilityLoad(stationId, type, expiresAt) {
 async function allocateTransport(kind, lat, lon, unitClass) {
   const facilities = await all(
     kind === 'patient'
-      ? `SELECT id, lat, lon, bed_capacity AS capacity FROM stations WHERE type='hospital' AND bed_capacity>0`
-      : `SELECT id, lat, lon, holding_cells AS capacity FROM stations WHERE (type='jail' OR (type='police' AND holding_cells>0))`
+      ? `SELECT id, lat, lon, bed_capacity AS capacity, type FROM stations WHERE type='hospital' AND bed_capacity>0`
+      : `SELECT id, lat, lon, holding_cells AS capacity, type FROM stations WHERE (type='jail' OR (type='police' AND holding_cells>0))`
   );
   if (!facilities.length) return null;
 
@@ -68,7 +68,7 @@ async function allocateTransport(kind, lat, lon, unitClass) {
     const occ = await getFacilityOccupancy(f.id, kind);
     if (occ.count < f.capacity) {
       await addFacilityLoad(f.id, kind, now + 10 * 60 * 1000);
-      return f.id;
+      return f;
     }
     const nextFree = occ.nextFree || now;
     const timeUntilFree = nextFree - now;
@@ -76,7 +76,7 @@ async function allocateTransport(kind, lat, lon, unitClass) {
     const travelToNext = next ? (haversine(lat, lon, next.lat, next.lon) / speed) * 3600 * 1000 : Infinity;
     if (timeUntilFree < travelToNext) {
       await addFacilityLoad(f.id, kind, nextFree + 10 * 60 * 1000);
-      return f.id;
+      return f;
     }
   }
 
@@ -84,11 +84,16 @@ async function allocateTransport(kind, lat, lon, unitClass) {
   const occ = await getFacilityOccupancy(first.id, kind);
   const expiry = (occ.nextFree || now) + 10 * 60 * 1000;
   await addFacilityLoad(first.id, kind, expiry);
-  return first.id;
+  return first;
 }
 
 async function handleTransports(unitIds, lat, lon, patients, prisoners) {
-  const summary = { patientTransports: 0, prisonerTransports: 0, transportReward: 0 };
+  const summary = {
+    patientTransports: 0,
+    prisonerTransports: 0,
+    transportReward: 0,
+    transportAssignments: []
+  };
 
   let patientCount = 0;
   for (const p of patients) patientCount += Number(p.count || 0);
@@ -113,16 +118,22 @@ async function handleTransports(unitIds, lat, lon, patients, prisoners) {
 
   const medTransports = Math.min(patientCount, medUnits.length);
   for (let i = 0; i < medTransports; i++) {
-    await allocateTransport('patient', lat, lon, 'ambulance');
+    const facility = await allocateTransport('patient', lat, lon, 'ambulance');
     summary.patientTransports += 1;
     summary.transportReward += 500;
+    if (facility) {
+      summary.transportAssignments.push({ unitId: medUnits[i], kind: 'patient', facility });
+    }
   }
 
   const prisTransports = Math.min(prisonerCount, prisUnits.length);
   for (let i = 0; i < prisTransports; i++) {
-    await allocateTransport('prisoner', lat, lon, 'police');
+    const facility = await allocateTransport('prisoner', lat, lon, 'police');
     summary.prisonerTransports += 1;
     summary.transportReward += 500;
+    if (facility) {
+      summary.transportAssignments.push({ unitId: prisUnits[i], kind: 'prisoner', facility });
+    }
   }
 
   if (summary.transportReward > 0) {

@@ -958,7 +958,7 @@ app.get('/api/missions/:id/units', (req, res) => {
         const { travel_started_at, travel_total_duration, ...rest } = r;
         const base = {
           ...rest,
-          responding: r.responding === 1 || r.responding === true,
+          responding: Number(r.responding) === 1 || r.responding === true,
           equipment: (()=>{ try { return JSON.parse(r.equipment||'[]'); } catch { return []; } })(),
           personnel: (()=>{
             try {
@@ -1156,7 +1156,7 @@ app.get('/api/missions/:id/units', (req, res) => {
         const { travel_started_at, travel_total_duration, ...rest } = r;
         const base = {
           ...rest,
-          responding: r.responding === 1 || r.responding === true,
+          responding: Number(r.responding) === 1 || r.responding === true,
           equipment: (()=>{ try { return JSON.parse(r.equipment||'[]'); } catch { return []; } })(),
           personnel: (()=>{
             try {
