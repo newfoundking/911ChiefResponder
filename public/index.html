@@ -1131,6 +1131,7 @@ let missionSearchFilter = '';
   });
 
   // Mission modal shortcuts: ←/→ cycle missions, A auto-dispatch, D dispatch selected, N dispatch selected + next.
+  // Run card hotkeys: 1–9 map to cards 1–9, 0 maps to card 10.
   document.addEventListener('keydown', e => {
     const missionDetails = document.getElementById('missionDetails');
     if (!missionDetails || missionDetails.classList.contains('hidden') || openMissionId === null) return;
@@ -1154,6 +1155,13 @@ let missionSearchFilter = '';
     } else if (e.key.toLowerCase() === 'n') {
       e.preventDefault();
       dispatchSelectedFromList(mission, true);
+    } else if (/^\d$/.test(e.key)) {
+      const buttons = Array.from(document.querySelectorAll('#runCardList .run-card-dispatch'));
+      const index = e.key === '0' ? 9 : Number.parseInt(e.key, 10) - 1;
+      const btn = buttons[index];
+      if (!btn) return;
+      e.preventDefault();
+      btn.click();
     }
   });
 
