@@ -1673,7 +1673,29 @@ async function routeAndAnimateUnit(unitId, from, to, speedClassKmh, onArrive, re
     const la1 = from[0] * Math.PI/180, la2 = to[0] * Math.PI/180;
     const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
     const distKm = 2*R*Math.asin(Math.sqrt(h));
-      const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 56)) * 3600));
+    const etaSec = Math.max(5, Math.round((distKm / (speedClassKmh || 56)) * 3600));
+    const coords = [from, to];
+    const seg_durations = [etaSec];
+    const u = _unitById.get(unitId);
+    ensureUnitMarker(u || { id: unitId, station_id: 0, class: 'fire' });
+    drawRoute(unitId, coords);
+    try {
+      await fetch('/api/unit-travel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          unit_id: unitId,
+          mission_id: resumeOpts?.mission_id,
+          phase: resumeOpts?.phase || 'to_scene',
+          started_at: new Date().toISOString(),
+          from,
+          to,
+          coords,
+          seg_durations,
+          total_duration: etaSec
+        })
+      });
+    } catch (e) { console.warn('Failed to persist fallback travel:', e); }
     animateMoveUnit(unitId, from, to, etaSec * 1000, onArrive);
   }
 }
@@ -6107,20 +6129,87 @@ function setupTimerForMission(mission, endTime) {
       const stations = await (await fetch('/api/stations')).json();
       cacheStations(stations);
     }
+    const transportAssignments = Array.isArray(resolutionResult?.transportAssignments)
+      ? resolutionResult.transportAssignments
+      : [];
+    const transportByUnit = new Map(
+      transportAssignments
+        .filter(assignment => assignment && assignment.unitId != null)
+        .map(assignment => [Number(assignment.unitId), assignment])
+    );
+
     for (const u of assignedBefore) {
       const st = _stationById.get(u.station_id);
       if (!st) continue;
+
+      const assignment = transportByUnit.get(u.id);
+      const facility = assignment?.facility;
+      const facilityLat = Number(facility?.lat);
+      const facilityLon = Number(facility?.lon);
+      const hasFacility = Number.isFinite(facilityLat) && Number.isFinite(facilityLon);
+
+      const entry = unitMarkers.get(u.id);
+      const current = entry?.marker.getLatLng() || L.latLng(mission.lat, mission.lon);
+      const speed = TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56;
+
+      if (hasFacility) {
+        u.responding = false;
+        u.status = 'transporting';
+        _unitById.set(u.id, u);
+        ensureUnitMarker(u);
+        updateUnitStatusDisplay(u.id, u.status, u.responding);
+
+        fetch(`/api/units/${u.id}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'transporting', responding: false })
+        }).catch(() => {});
+
+        routeAndAnimateUnit(
+          u.id,
+          [current.lat, current.lng],
+          [facilityLat, facilityLon],
+          speed,
+          async () => {
+            const updatedUnit = _unitById.get(u.id) || u;
+            updatedUnit.responding = false;
+            updatedUnit.status = 'available';
+            _unitById.set(u.id, updatedUnit);
+            ensureUnitMarker(updatedUnit);
+            updateUnitStatusDisplay(u.id, updatedUnit.status, updatedUnit.responding);
+
+            fetch(`/api/units/${u.id}/status`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'available', responding: false })
+            }).catch(() => {});
+
+            routeAndAnimateUnit(
+              u.id,
+              [facilityLat, facilityLon],
+              [st.lat, st.lon],
+              speed,
+              async () => {
+                await handleReturnArrival(u.id);
+              },
+              { phase: 'return' }
+            );
+          },
+          { phase: 'transport' }
+        );
+        continue;
+      }
+
       u.responding = false;
       u.status = 'available';
       _unitById.set(u.id, u);
       ensureUnitMarker(u);
-      const entry = unitMarkers.get(u.id);
-      const current = entry?.marker.getLatLng() || L.latLng(mission.lat, mission.lon);
+      updateUnitStatusDisplay(u.id, u.status, u.responding);
       routeAndAnimateUnit(
         u.id,
         [current.lat, current.lng],
         [st.lat, st.lon],
-          TRAVEL_SPEED[u.type] || CLASS_SPEED[u.class] || 56,
+        speed,
         async () => {
           await handleReturnArrival(u.id);
         },
