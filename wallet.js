@@ -6,8 +6,16 @@ function findEquipmentCostByName(name) {
   try {
     const lists = Object.values(equipment || {});
     for (const arr of lists || []) {
+      if (!Array.isArray(arr)) continue;
       for (const item of arr || []) {
         if (typeof item === 'string' && item === name) return 0;
+        if (item?.name === name) return Number(item.cost) || 0;
+      }
+    }
+    const upgradeSets = equipment?.vehicleUpgrades || {};
+    for (const cfg of Object.values(upgradeSets || {})) {
+      const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
+      for (const item of upgrades) {
         if (item?.name === name) return Number(item.cost) || 0;
       }
     }

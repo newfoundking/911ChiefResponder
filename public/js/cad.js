@@ -48,6 +48,89 @@ function gatherEquipmentForUnit(unit) {
   return counts;
 }
 
+function getVehicleUpgradeConfigForClass(unitClass) {
+  const key = String(unitClass || '').toLowerCase();
+  const source = (typeof vehicleUpgrades !== 'undefined' && vehicleUpgrades)
+    ? vehicleUpgrades
+    : (equipment?.vehicleUpgrades || {});
+  return source?.[key] || null;
+}
+
+function expandTrainingListForUnit(list, unitClass) {
+  return expandTrainingListForClass(list, unitClass);
+}
+
+function getUnitTrainingKeySet(unit) {
+  const set = new Set();
+  if (!unit) return set;
+  for (const p of Array.isArray(unit.personnel) ? unit.personnel : []) {
+    const expanded = expandTrainingListForUnit(p.training, unit.class);
+    for (const t of expanded) {
+      const key = String(t || '').trim().toLowerCase();
+      if (key) set.add(key);
+    }
+  }
+  return set;
+}
+
+function getUnitQualificationSet(unit) {
+  const quals = new Set();
+  if (!unit) return quals;
+  const aliasMap = new Map([
+    ['Chief', 'Command Vehicle'],
+    ['Command Vehicle', 'Chief']
+  ]);
+  const addQualification = (label) => {
+    if (!label) return;
+    quals.add(label);
+    const alias = aliasMap.get(label);
+    if (alias) quals.add(alias);
+  };
+  if (unit.type) addQualification(unit.type);
+  const cfg = getVehicleUpgradeConfigForClass(unit.class);
+  const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
+  if (!upgrades.length) return quals;
+  const allowed = cfg?.allowedByUnit?.[unit.type];
+  const allowedSet = Array.isArray(allowed) ? new Set(allowed.map((name) => String(name || '').toLowerCase())) : null;
+  const equipmentKeys = new Set(gatherEquipmentForUnit(unit).keys());
+  const trainingKeys = getUnitTrainingKeySet(unit);
+
+  for (const upgrade of upgrades) {
+    const upgradeName = String(upgrade?.name || '').trim();
+    if (!upgradeName) continue;
+    if (allowedSet && !allowedSet.has(upgradeName.toLowerCase())) continue;
+    const qualifiesAs = upgrade?.qualifiesAs || upgrade?.type || upgradeName;
+    const equipmentAny = Array.isArray(upgrade?.equipmentAny)
+      ? upgrade.equipmentAny
+      : (upgrade?.equipment ? [upgrade.equipment] : [upgradeName]);
+    const trainingAny = Array.isArray(upgrade?.trainingAny)
+      ? upgrade.trainingAny
+      : (upgrade?.training ? [upgrade.training] : []);
+    const mode = upgrade?.mode === 'all' ? 'all' : 'any';
+    const equipmentMatch = equipmentAny.length
+      ? equipmentAny.some((name) => equipmentKeys.has(equipmentKey(name)))
+      : false;
+    const trainingMatch = trainingAny.length
+      ? trainingAny.some((name) => trainingKeys.has(String(name || '').toLowerCase()))
+      : false;
+    if (mode === 'all') {
+      const equipmentOk = equipmentAny.length ? equipmentMatch : true;
+      const trainingOk = trainingAny.length ? trainingMatch : true;
+      if (equipmentOk && trainingOk) addQualification(qualifiesAs);
+    } else if ((equipmentAny.length && equipmentMatch) || (trainingAny.length && trainingMatch)) {
+      addQualification(qualifiesAs);
+    }
+  }
+  return quals;
+}
+
+function unitQualifiesAs(unit, type) {
+  if (!unit || !type) return false;
+  const target = String(type || '').trim();
+  if (!target) return false;
+  return getUnitQualificationSet(unit).has(target);
+}
+
 let missionTemplates = [];
 fetch('/api/mission-templates')
   .then(r => r.json())
@@ -280,7 +363,10 @@ async function checkMissionCompletion(mission) {
     const trainOnScene = new Map();
     for (const u of assigned) {
       if (u.status === 'on_scene') {
-        unitOnScene.set(u.type, (unitOnScene.get(u.type) || 0) + 1);
+        const quals = getUnitQualificationSet(u);
+        for (const q of quals) {
+          unitOnScene.set(q, (unitOnScene.get(q) || 0) + 1);
+        }
         for (const e of Array.isArray(u.equipment) ? u.equipment : []) {
           equipOnScene.set(e, (equipOnScene.get(e) || 0) + 1);
         }
@@ -832,10 +918,13 @@ async function autoDispatch(mission) {
 
     // Account for units already assigned to this mission (enroute/on_scene)
     const assigned = await fetchNoCache(`/api/missions/${mission.id}/units`).then(r=>r.json()).catch(()=>[]);
-    const assignedCounts = {};
+    const assignedCounts = new Map();
     for (const a of assigned) {
       if (!['enroute','on_scene'].includes(a.status)) continue;
-      assignedCounts[a.type] = (assignedCounts[a.type] || 0) + 1;
+      const quals = getUnitQualificationSet(a);
+      for (const q of quals) {
+        assignedCounts.set(q, (assignedCounts.get(q) || 0) + 1);
+      }
       applyNeeds(a);
     }
 
@@ -855,12 +944,21 @@ async function autoDispatch(mission) {
       applyNeeds(u);
     }
 
+    function unitMatchesTypes(u, types) {
+      const unitClass = String(u.class || '').trim().toLowerCase();
+      return types.some((t) => {
+        const target = String(t || '').trim().toLowerCase();
+        return target && (unitQualifiesAs(u, t) || target === unitClass);
+      });
+    }
+
     const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
     for (const r of reqUnits) {
       const types = Array.isArray(r.types) ? r.types : [r.type];
-      let need = (r.quantity ?? r.count ?? r.qty ?? 1) - types.reduce((s,t)=>s+(assignedCounts[t]||0),0);
+      let need = (r.quantity ?? r.count ?? r.qty ?? 1)
+        - types.reduce((s, t) => s + (assignedCounts.get(t) || 0), 0);
       for (let i=0; i<need; i++) {
-        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && types.includes(u.type))
+        let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && unitMatchesTypes(u, types))
                                  .sort(sortUnits);
         if (!candidates.length) break;
         const chosen = candidates.find(unitMatchesAllNeeds) ||

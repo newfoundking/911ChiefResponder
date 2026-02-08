@@ -1,8 +1,6 @@
 const defaultUnitEquipment = {
   fire: {
-    Ladder: ['Ladder'],
-    ARFF: ['Foam System'],
-    Rescue: ['Rescue Gear']
+    // Fire units start without default equipment; upgrades/equipment are configured per unit.
   },
   ambulance: {
     Ambulance: ['Med Stuff'],
