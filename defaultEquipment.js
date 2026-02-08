@@ -3,13 +3,14 @@ const defaultUnitEquipment = {
     // Fire units start without default equipment; upgrades/equipment are configured per unit.
   },
   ambulance: {
-    Ambulance: ['Med Stuff'],
-    'Fly-car': ['Med Stuff'],
-    Supervisor: ['Med Stuff'],
-    'Mass Casualty': ['Med Stuff']
+    Ambulance: ['ALS Medical'],
+    'Fly-car': ['ALS Medical'],
+    Supervisor: ['ALS Medical'],
+    'Mass Casualty': ['ALS Medical'],
+    'Inter-facility Transport': ['ALS Medical']
   },
   police: {
-    'SWAT Van': ['Ballistic Shield', 'Battering Ram']
+    'SWAT Van': ['Tactical Gear']
   }
 };
 
