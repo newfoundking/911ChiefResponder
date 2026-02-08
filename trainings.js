@@ -64,6 +64,7 @@ const trainingEquivalencies = {
   fire: {
     "chief officer": ["incident command", "firefighter"],
     "incident command": ["firefighter"],
+    "paramedic": ["EMR"],
   },
   police: {
     "SWAT": ["police officer"],
