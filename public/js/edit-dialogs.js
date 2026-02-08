@@ -10,6 +10,69 @@ const fetchRankOptions = (dept) => {
   return Promise.resolve([]);
 };
 
+const normalizeEquipmentName = (value) => {
+  return String(value || '').trim();
+};
+
+const getVehicleUpgradeConfigForClass = (unitClass) => {
+  const key = String(unitClass || '').toLowerCase();
+  const source = (typeof vehicleUpgrades !== 'undefined' && vehicleUpgrades)
+    ? vehicleUpgrades
+    : (equipment?.vehicleUpgrades || {});
+  return source?.[key] || null;
+};
+
+const findUnitDefinition = (unitClass, unitType) => {
+  const cls = String(unitClass || '').toLowerCase();
+  const type = String(unitType || '').toLowerCase();
+  return (Array.isArray(unitTypes) ? unitTypes : []).find(
+    (u) => String(u.class || '').toLowerCase() === cls && String(u.type || '').toLowerCase() === type
+  ) || null;
+};
+
+const equipmentOptionsForClass = (unitClass) => {
+  const list = Array.isArray(equipment?.[unitClass]) ? equipment[unitClass] : [];
+  return list.map((item) => {
+    if (typeof item === 'string') return { name: item, cost: 0 };
+    return { name: item?.name || '', cost: Number(item?.cost) || 0 };
+  }).filter((opt) => opt.name);
+};
+
+const upgradeOptionsForUnit = (unit) => {
+  const cfg = getVehicleUpgradeConfigForClass(unit?.class);
+  const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
+  if (!upgrades.length) return [];
+  const allowed = cfg?.allowedByUnit?.[unit?.type];
+  const allowedSet = Array.isArray(allowed)
+    ? new Set(allowed.map((name) => String(name || '').toLowerCase()))
+    : null;
+  return upgrades
+    .filter((upg) => {
+      if (!upg) return false;
+      const name = String(upg?.name || '').toLowerCase();
+      if (!name) return false;
+      if (!allowedSet) return true;
+      return allowedSet.has(name);
+    })
+    .map((upg) => ({
+      name: upg?.name || '',
+      cost: Number(upg?.cost) || 0,
+      isUpgrade: true
+    }))
+    .filter((opt) => opt.name);
+};
+
+const unitEquipmentOptions = (unit) => {
+  const options = [...equipmentOptionsForClass(unit?.class), ...upgradeOptionsForUnit(unit)];
+  const seen = new Set();
+  return options.filter((opt) => {
+    const key = normalizeEquipmentName(opt?.name).toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 export function openPersonnelModal(person, station) {
   const modal = document.getElementById('editPersonnelModal');
   const content = document.getElementById('editPersonnelContent');
@@ -170,6 +233,10 @@ export function openUnitModal(unit) {
         <div>Seats${defaultSeats ? ` (max ${defaultSeats})` : ''}</div>
         <input id="edit-unit-seats" type="number" ${defaultSeats ? `min="1" max="${defaultSeats}" value="${seatDisplay}"` : 'disabled placeholder="N/A"'} style="width:100%;" ${defaultSeats ? `placeholder="${defaultSeats}"` : ''} />
       </label>
+      <div>
+        <div id="edit-unit-equipment-label" style="font-weight:bold;">Upgrades & Equipment</div>
+        <div id="edit-unit-equipment" style="max-height:160px; overflow:auto; padding:6px; border:1px solid #ddd; border-radius:6px;"></div>
+      </div>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
         <button id="edit-unit-cancel" type="button">Cancel</button>
         <button id="edit-unit-save" type="button" style="background:#0b5; color:#fff;">Save</button>
@@ -192,6 +259,52 @@ export function openUnitModal(unit) {
       seatInput.value = String(value);
     });
   }
+  const equipmentSelection = new Set(
+    (Array.isArray(unit?.equipment) ? unit.equipment : [])
+      .map((item) => normalizeEquipmentName(item))
+      .filter(Boolean)
+  );
+  const equipLabel = content.querySelector('#edit-unit-equipment-label');
+  const equipContainer = content.querySelector('#edit-unit-equipment');
+  const renderEquipmentOptions = () => {
+    if (!equipContainer) return;
+    const def = findUnitDefinition(unit?.class, unit?.type);
+    const slots = Number(def?.equipmentSlots || 0);
+    if (equipLabel) {
+      equipLabel.textContent = slots ? `Upgrades & Equipment (${slots} slots)` : 'Upgrades & Equipment';
+    }
+    const opts = unitEquipmentOptions(unit);
+    equipContainer.innerHTML = '';
+    if (!opts.length) {
+      equipContainer.innerHTML = '<em>No upgrades or equipment available for this unit.</em>';
+      return;
+    }
+    opts.forEach((opt) => {
+      const label = document.createElement('label');
+      label.style.display = 'block';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = opt.name;
+      checkbox.checked = equipmentSelection.has(opt.name);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          if (slots && equipmentSelection.size >= slots) {
+            checkbox.checked = false;
+            notifyError('No free equipment slots for this unit.');
+            return;
+          }
+          equipmentSelection.add(opt.name);
+        } else {
+          equipmentSelection.delete(opt.name);
+        }
+      });
+      const span = document.createElement('span');
+      span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+      label.append(checkbox, ' ', span);
+      equipContainer.appendChild(label);
+    });
+  };
+  renderEquipmentOptions();
   content.querySelector('#edit-unit-cancel').onclick = () => { modal.style.display = 'none'; };
   content.querySelector('#edit-unit-save').onclick = async () => {
     const nameEl = content.querySelector('#edit-unit-name');
@@ -200,7 +313,7 @@ export function openUnitModal(unit) {
     let priority = Number(content.querySelector('#edit-unit-priority')?.value);
     if (!Number.isFinite(priority)) priority = 1;
     priority = Math.min(5, Math.max(1, priority));
-    const payload = { name, tag, priority };
+    const payload = { name, tag, priority, equipment: Array.from(equipmentSelection) };
     if (seatInput && !seatInput.disabled) {
       const raw = seatInput.value.trim();
       if (!raw) {

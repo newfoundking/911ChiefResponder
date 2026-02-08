@@ -4,7 +4,7 @@ const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
 const { getRandomName } = require('./names');
-const { getBalance, adjustBalance, requireFunds } = require('./wallet');
+const { getBalance, adjustBalance, requireFunds, findEquipmentCostByName } = require('./wallet');
 
 const db = require('./db');             // your sqlite3 instance
 const unitTypes = require('./unitTypes');
@@ -737,6 +737,7 @@ app.post('/api/units', async (req, res) => {
     const { station_id, class: unitClass, type, name, tag } = req.body || {};
     let { priority } = req.body || {};
     const seatInput = req.body?.seats ?? req.body?.seat_capacity ?? req.body?.seat_override;
+    const equipmentInput = req.body?.equipment;
     if (!station_id || !unitClass || !type || !name)
       return res.status(400).json({ error: 'station_id, class, type, name are required' });
 
@@ -750,21 +751,41 @@ app.post('/api/units', async (req, res) => {
     if (!usage.ok) return res.status(404).json({ error: usage.reason });
     if (usage.used >= usage.bays) return res.status(409).json({ error: 'No free bays at station' });
 
-    const cost = findUnitCostByType(type) || 0;
-    const ok = await requireFunds(cost);
-    if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: cost });
+    const equipmentRaw = Array.isArray(equipmentInput) ? equipmentInput : (equipmentInput ? [equipmentInput] : []);
+    const equipmentList = equipmentRaw
+      .map((item) => String(item || '').trim())
+      .filter((item) => item.length);
+    const def = (Array.isArray(unitTypes) ? unitTypes : []).find(
+      (u) => String(u.class || '').toLowerCase() === String(unitClass || '').toLowerCase()
+        && String(u.type || '').toLowerCase() === String(type || '').toLowerCase()
+    );
+    const slots = Number(def?.equipmentSlots || 0);
+    if (slots && equipmentList.length > slots) {
+      return res.status(400).json({ error: `Unit exceeds equipment slots (${equipmentList.length}/${slots})` });
+    }
+    if (!slots && equipmentList.length) {
+      return res.status(400).json({ error: 'Unit cannot carry equipment' });
+    }
+
+    const unitCost = findUnitCostByType(type) || 0;
+    const equipmentCost = equipmentList.reduce((sum, item) => sum + (findEquipmentCostByName(item) || 0), 0);
+    const totalCost = unitCost + equipmentCost;
+    const ok = await requireFunds(totalCost);
+    if (!ok.ok) return res.status(409).json({ error: 'Insufficient funds', balance: ok.balance, needed: totalCost });
 
     db.run(
-      `INSERT INTO units (station_id, class, type, name, tag, priority, status, seat_override) VALUES (?,?,?,?,?,?, 'available', ?)` ,
-      [station_id, unitClass, type, name, tag, priority, seatInfo.seatOverride],
+      `INSERT INTO units (station_id, class, type, name, tag, priority, status, equipment, seat_override) VALUES (?,?,?,?,?,?, 'available', ?, ?)` ,
+      [station_id, unitClass, type, name, tag, priority, JSON.stringify(equipmentList), seatInfo.seatOverride],
       async function (err) {
         if (err) return res.status(500).json({ error: err.message });
-        if (cost > 0) await adjustBalance(-cost);
+        if (totalCost > 0) await adjustBalance(-totalCost);
         const balance = await getBalance();
         res.json({
           ok: true,
           id: this.lastID,
-          charged: cost,
+          charged: totalCost,
+          charged_unit: unitCost,
+          charged_equipment: equipmentCost,
           balance,
           seat_capacity: seatInfo.seatCapacity,
           default_capacity: seatInfo.defaultCapacity,

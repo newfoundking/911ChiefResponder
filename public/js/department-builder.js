@@ -135,7 +135,37 @@ function showStatus(message, variant = 'success') {
 
 function getEquipmentOptions(stationType) {
   const list = equipment?.[stationType] || [];
-  return list.map((item) => item.name);
+  return list
+    .map((item) => (typeof item === 'string' ? item : item?.name))
+    .filter(Boolean);
+}
+
+function getVehicleUpgradeConfigForClass(unitClass) {
+  const key = String(unitClass || '').toLowerCase();
+  const source = (typeof vehicleUpgrades !== 'undefined' && vehicleUpgrades)
+    ? vehicleUpgrades
+    : (equipment?.vehicleUpgrades || {});
+  return source?.[key] || null;
+}
+
+function getUpgradeOptionsForUnit(unitClass, unitType) {
+  const cfg = getVehicleUpgradeConfigForClass(unitClass);
+  const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
+  if (!upgrades.length) return [];
+  const allowed = cfg?.allowedByUnit?.[unitType];
+  const allowedSet = Array.isArray(allowed)
+    ? new Set(allowed.map((name) => String(name || '').toLowerCase()))
+    : null;
+  return upgrades
+    .map((upgrade) => (typeof upgrade === 'string' ? { name: upgrade } : upgrade))
+    .filter((upgrade) => {
+      const name = String(upgrade?.name || '').trim();
+      if (!name) return false;
+      if (!allowedSet) return true;
+      return allowedSet.has(name.toLowerCase());
+    })
+    .map((upgrade) => String(upgrade?.name || '').trim())
+    .filter(Boolean);
 }
 
 function getUnitOptions(stationType) {
@@ -150,6 +180,23 @@ function getUnitClassForType(stationType, unitType) {
   const options = getUnitOptions(stationType);
   const match = options.find((opt) => String(opt.type || '').toLowerCase() === desiredType);
   return String(match?.class || stationType);
+}
+
+function getUnitEquipmentOptions(stationType, unitType) {
+  const unitClass = getUnitClassForType(stationType, unitType);
+  const equipmentOptions = getEquipmentOptions(unitClass);
+  const upgradeOptions = getUpgradeOptionsForUnit(unitClass, unitType);
+  const seen = new Set();
+  const combined = [];
+  [...equipmentOptions, ...upgradeOptions].forEach((name) => {
+    const trimmed = normalizeText(name);
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    combined.push(trimmed);
+  });
+  return combined;
 }
 
 function getTrainingOptions(stationType) {
@@ -295,7 +342,7 @@ function renderStationCard(station, index) {
             </div>
             <div class="section-title">Unit Equipment</div>
             <div class="pill-list">
-              ${equipOptions.length ? equipOptions.map((name) => `
+              ${getUnitEquipmentOptions(station.type, unit.type).length ? getUnitEquipmentOptions(station.type, unit.type).map((name) => `
                 <label class="pill">
                   <input type="checkbox" class="unit-equipment-checkbox" data-focus-key="station-${index}-unit-${unitIndex}-equipment-${name}" data-equipment-name="${name}" ${unit.equipment.includes(name) ? 'checked' : ''} />
                   ${name}
@@ -514,7 +561,11 @@ stationListEl.addEventListener('change', (event) => {
       return;
     }
     if (field === 'unit-name') unit.name = event.target.value;
-    if (field === 'unit-type') unit.type = event.target.value;
+    if (field === 'unit-type') {
+      unit.type = event.target.value;
+      const allowedEquipment = new Set(getUnitEquipmentOptions(station.type, unit.type));
+      unit.equipment = unit.equipment.filter((name) => allowedEquipment.has(name));
+    }
     if (field === 'unit-tag') unit.tag = event.target.value;
     if (field === 'unit-priority') unit.priority = parseNumber(event.target.value, 1);
     if (field === 'unit-patrol') unit.patrol = event.target.checked;
