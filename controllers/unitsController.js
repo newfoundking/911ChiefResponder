@@ -144,6 +144,33 @@ function updateUnit(req, res) {
       params.push(pr);
     }
 
+    if (req.body.equipment !== undefined) {
+      const equipmentRaw = Array.isArray(req.body.equipment) ? req.body.equipment : [req.body.equipment];
+      const equipmentList = [];
+      const seen = new Set();
+      equipmentRaw.forEach((item) => {
+        const name = String(item || '').trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        equipmentList.push(name);
+      });
+      const def = unitTypes.find(
+        (u) => String(u.class || '').toLowerCase() === String(updatedClass || '').toLowerCase()
+          && String(u.type || '').toLowerCase() === String(updatedType || '').toLowerCase()
+      );
+      const slots = Number(def?.equipmentSlots || 0);
+      if (slots && equipmentList.length > slots) {
+        return res.status(400).json({ error: `Unit exceeds equipment slots (${equipmentList.length}/${slots})` });
+      }
+      if (!slots && equipmentList.length) {
+        return res.status(400).json({ error: 'Unit cannot carry equipment' });
+      }
+      fields.push('equipment = ?');
+      params.push(JSON.stringify(equipmentList));
+    }
+
     const seatInput = req.body?.seats ?? req.body?.seat_capacity ?? req.body?.seat_override;
     if (seatInput !== undefined) {
       const seatData = getSeatInfo(updatedClass, updatedType, seatInput);

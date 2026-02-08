@@ -56,6 +56,57 @@ function getVehicleUpgradeConfigForClass(unitClass) {
   return source?.[key] || null;
 }
 
+function findUnitDefinition(unitClass, unitType) {
+  const cls = String(unitClass || '').toLowerCase();
+  const type = String(unitType || '').toLowerCase();
+  return (Array.isArray(unitTypes) ? unitTypes : []).find(
+    (u) => String(u.class || '').toLowerCase() === cls && String(u.type || '').toLowerCase() === type
+  ) || null;
+}
+
+function equipmentOptionsForClass(unitClass) {
+  const list = Array.isArray(equipment?.[unitClass]) ? equipment[unitClass] : [];
+  return list.map((item) => {
+    if (typeof item === 'string') return { name: item, cost: 0 };
+    return { name: item?.name || '', cost: Number(item?.cost) || 0 };
+  }).filter((opt) => opt.name);
+}
+
+function upgradeOptionsForUnit(unit) {
+  const cfg = getVehicleUpgradeConfigForClass(unit?.class);
+  const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
+  if (!upgrades.length) return [];
+  const allowed = cfg?.allowedByUnit?.[unit?.type];
+  const allowedSet = Array.isArray(allowed)
+    ? new Set(allowed.map((name) => String(name || '').toLowerCase()))
+    : null;
+  return upgrades
+    .filter((upg) => {
+      if (!upg) return false;
+      const name = String(upg?.name || '').toLowerCase();
+      if (!name) return false;
+      if (!allowedSet) return true;
+      return allowedSet.has(name);
+    })
+    .map((upg) => ({
+      name: upg?.name || '',
+      cost: Number(upg?.cost) || 0,
+      isUpgrade: true
+    }))
+    .filter((opt) => opt.name);
+}
+
+function unitEquipmentOptions(unit) {
+  const options = [...equipmentOptionsForClass(unit?.class), ...upgradeOptionsForUnit(unit)];
+  const seen = new Set();
+  return options.filter((opt) => {
+    const key = String(opt?.name || '').toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function expandTrainingListForUnit(list, unitClass) {
   return expandTrainingListForClass(list, unitClass);
 }
@@ -647,8 +698,61 @@ function openNewUnit(st) {
   html += `<label>Name: <input id="unitName"/></label><br>`;
   html += `<label>Tag: <input id="unitTag"/></label><br>`;
   html += `<label>Priority: <input id="unitPriority" type="number" min="1" max="5" value="1" style="width:60px;"></label><br>`;
+  html += `<div id="unit-equip-section" style="margin:8px 0;">`;
+  html += `<div id="unit-equip-label" style="font-weight:bold;">Upgrades & Equipment</div>`;
+  html += `<div id="unit-equip-options" style="display:flex; flex-direction:column; gap:4px;"></div>`;
+  html += `</div>`;
   html += `<button id="createUnitBtn">Create</button>`;
   pane.innerHTML = html;
+  const equipmentSelection = new Set();
+  const equipLabel = document.getElementById('unit-equip-label');
+  const equipContainer = document.getElementById('unit-equip-options');
+  const unitTypeSelect = document.getElementById('unitType');
+  const renderEquipmentOptions = () => {
+    const unitType = unitTypeSelect.value;
+    const unitDef = findUnitDefinition(st.type, unitType);
+    const slots = Number(unitDef?.equipmentSlots || 0);
+    if (equipLabel) {
+      equipLabel.textContent = slots ? `Upgrades & Equipment (${slots} slots)` : 'Upgrades & Equipment';
+    }
+    if (!equipContainer) return;
+    const opts = unitEquipmentOptions({ class: st.type, type: unitType });
+    for (const name of Array.from(equipmentSelection)) {
+      if (!opts.some((opt) => opt.name === name)) equipmentSelection.delete(name);
+    }
+    equipContainer.innerHTML = '';
+    if (!opts.length) {
+      equipContainer.innerHTML = '<em>No upgrades or equipment available for this unit.</em>';
+      return;
+    }
+    opts.forEach((opt) => {
+      const label = document.createElement('label');
+      label.style.display = 'flex';
+      label.style.gap = '6px';
+      label.style.alignItems = 'center';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = equipmentSelection.has(opt.name);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          if (slots && equipmentSelection.size >= slots) {
+            checkbox.checked = false;
+            notifyError('No free equipment slots for this unit.');
+            return;
+          }
+          equipmentSelection.add(opt.name);
+        } else {
+          equipmentSelection.delete(opt.name);
+        }
+      });
+      const span = document.createElement('span');
+      span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+      label.append(checkbox, span);
+      equipContainer.appendChild(label);
+    });
+  };
+  renderEquipmentOptions();
+  unitTypeSelect?.addEventListener('change', renderEquipmentOptions);
   document.getElementById('cancelNewUnit').onclick = () => showStation(st.id);
   document.getElementById('createUnitBtn').onclick = async ()=>{
     const type = document.getElementById('unitType').value;
@@ -656,7 +760,8 @@ function openNewUnit(st) {
     const tag = document.getElementById('unitTag').value.trim();
     const priority = Number(document.getElementById('unitPriority').value)||1;
     if (!type || !name) return notifyError('Missing name or type');
-    const res = await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id: st.id,class: st.type,type,name,tag,priority})});
+    const equipment = Array.from(equipmentSelection);
+    const res = await fetch('/api/units',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({station_id: st.id,class: st.type,type,name,tag,priority,equipment})});
     if(!res.ok){ const data = await res.json().catch(()=>({})); notifyError(`Failed: ${data.error || res.statusText}`); return; }
     showStation(st.id);
   };
