@@ -11,7 +11,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 // ---------- helpers to read name/cost from string OR object ----------
 function getEquipDisplayList() {
-  const lists = Object.values(equipment || {}).flat();
+  const lists = Object.values(equipment || {}).filter(Array.isArray).flat();
   return lists.map(item => {
     if (typeof item === "string") return { name: item, cost: null };
     return { name: item.name, cost: item.cost ?? null };

@@ -3,7 +3,7 @@ const CLASS_SPEED = { fire: 63, police: 94, ambulance: 75, sar: 70 };
 const unitTypes = [
   { class: "fire", type: "Engine",            capacity: 6, equipmentSlots: 3, attributes: ["waterTank"], cost: 12000, speed: 65 },
   { class: "fire", type: "Ladder",            capacity: 4, equipmentSlots: 2, attributes: ["ladder"], cost: 18000, speed: 60 },
-  { class: "fire", type: "Chief",             capacity: 2, equipmentSlots: 2, attributes: [], cost: 8000,  speed: 75 },
+  { class: "fire", type: "Command Vehicle",   capacity: 2, equipmentSlots: 2, attributes: [], cost: 8000,  speed: 75 },
   { class: "fire", type: "Rescue",            capacity: 4, equipmentSlots: 2, attributes: [], cost: 15000, speed: 65 },
   { class: "fire", type: "Special Operations",capacity: 4, equipmentSlots: 2, attributes: [], cost: 22000, speed: 75 },
   { class: "fire", type: "Tanker",            capacity: 4, equipmentSlots: 2, attributes: ["tanker"], cost: 12000, speed: 55 },

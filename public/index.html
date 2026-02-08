@@ -2262,6 +2262,102 @@ function gatherUnitEquipment(unit) {
   return counts;
 }
 
+function getVehicleUpgradeConfigForClass(unitClass) {
+  const key = String(unitClass || '').toLowerCase();
+  const source = (typeof vehicleUpgrades !== 'undefined' && vehicleUpgrades)
+    ? vehicleUpgrades
+    : (equipment?.vehicleUpgrades || {});
+  return source?.[key] || null;
+}
+
+function expandTrainingListForUnit(list, unitClass) {
+  if (typeof trainingHelpers !== 'undefined' && trainingHelpers && typeof trainingHelpers.expandTrainingList === 'function') {
+    return trainingHelpers.expandTrainingList(list, unitClass) || [];
+  }
+  const seen = new Set();
+  const result = [];
+  (Array.isArray(list) ? list : []).forEach((value) => {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(trimmed);
+  });
+  return result;
+}
+
+function getUnitTrainingKeySet(unit) {
+  const set = new Set();
+  if (!unit) return set;
+  for (const p of Array.isArray(unit.personnel) ? unit.personnel : []) {
+    const expanded = expandTrainingListForUnit(p.training, unit.class);
+    for (const t of expanded) {
+      const key = String(t || '').trim().toLowerCase();
+      if (key) set.add(key);
+    }
+  }
+  return set;
+}
+
+function getUnitQualificationSet(unit) {
+  const quals = new Set();
+  if (!unit) return quals;
+  const aliasMap = new Map([
+    ['Chief', 'Command Vehicle'],
+    ['Command Vehicle', 'Chief']
+  ]);
+  const addQualification = (label) => {
+    if (!label) return;
+    quals.add(label);
+    const alias = aliasMap.get(label);
+    if (alias) quals.add(alias);
+  };
+  if (unit.type) addQualification(unit.type);
+  const cfg = getVehicleUpgradeConfigForClass(unit.class);
+  const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
+  if (!upgrades.length) return quals;
+  const allowed = cfg?.allowedByUnit?.[unit.type];
+  const allowedSet = Array.isArray(allowed) ? new Set(allowed.map((name) => String(name || '').toLowerCase())) : null;
+  const equipmentKeys = new Set(gatherUnitEquipment(unit).keys());
+  const trainingKeys = getUnitTrainingKeySet(unit);
+
+  for (const upgrade of upgrades) {
+    const upgradeName = String(upgrade?.name || '').trim();
+    if (!upgradeName) continue;
+    if (allowedSet && !allowedSet.has(upgradeName.toLowerCase())) continue;
+    const qualifiesAs = upgrade?.qualifiesAs || upgrade?.type || upgradeName;
+    const equipmentAny = Array.isArray(upgrade?.equipmentAny)
+      ? upgrade.equipmentAny
+      : (upgrade?.equipment ? [upgrade.equipment] : [upgradeName]);
+    const trainingAny = Array.isArray(upgrade?.trainingAny)
+      ? upgrade.trainingAny
+      : (upgrade?.training ? [upgrade.training] : []);
+    const mode = upgrade?.mode === 'all' ? 'all' : 'any';
+    const equipmentMatch = equipmentAny.length
+      ? equipmentAny.some((name) => equipmentKeys.has(equipmentKey(name)))
+      : false;
+    const trainingMatch = trainingAny.length
+      ? trainingAny.some((name) => trainingKeys.has(String(name || '').toLowerCase()))
+      : false;
+    if (mode === 'all') {
+      const equipmentOk = equipmentAny.length ? equipmentMatch : true;
+      const trainingOk = trainingAny.length ? trainingMatch : true;
+      if (equipmentOk && trainingOk) addQualification(qualifiesAs);
+    } else if ((equipmentAny.length && equipmentMatch) || (trainingAny.length && trainingMatch)) {
+      addQualification(qualifiesAs);
+    }
+  }
+  return quals;
+}
+
+function unitQualifiesAs(unit, type) {
+  if (!unit || !type) return false;
+  const target = String(type || '').trim();
+  if (!target) return false;
+  return getUnitQualificationSet(unit).has(target);
+}
+
 function renderRequirementsDynamic(mission, assigned) {
   const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
   const reqTraining = Array.isArray(mission.required_training) ? mission.required_training : [];
@@ -2271,8 +2367,14 @@ function renderRequirementsDynamic(mission, assigned) {
   // Count assigned units by status
   const unitCounts = { enroute: new Map(), on_scene: new Map() };
   for (const u of assigned || []) {
-    if (u.status === 'on_scene') unitCounts.on_scene.set(u.type, (unitCounts.on_scene.get(u.type) || 0) + 1);
-    else if (u.status === 'enroute') unitCounts.enroute.set(u.type, (unitCounts.enroute.get(u.type) || 0) + 1);
+    const target = u.status === 'on_scene'
+      ? unitCounts.on_scene
+      : (u.status === 'enroute' ? unitCounts.enroute : null);
+    if (!target) continue;
+    const quals = getUnitQualificationSet(u);
+    for (const q of quals) {
+      target.set(q, (target.get(q) || 0) + 1);
+    }
   }
 
   // Count training and equipment on assigned units
@@ -2490,7 +2592,7 @@ function formatRunCardSummary(title, items, labelKey) {
 }
 
 function getEquipDisplayList() {
-  const lists = Object.values(equipment || {}).flat();
+  const lists = Object.values(equipment || {}).filter(Array.isArray).flat();
   return lists.map(item => {
     if (typeof item === 'string') return { name: item, cost: null };
     return { name: item.name, cost: item.cost ?? null };
@@ -3995,11 +4097,44 @@ function openStationBuilderModal(initial = {}) {
     }
 
     function equipmentOptions() {
-      const list = (equipment && equipment[state.type]) || [];
+      const list = Array.isArray(equipment?.[state.type]) ? equipment[state.type] : [];
       return list.map((item) => {
         if (typeof item === 'string') return { name: item, cost: 0 };
         return { name: item?.name || '', cost: Number(item?.cost) || 0 };
       }).filter(opt => opt.name);
+    }
+
+    function upgradeOptionsForUnit(unit) {
+      const cfg = getVehicleUpgradeConfigForClass(unit?.class);
+      const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
+      if (!upgrades.length) return [];
+      const allowed = cfg?.allowedByUnit?.[unit?.type];
+      const allowedSet = Array.isArray(allowed)
+        ? new Set(allowed.map((name) => String(name || '').toLowerCase()))
+        : null;
+      return upgrades
+        .filter((upg) => {
+          if (!allowedSet) return true;
+          const name = String(upg?.name || '').toLowerCase();
+          return name && allowedSet.has(name);
+        })
+        .map((upg) => ({
+          name: upg?.name || '',
+          cost: Number(upg?.cost) || 0,
+          isUpgrade: true
+        }))
+        .filter((opt) => opt.name);
+    }
+
+    function unitEquipmentOptions(unit) {
+      const options = [...equipmentOptions(), ...upgradeOptionsForUnit(unit)];
+      const seen = new Set();
+      return options.filter((opt) => {
+        const key = String(opt?.name || '').toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     }
 
     function trainingOptions() {
@@ -4068,8 +4203,18 @@ function openStationBuilderModal(initial = {}) {
       const key = String(name || '').toLowerCase();
       const lists = Object.values(equipment || {});
       for (const arr of lists) {
+        if (!Array.isArray(arr)) continue;
         for (const item of arr || []) {
           if (typeof item === 'string' && item.toLowerCase() === key) return 0;
+          if (item?.name && String(item.name).toLowerCase() === key) return Number(item.cost) || 0;
+        }
+      }
+      const upgradeSets = (typeof vehicleUpgrades !== 'undefined' && vehicleUpgrades)
+        ? vehicleUpgrades
+        : (equipment?.vehicleUpgrades || {});
+      for (const cfg of Object.values(upgradeSets || {})) {
+        const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
+        for (const item of upgrades) {
           if (item?.name && String(item.name).toLowerCase() === key) return Number(item.cost) || 0;
         }
       }
@@ -4110,7 +4255,9 @@ function openStationBuilderModal(initial = {}) {
           }
           const def = unitDefs.find((d) => d.type === unit.type);
           const slots = Number(def?.equipmentSlots || 0);
-          unit.equipment = unit.equipment.filter((name) => eqNames.has(name));
+          const unitOptions = unitEquipmentOptions(unit);
+          const unitNames = new Set(unitOptions.map((opt) => opt.name));
+          unit.equipment = unit.equipment.filter((name) => unitNames.has(name));
           if (slots && unit.equipment.length > slots) {
             unit.equipment = unit.equipment.slice(0, slots);
           }
@@ -4383,7 +4530,7 @@ function openStationBuilderModal(initial = {}) {
           const equipLabel = document.createElement('div');
           const def = unitDefs.find((d) => d.type === unit.type);
           const slots = Number(def?.equipmentSlots || 0);
-          equipLabel.textContent = slots ? `Equipment (${slots} slots)` : 'Equipment';
+          equipLabel.textContent = slots ? `Upgrades & Equipment (${slots} slots)` : 'Upgrades & Equipment';
           equipLabel.style.fontWeight = 'bold';
           wrapper.append(
             nameField,
@@ -4395,7 +4542,7 @@ function openStationBuilderModal(initial = {}) {
             seatField,
             equipLabel
           );
-          const opts = equipmentOptions();
+          const opts = unitEquipmentOptions(unit);
           unit.equipment = unit.equipment.filter((name) => opts.some((opt) => opt.name === name));
           opts.forEach((opt) => {
             const label = document.createElement('label');
@@ -4425,7 +4572,7 @@ function openStationBuilderModal(initial = {}) {
           if (!opts.length) {
             const emptyEquip = document.createElement('div');
             emptyEquip.className = 'station-builder-empty';
-            emptyEquip.textContent = 'No equipment available for this class.';
+            emptyEquip.textContent = 'No upgrades or equipment available for this unit.';
             equipField.appendChild(emptyEquip);
           }
           wrapper.appendChild(equipField);
@@ -5868,7 +6015,8 @@ async function autoDispatch(mission) {
     function trainingCount(u, name) {
       let c = 0;
       for (const p of Array.isArray(u.personnel)?u.personnel:[]) {
-        for (const t of Array.isArray(p.training)?p.training:[]) {
+        const expanded = expandTrainingListForUnit(p.training, u.class);
+        for (const t of expanded) {
           if (String(t).toLowerCase() === String(name).toLowerCase()) c++;
         }
       }
@@ -5907,11 +6055,10 @@ async function autoDispatch(mission) {
 
     const normalizeType = value => String(value || '').toLowerCase();
     const unitMatchesTypes = (unit, types) => {
-      const unitType = normalizeType(unit.type);
       const unitClass = normalizeType(unit.class);
       return types.some(t => {
         const normalized = normalizeType(t);
-        return normalized && (normalized === unitType || normalized === unitClass);
+        return normalized && (unitQualifiesAs(unit, t) || normalized === unitClass);
       });
     };
     const countAssignedForTypes = types =>

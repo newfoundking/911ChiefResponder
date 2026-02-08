@@ -131,6 +131,89 @@ function gatherEquipmentForUnit(unit) {
   return counts;
 }
 
+function getVehicleUpgradeConfigForClass(unitClass) {
+  const key = String(unitClass || '').toLowerCase();
+  const source = (typeof vehicleUpgrades !== 'undefined' && vehicleUpgrades)
+    ? vehicleUpgrades
+    : (equipment?.vehicleUpgrades || {});
+  return source?.[key] || null;
+}
+
+function expandTrainingListForUnit(list, unitClass) {
+  return expandTrainingListForClass(list, unitClass);
+}
+
+function getUnitTrainingKeySet(unit) {
+  const set = new Set();
+  if (!unit) return set;
+  for (const p of Array.isArray(unit.personnel) ? unit.personnel : []) {
+    const expanded = expandTrainingListForUnit(p.training, unit.class);
+    for (const t of expanded) {
+      const key = String(t || '').trim().toLowerCase();
+      if (key) set.add(key);
+    }
+  }
+  return set;
+}
+
+function getUnitQualificationSet(unit) {
+  const quals = new Set();
+  if (!unit) return quals;
+  const aliasMap = new Map([
+    ['Chief', 'Command Vehicle'],
+    ['Command Vehicle', 'Chief']
+  ]);
+  const addQualification = (label) => {
+    if (!label) return;
+    quals.add(label);
+    const alias = aliasMap.get(label);
+    if (alias) quals.add(alias);
+  };
+  if (unit.type) addQualification(unit.type);
+  const cfg = getVehicleUpgradeConfigForClass(unit.class);
+  const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
+  if (!upgrades.length) return quals;
+  const allowed = cfg?.allowedByUnit?.[unit.type];
+  const allowedSet = Array.isArray(allowed) ? new Set(allowed.map((name) => String(name || '').toLowerCase())) : null;
+  const equipmentKeys = new Set(gatherEquipmentForUnit(unit).keys());
+  const trainingKeys = getUnitTrainingKeySet(unit);
+
+  for (const upgrade of upgrades) {
+    const upgradeName = String(upgrade?.name || '').trim();
+    if (!upgradeName) continue;
+    if (allowedSet && !allowedSet.has(upgradeName.toLowerCase())) continue;
+    const qualifiesAs = upgrade?.qualifiesAs || upgrade?.type || upgradeName;
+    const equipmentAny = Array.isArray(upgrade?.equipmentAny)
+      ? upgrade.equipmentAny
+      : (upgrade?.equipment ? [upgrade.equipment] : [upgradeName]);
+    const trainingAny = Array.isArray(upgrade?.trainingAny)
+      ? upgrade.trainingAny
+      : (upgrade?.training ? [upgrade.training] : []);
+    const mode = upgrade?.mode === 'all' ? 'all' : 'any';
+    const equipmentMatch = equipmentAny.length
+      ? equipmentAny.some((name) => equipmentKeys.has(equipmentKey(name)))
+      : false;
+    const trainingMatch = trainingAny.length
+      ? trainingAny.some((name) => trainingKeys.has(String(name || '').toLowerCase()))
+      : false;
+    if (mode === 'all') {
+      const equipmentOk = equipmentAny.length ? equipmentMatch : true;
+      const trainingOk = trainingAny.length ? trainingMatch : true;
+      if (equipmentOk && trainingOk) addQualification(qualifiesAs);
+    } else if ((equipmentAny.length && equipmentMatch) || (trainingAny.length && trainingMatch)) {
+      addQualification(qualifiesAs);
+    }
+  }
+  return quals;
+}
+
+function unitQualifiesAs(unit, type) {
+  if (!unit || !type) return false;
+  const target = String(type || '').trim();
+  if (!target) return false;
+  return getUnitQualificationSet(unit).has(target);
+}
+
 function randomCount({ min = 0, max = 0, chance = 1 }) {
   min = Math.floor(min);
   max = Math.floor(max);
@@ -1796,11 +1879,12 @@ async function autoDispatchMission(mission) {
   }
 
   const assigned = await fetchJson(`/api/missions/${mission.id}/units`).catch(() => []);
-  const assignedCounts = {};
+  const assignedCounts = new Map();
   for (const unit of Array.isArray(assigned) ? assigned : []) {
     if (!['enroute', 'on_scene'].includes(unit?.status)) continue;
-    if (unit?.type) {
-      assignedCounts[unit.type] = (assignedCounts[unit.type] || 0) + 1;
+    const quals = getUnitQualificationSet(unit);
+    for (const q of quals) {
+      assignedCounts.set(q, (assignedCounts.get(q) || 0) + 1);
     }
     applyNeeds(unit);
   }
@@ -1840,11 +1924,18 @@ async function autoDispatchMission(mission) {
     const types = Array.isArray(req.types) ? req.types.filter(Boolean) : [];
     if (!types.length && req.type) types.push(req.type);
     const needTotal = Number(req.quantity ?? req.count ?? req.qty ?? 1) || 1;
-    let remaining = needTotal - types.reduce((sum, type) => sum + (assignedCounts[type] || 0), 0);
+    let remaining = needTotal - types.reduce((sum, type) => sum + (assignedCounts.get(type) || 0), 0);
     remaining = Math.max(0, remaining);
     for (let i = 0; i < remaining; i++) {
       const candidates = units
-        .filter((unit) => !selectedIds.has(unit.id) && types.includes(unit.type))
+        .filter((unit) => {
+          if (selectedIds.has(unit.id)) return false;
+          const unitClass = String(unit.class || '').trim().toLowerCase();
+          return types.some((type) => {
+            const target = String(type || '').trim().toLowerCase();
+            return target && (unitQualifiesAs(unit, type) || target === unitClass);
+          });
+        })
         .sort(sortUnits);
       if (!candidates.length) break;
       const chosen = candidates.find(unitMatchesAllNeeds) || candidates.find(unitMatchesNeed) || candidates[0];
