@@ -48,6 +48,12 @@ db.serialize(() => {
 });
 
 const { parseArrayField, reverseGeocode, pointInPolygon, getSeatInfo } = require('./utils');
+const {
+  equipmentKey,
+  trainingKey,
+  gatherUnitEquipment,
+  getUnitQualificationSet,
+} = require('./utils/qualification');
 const { startPatrol, handlePatrolCompletion } = require('./services/patrol');
 const { resolveMissionById, getFacilityOccupancy } = require('./services/missions');
 const ROUTE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
@@ -511,18 +517,6 @@ db.run(`INSERT OR IGNORE INTO wallet (id, balance) VALUES (1, 100000)`);
 const { missionClocks, beginMissionClock, clearMissionClock, rehydrateMissionClocks } = require('./services/missionTimers');
 rehydrateMissionClocks();
 
-function equipmentKey(name) {
-  if (name === null || name === undefined) return '';
-  const trimmed = String(name).trim();
-  return trimmed ? trimmed.toLowerCase() : '';
-}
-
-function trainingKey(name) {
-  if (name === null || name === undefined) return '';
-  const trimmed = String(name).trim();
-  return trimmed ? trimmed.toLowerCase() : '';
-}
-
 function missionRequirementsMet(mission, assigned) {
   const unitOnScene = new Map();
   const equipOnScene = new Map();
@@ -537,27 +531,26 @@ function missionRequirementsMet(mission, assigned) {
       .toLowerCase()
       .replace(/\s+/g, '_');
     if (normStatus !== 'on_scene' && normStatus !== 'onscene') continue;
-    unitOnScene.set(u.type, (unitOnScene.get(u.type) || 0) + 1);
-
-    const eqArr = Array.isArray(u.equipment) ? u.equipment : parseArrayField(u.equipment);
-    const eqKeys = new Set();
-    for (const e of eqArr) {
-      const name = typeof e === 'string' ? e : e?.name;
-      const key = equipmentKey(name);
-      if (!key) continue;
-      equipOnScene.set(key, (equipOnScene.get(key) || 0) + 1);
-      eqKeys.add(key);
-    }
-    const defaults = getDefaultUnitEquipment(u.class, u.type) || [];
-    for (const provided of defaults) {
-      const key = equipmentKey(provided);
-      if (!key || eqKeys.has(key)) continue;
-      equipOnScene.set(key, (equipOnScene.get(key) || 0) + 1);
-      eqKeys.add(key);
+    const normalizedUnit = {
+      ...u,
+      equipment: Array.isArray(u.equipment) ? u.equipment : parseArrayField(u.equipment),
+      personnel: Array.isArray(u.personnel) ? u.personnel : parseArrayField(u.personnel),
+    };
+    const quals = getUnitQualificationSet(normalizedUnit, {
+      vehicleUpgrades: equipment.vehicleUpgrades || {},
+      getDefaultUnitEquipment,
+      expandTrainingList,
+    });
+    for (const q of quals) {
+      unitOnScene.set(q, (unitOnScene.get(q) || 0) + 1);
     }
 
-    const personnel = parseArrayField(u.personnel);
-    for (const p of personnel) {
+    const eqCounts = gatherUnitEquipment(normalizedUnit, getDefaultUnitEquipment);
+    for (const [key, count] of eqCounts.entries()) {
+      equipOnScene.set(key, (equipOnScene.get(key) || 0) + count);
+    }
+
+    for (const p of normalizedUnit.personnel) {
       const tList = Array.isArray(p.training) ? p.training : parseArrayField(p.training);
       const expanded = expandTrainingList(tList, u.class);
       for (const t of expanded) {
