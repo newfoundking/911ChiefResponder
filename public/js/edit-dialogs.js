@@ -63,7 +63,7 @@ const upgradeOptionsForUnit = (unit) => {
 };
 
 const unitEquipmentOptions = (unit) => {
-  const options = [...equipmentOptionsForClass(unit?.class), ...upgradeOptionsForUnit(unit)];
+  const options = [...equipmentOptionsForClass(unit?.class)];
   const seen = new Set();
   return options.filter((opt) => {
     const key = normalizeEquipmentName(opt?.name).toLowerCase();
@@ -234,7 +234,7 @@ export function openUnitModal(unit) {
         <input id="edit-unit-seats" type="number" ${defaultSeats ? `min="1" max="${defaultSeats}" value="${seatDisplay}"` : 'disabled placeholder="N/A"'} style="width:100%;" ${defaultSeats ? `placeholder="${defaultSeats}"` : ''} />
       </label>
       <div>
-        <div id="edit-unit-equipment-label" style="font-weight:bold;">Upgrades & Equipment</div>
+        <div id="edit-unit-equipment-label" style="font-weight:bold;">Equipment</div>
         <div id="edit-unit-equipment" style="max-height:160px; overflow:auto; padding:6px; border:1px solid #ddd; border-radius:6px;"></div>
       </div>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
@@ -264,6 +264,11 @@ export function openUnitModal(unit) {
       .map((item) => normalizeEquipmentName(item))
       .filter(Boolean)
   );
+  const upgradeSelection = new Set(
+    (Array.isArray(unit?.upgrades) ? unit.upgrades : [])
+      .map((item) => normalizeEquipmentName(item))
+      .filter(Boolean)
+  );
   const equipLabel = content.querySelector('#edit-unit-equipment-label');
   const equipContainer = content.querySelector('#edit-unit-equipment');
   const renderEquipmentOptions = () => {
@@ -274,8 +279,9 @@ export function openUnitModal(unit) {
       equipLabel.textContent = slots ? `Upgrades & Equipment (${slots} slots)` : 'Upgrades & Equipment';
     }
     const opts = unitEquipmentOptions(unit);
+    const upgradeOpts = upgradeOptionsForUnit(unit);
     equipContainer.innerHTML = '';
-    if (!opts.length) {
+    if (!opts.length && !upgradeOpts.length) {
       equipContainer.innerHTML = '<em>No upgrades or equipment available for this unit.</em>';
       return;
     }
@@ -303,6 +309,29 @@ export function openUnitModal(unit) {
       label.append(checkbox, ' ', span);
       equipContainer.appendChild(label);
     });
+    if (upgradeOpts.length) {
+      const upgradeLabel = document.createElement('div');
+      upgradeLabel.style.fontWeight = 'bold';
+      upgradeLabel.style.marginTop = '8px';
+      upgradeLabel.textContent = 'Vehicle Upgrades';
+      equipContainer.appendChild(upgradeLabel);
+    }
+    upgradeOpts.forEach((opt) => {
+      const label = document.createElement('label');
+      label.style.display = 'block';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = opt.name;
+      checkbox.checked = upgradeSelection.has(opt.name);
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) upgradeSelection.add(opt.name);
+        else upgradeSelection.delete(opt.name);
+      });
+      const span = document.createElement('span');
+      span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+      label.append(checkbox, ' ', span);
+      equipContainer.appendChild(label);
+    });
   };
   renderEquipmentOptions();
   content.querySelector('#edit-unit-cancel').onclick = () => { modal.style.display = 'none'; };
@@ -313,7 +342,7 @@ export function openUnitModal(unit) {
     let priority = Number(content.querySelector('#edit-unit-priority')?.value);
     if (!Number.isFinite(priority)) priority = 1;
     priority = Math.min(5, Math.max(1, priority));
-    const payload = { name, tag, priority, equipment: Array.from(equipmentSelection) };
+    const payload = { name, tag, priority, equipment: Array.from(equipmentSelection), upgrades: Array.from(upgradeSelection) };
     if (seatInput && !seatInput.disabled) {
       const raw = seatInput.value.trim();
       if (!raw) {

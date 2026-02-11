@@ -2244,7 +2244,10 @@ function equipmentKey(name) {
 function gatherUnitEquipment(unit) {
   const counts = new Map();
   if (!unit) return counts;
-  const eqArr = Array.isArray(unit.equipment) ? unit.equipment : [];
+  const eqArr = [
+    ...(Array.isArray(unit.equipment) ? unit.equipment : []),
+    ...(Array.isArray(unit.upgrades) ? unit.upgrades : []),
+  ];
   for (const eq of eqArr) {
     const label = typeof eq === 'string' ? eq : eq?.name;
     const key = equipmentKey(label);
@@ -3867,6 +3870,7 @@ function openStationBuilderModal(initial = {}) {
         tag: typeof u?.tag === 'string' ? u.tag : '',
         priority: Math.min(5, Math.max(1, Number(u?.priority ?? 1) || 1)),
         equipment: Array.isArray(u?.equipment) ? u.equipment.slice() : [],
+        upgrades: Array.isArray(u?.upgrades) ? u.upgrades.slice() : [],
         patrol: Boolean(u?.patrol),
         personnel: unitPersonnel.map((person) => ({
           name: typeof person?.name === 'string' ? person.name : '',
@@ -4127,7 +4131,7 @@ function openStationBuilderModal(initial = {}) {
     }
 
     function unitEquipmentOptions(unit) {
-      const options = [...equipmentOptions(), ...upgradeOptionsForUnit(unit)];
+      const options = [...equipmentOptions()];
       const seen = new Set();
       return options.filter((opt) => {
         const key = String(opt?.name || '').toLowerCase();
@@ -4256,8 +4260,14 @@ function openStationBuilderModal(initial = {}) {
           const def = unitDefs.find((d) => d.type === unit.type);
           const slots = Number(def?.equipmentSlots || 0);
           const unitOptions = unitEquipmentOptions(unit);
+          const upgradeOptions = upgradeOptionsForUnit(unit);
           const unitNames = new Set(unitOptions.map((opt) => opt.name));
-          unit.equipment = unit.equipment.filter((name) => unitNames.has(name));
+          const upgradeNames = new Set(upgradeOptions.map((opt) => opt.name));
+          const existingEquipment = Array.isArray(unit.equipment) ? unit.equipment : [];
+          const existingUpgrades = Array.isArray(unit.upgrades) ? unit.upgrades : [];
+          const migratedUpgrades = existingEquipment.filter((name) => upgradeNames.has(name));
+          unit.equipment = existingEquipment.filter((name) => unitNames.has(name));
+          unit.upgrades = [...existingUpgrades, ...migratedUpgrades].filter((name, i, arr) => upgradeNames.has(name) && arr.indexOf(name) === i);
           if (slots && unit.equipment.length > slots) {
             unit.equipment = unit.equipment.slice(0, slots);
           }
@@ -4397,6 +4407,7 @@ function openStationBuilderModal(initial = {}) {
                   const defs = allowedUnitTypes(unit.class);
                   unit.type = defs[0]?.type || '';
                   unit.equipment = [];
+                  unit.upgrades = [];
                   unit.seats = null;
                   hideError();
                   renderUnits();
@@ -4425,6 +4436,7 @@ function openStationBuilderModal(initial = {}) {
               const def = unitDefs.find((d) => d.type === unit.type);
               const slots = Number(def?.equipmentSlots || 0);
               if (!slots) unit.equipment = [];
+              if (!Array.isArray(unit.upgrades)) unit.upgrades = [];
               if (slots && unit.equipment.length > slots) {
                 unit.equipment = unit.equipment.slice(0, slots);
               }
@@ -4530,7 +4542,7 @@ function openStationBuilderModal(initial = {}) {
           const equipLabel = document.createElement('div');
           const def = unitDefs.find((d) => d.type === unit.type);
           const slots = Number(def?.equipmentSlots || 0);
-          equipLabel.textContent = slots ? `Upgrades & Equipment (${slots} slots)` : 'Upgrades & Equipment';
+          equipLabel.textContent = slots ? `Equipment (${slots} slots)` : 'Equipment';
           equipLabel.style.fontWeight = 'bold';
           wrapper.append(
             nameField,
@@ -4543,7 +4555,9 @@ function openStationBuilderModal(initial = {}) {
             equipLabel
           );
           const opts = unitEquipmentOptions(unit);
+          const upgradeOpts = upgradeOptionsForUnit(unit);
           unit.equipment = unit.equipment.filter((name) => opts.some((opt) => opt.name === name));
+          unit.upgrades = (Array.isArray(unit.upgrades) ? unit.upgrades : []).filter((name) => upgradeOpts.some((opt) => opt.name === name));
           opts.forEach((opt) => {
             const label = document.createElement('label');
             const checkbox = document.createElement('input');
@@ -4569,7 +4583,32 @@ function openStationBuilderModal(initial = {}) {
             label.append(checkbox, span);
             equipField.appendChild(label);
           });
-          if (!opts.length) {
+          const upgradeLabel = document.createElement('div');
+          upgradeLabel.style.fontWeight = 'bold';
+          upgradeLabel.style.marginTop = '8px';
+          upgradeLabel.textContent = 'Vehicle Upgrades';
+          equipField.appendChild(upgradeLabel);
+          upgradeOpts.forEach((opt) => {
+            const label = document.createElement('label');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = unit.upgrades.includes(opt.name);
+            checkbox.dataset.focusKey = `unit-${idx}-upgrade-${opt.name}`;
+            checkbox.addEventListener('change', () => {
+              if (checkbox.checked) {
+                if (!unit.upgrades.includes(opt.name)) unit.upgrades.push(opt.name);
+              } else {
+                unit.upgrades = unit.upgrades.filter((name) => name !== opt.name);
+              }
+              hideError();
+              updateCostSummary();
+            });
+            const span = document.createElement('span');
+            span.textContent = opt.cost ? `${opt.name} ($${opt.cost})` : opt.name;
+            label.append(checkbox, span);
+            equipField.appendChild(label);
+          });
+          if (!opts.length && !upgradeOpts.length) {
             const emptyEquip = document.createElement('div');
             emptyEquip.className = 'station-builder-empty';
             emptyEquip.textContent = 'No upgrades or equipment available for this unit.';
@@ -4755,7 +4794,7 @@ function openStationBuilderModal(initial = {}) {
       }, 0);
       const stationEquipCost = state.storageEquipment.reduce((sum, item) => sum + findEquipmentCost(item), 0);
       const unitEquipCost = state.units.reduce(
-        (sum, unit) => sum + unit.equipment.reduce((s, item) => s + findEquipmentCost(item), 0),
+        (sum, unit) => sum + [...(Array.isArray(unit.equipment) ? unit.equipment : []), ...(Array.isArray(unit.upgrades) ? unit.upgrades : [])].reduce((s, item) => s + findEquipmentCost(item), 0),
         0
       );
       const personnelCost = state.units.reduce((sum, unit) => {
@@ -4848,6 +4887,7 @@ function openStationBuilderModal(initial = {}) {
             tag: unit.tag ? unit.tag.trim() : '',
             priority: Math.min(5, Math.max(1, Number(unit.priority) || 1)),
             equipment: unit.equipment.slice(),
+            upgrades: Array.isArray(unit.upgrades) ? unit.upgrades.slice() : [],
             patrol: Boolean(unit.patrol),
             seats,
             personnel,
@@ -4906,6 +4946,7 @@ function openStationBuilderModal(initial = {}) {
           tag: '',
           priority: 1,
           equipment: [],
+          upgrades: [],
           patrol: false,
           personnel: [],
           personnelAddCount: 1,

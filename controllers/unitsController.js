@@ -1,5 +1,6 @@
 const db = require('../db');
 const { parseArrayField, getSeatInfo } = require('../utils');
+const { splitUnitLoadout } = require('../utils/unitLoadout');
 const unitTypes = require('../unitTypes');
 const { startPatrol } = require('../services/patrol');
 
@@ -27,12 +28,14 @@ function getUnits(req, res) {
     if (err) return res.status(500).json({ error: err.message });
     const parsed = rows.map(u => {
       const seatData = getSeatInfo(u.class, u.type, u.seat_override);
+      const loadout = splitUnitLoadout({ unitClass: u.class, unitType: u.type, equipmentInput: parseArrayField(u.equipment) });
       return {
         ...u,
         priority: Number(u.priority) || 1,
         patrol: u.patrol === 1 || u.patrol === true,
         responding: Number(u.responding) === 1 || u.responding === true,
-        equipment: parseArrayField(u.equipment),
+        equipment: loadout.equipment,
+        upgrades: loadout.upgrades,
         seat_override: seatData.seatOverride,
         seat_capacity: seatData.seatCapacity,
         default_capacity: seatData.defaultCapacity,
@@ -61,12 +64,14 @@ function getUnit(req, res) {
     if (err) return res.status(500).json({ error: err.message });
     if (!row) return res.status(404).json({ error: 'Not found' });
     const seatData = getSeatInfo(row.class, row.type, row.seat_override);
+    const loadout = splitUnitLoadout({ unitClass: row.class, unitType: row.type, equipmentInput: parseArrayField(row.equipment) });
     const parsed = {
       ...row,
       priority: Number(row.priority) || 1,
       patrol: row.patrol === 1 || row.patrol === true,
       responding: Number(row.responding) === 1 || row.responding === true,
-      equipment: parseArrayField(row.equipment),
+      equipment: loadout.equipment,
+      upgrades: loadout.upgrades,
       seat_override: seatData.seatOverride,
       seat_capacity: seatData.seatCapacity,
       default_capacity: seatData.defaultCapacity,
@@ -144,31 +149,26 @@ function updateUnit(req, res) {
       params.push(pr);
     }
 
-    if (req.body.equipment !== undefined) {
-      const equipmentRaw = Array.isArray(req.body.equipment) ? req.body.equipment : [req.body.equipment];
-      const equipmentList = [];
-      const seen = new Set();
-      equipmentRaw.forEach((item) => {
-        const name = String(item || '').trim();
-        if (!name) return;
-        const key = name.toLowerCase();
-        if (seen.has(key)) return;
-        seen.add(key);
-        equipmentList.push(name);
+    if (req.body.equipment !== undefined || req.body.upgrades !== undefined) {
+      const loadout = splitUnitLoadout({
+        unitClass: updatedClass,
+        unitType: updatedType,
+        equipmentInput: req.body.equipment,
+        upgradesInput: req.body.upgrades,
       });
       const def = unitTypes.find(
         (u) => String(u.class || '').toLowerCase() === String(updatedClass || '').toLowerCase()
           && String(u.type || '').toLowerCase() === String(updatedType || '').toLowerCase()
       );
       const slots = Number(def?.equipmentSlots || 0);
-      if (slots && equipmentList.length > slots) {
-        return res.status(400).json({ error: `Unit exceeds equipment slots (${equipmentList.length}/${slots})` });
+      if (slots && loadout.equipment.length > slots) {
+        return res.status(400).json({ error: `Unit exceeds equipment slots (${loadout.equipment.length}/${slots})` });
       }
-      if (!slots && equipmentList.length) {
+      if (!slots && loadout.equipment.length) {
         return res.status(400).json({ error: 'Unit cannot carry equipment' });
       }
       fields.push('equipment = ?');
-      params.push(JSON.stringify(equipmentList));
+      params.push(JSON.stringify([...loadout.equipment, ...loadout.upgrades]));
     }
 
     const seatInput = req.body?.seats ?? req.body?.seat_capacity ?? req.body?.seat_override;
