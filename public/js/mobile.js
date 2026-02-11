@@ -113,7 +113,10 @@ const equipmentKey = (name) => {
 function gatherEquipmentForUnit(unit) {
   const counts = new Map();
   if (!unit) return counts;
-  const eqArr = Array.isArray(unit.equipment) ? unit.equipment : [];
+  const eqArr = [
+    ...(Array.isArray(unit.equipment) ? unit.equipment : []),
+    ...(Array.isArray(unit.upgrades) ? unit.upgrades : []),
+  ];
   for (const eq of eqArr) {
     const label = typeof eq === 'string' ? eq : eq?.name;
     const key = equipmentKey(label);
@@ -2100,7 +2103,7 @@ function buildUnitDetail(unit) {
   const detailList = createListFromArray(detailLines);
   if (detailList) detail.appendChild(createDetailSection('Details', detailList));
 
-  const equipmentList = createListFromArray((Array.isArray(unit.equipment) ? unit.equipment : []).map(formatEquipmentName));
+  const equipmentList = createListFromArray(([...(Array.isArray(unit.equipment) ? unit.equipment : []), ...(Array.isArray(unit.upgrades) ? unit.upgrades : [])]).map(formatEquipmentName));
   detail.appendChild(createDetailSection('Equipment', equipmentList, 'No equipment assigned.'));
 
   const personnelList = createPersonnelList(unit.personnel);

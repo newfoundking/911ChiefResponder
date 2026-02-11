@@ -1,6 +1,7 @@
 const db = require('../db');
 const { findEquipmentCostByName, requireFunds, adjustBalance, getBalance } = require('../wallet');
 const { getSeatInfo } = require('../utils');
+const { splitUnitLoadout } = require('../utils/unitLoadout');
 const unitTypes = require('../unitTypes');
 const { getFacilityOccupancy } = require('../services/missions');
 const { startPatrol } = require('../services/patrol');
@@ -183,23 +184,24 @@ function buildStationPlan(body = {}) {
     const seatInfo = getSeatInfo(unitDef.class, unitDef.type, unitRaw?.seats ?? unitRaw?.seat_override ?? unitRaw?.seat_capacity);
     const seatCapacity = Number(seatInfo.seatCapacity || 0);
 
-    const equipmentList = Array.isArray(unitRaw?.equipment)
-      ? unitRaw.equipment
-          .map((item) => String(item || '').trim())
-          .filter((item) => item.length)
-      : [];
-    if (Number(unitDef.equipmentSlots || 0) && equipmentList.length > Number(unitDef.equipmentSlots)) {
+    const loadout = splitUnitLoadout({
+      unitClass: unitDef.class,
+      unitType: unitDef.type,
+      equipmentInput: unitRaw?.equipment,
+      upgradesInput: unitRaw?.upgrades,
+    });
+    if (Number(unitDef.equipmentSlots || 0) && loadout.equipment.length > Number(unitDef.equipmentSlots)) {
       throw createError(
         400,
-        `Unit ${unitName} exceeds equipment slots (${equipmentList.length}/${unitDef.equipmentSlots})`
+        `Unit ${unitName} exceeds equipment slots (${loadout.equipment.length}/${unitDef.equipmentSlots})`
       );
     }
-    if (!Number(unitDef.equipmentSlots || 0) && equipmentList.length) {
+    if (!Number(unitDef.equipmentSlots || 0) && loadout.equipment.length) {
       throw createError(400, `Unit ${unitName} cannot carry equipment`);
     }
 
     unitCostTotal += Number(unitDef.cost) || 0;
-    equipmentList.forEach((item) => {
+    [...loadout.equipment, ...loadout.upgrades].forEach((item) => {
       unitEquipmentCostTotal += findEquipmentCostByName(item) || 0;
     });
 
@@ -209,7 +211,8 @@ function buildStationPlan(body = {}) {
       class: unitDef.class,
       tag,
       priority,
-      equipment: equipmentList,
+      equipment: loadout.equipment,
+      upgrades: loadout.upgrades,
       seat_override: seatInfo.seatOverride,
       seat_capacity: seatCapacity,
       default_capacity: seatInfo.defaultCapacity,
@@ -346,7 +349,7 @@ async function insertStationFromPlan(plan) {
         unit.name,
         unit.tag,
         unit.priority,
-        JSON.stringify(unit.equipment),
+        JSON.stringify([...(unit.equipment || []), ...(unit.upgrades || [])]),
         unit.seat_override ?? null,
         patrol,
         patrolUntil,
