@@ -4,17 +4,24 @@ const sourceImageInput = document.getElementById('sourceImage');
 const modelQualitySelect = document.getElementById('modelQuality');
 const maskModeSelect = document.getElementById('maskMode');
 const maskThresholdInput = document.getElementById('maskThreshold');
+const autoCropInput = document.getElementById('autoCrop');
+const cropPaddingInput = document.getElementById('cropPadding');
 const segmentBtn = document.getElementById('segmentBtn');
 const iconSizeSelect = document.getElementById('iconSize');
 const zoomInput = document.getElementById('zoom');
 const offsetXInput = document.getElementById('offsetX');
 const offsetYInput = document.getElementById('offsetY');
 const lightsEnabledInput = document.getElementById('lightsEnabled');
-const colorAInput = document.getElementById('colorA');
-const colorBInput = document.getElementById('colorB');
-const patternSelect = document.getElementById('pattern');
+const groupPatternAInput = document.getElementById('groupPatternA');
+const groupPatternBInput = document.getElementById('groupPatternB');
 const fpsInput = document.getElementById('fps');
 const lightIntensityInput = document.getElementById('lightIntensity');
+const selectedLightInput = document.getElementById('selectedLight');
+const lightXInput = document.getElementById('lightX');
+const lightYInput = document.getElementById('lightY');
+const lightColorInput = document.getElementById('lightColor');
+const lightGroupInput = document.getElementById('lightGroup');
+const lightPatternModeInput = document.getElementById('lightPatternMode');
 const downloadPngBtn = document.getElementById('downloadPngBtn');
 const downloadGifBtn = document.getElementById('downloadGifBtn');
 const statusEl = document.getElementById('status');
@@ -25,11 +32,19 @@ const miniPreview = document.getElementById('miniPreview');
 const miniCtx = miniPreview.getContext('2d');
 
 let sourceBitmap = null;
+let segmentedCanvas = null;
 let cutoutCanvas = null;
 let model = null;
 let modelNameLoaded = '';
 let animationHandle = 0;
 let animationStart = performance.now();
+
+const lights = [
+  { x: 0.36, y: 0.25, color: '#ff0000', group: 'A', mode: 'group' },
+  { x: 0.64, y: 0.25, color: '#2f6bff', group: 'B', mode: 'group' },
+  { x: 0.5, y: 0.25, color: '#ffffff', group: 'A', mode: 'pulse' },
+  { x: 0.5, y: 0.35, color: '#ffbf00', group: 'B', mode: 'group' },
+];
 
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
@@ -91,6 +106,51 @@ function shouldKeepClass(className, mode) {
   return VEHICLE_CLASSES.has(String(className || '').toLowerCase());
 }
 
+function cropToOpaqueBounds(canvas, paddingRatio = 0) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  let minX = canvas.width;
+  let minY = canvas.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < canvas.height; y += 1) {
+    for (let x = 0; x < canvas.width; x += 1) {
+      const a = data.data[(y * canvas.width + x) * 4 + 3];
+      if (a > 0) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return null;
+
+  const pad = Math.round(Math.max(canvas.width, canvas.height) * clamp01(paddingRatio));
+  minX = Math.max(0, minX - pad);
+  minY = Math.max(0, minY - pad);
+  maxX = Math.min(canvas.width - 1, maxX + pad);
+  maxY = Math.min(canvas.height - 1, maxY + pad);
+
+  const w = maxX - minX + 1;
+  const h = maxY - minY + 1;
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const outCtx = out.getContext('2d');
+  outCtx.drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
+  return out;
+}
+
+function activeCutoutCanvas() {
+  if (!segmentedCanvas) return null;
+  if (!autoCropInput.checked) return segmentedCanvas;
+  return cropToOpaqueBounds(segmentedCanvas, Number(cropPaddingInput.value) || 0);
+}
+
 async function segmentVehicle() {
   if (!sourceBitmap) {
     setStatus('Please upload an image first.', true);
@@ -145,57 +205,28 @@ async function segmentVehicle() {
     }
   }
 
-  const canvas = document.createElement('canvas');
-  canvas.width = inputCanvas.width;
-  canvas.height = inputCanvas.height;
-  const ctx = canvas.getContext('2d');
+  segmentedCanvas = document.createElement('canvas');
+  segmentedCanvas.width = inputCanvas.width;
+  segmentedCanvas.height = inputCanvas.height;
+  const ctx = segmentedCanvas.getContext('2d');
   ctx.putImageData(out, 0, 0);
 
-  cutoutCanvas = cropToOpaqueBounds(canvas);
+  cutoutCanvas = activeCutoutCanvas();
   if (!cutoutCanvas) {
     setStatus('No visible object found after segmentation.', true);
     return;
   }
 
-  setStatus('Background removed. Tune zoom/offset/lights and export.');
+  setStatus('Background removed. Full segmented image is shown first; enable auto-crop when ready.');
   renderPreview(performance.now());
-}
-
-function cropToOpaqueBounds(canvas) {
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-  let minX = canvas.width;
-  let minY = canvas.height;
-  let maxX = -1;
-  let maxY = -1;
-
-  for (let y = 0; y < canvas.height; y += 1) {
-    for (let x = 0; x < canvas.width; x += 1) {
-      const a = data.data[(y * canvas.width + x) * 4 + 3];
-      if (a > 0) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
-    }
-  }
-
-  if (maxX < minX || maxY < minY) return null;
-
-  const w = maxX - minX + 1;
-  const h = maxY - minY + 1;
-  const out = document.createElement('canvas');
-  out.width = w;
-  out.height = h;
-  const outCtx = out.getContext('2d');
-  outCtx.drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
-  return out;
 }
 
 function frameLightPhase(frameIndex, totalFrames, pattern) {
   const t = (frameIndex % totalFrames) / totalFrames;
+  if (pattern === 'pulse') {
+    const pulse = Math.max(0, Math.sin(t * Math.PI * 2));
+    return { left: pulse, right: pulse };
+  }
   if (pattern === 'simultaneous') {
     const on = Math.sin(t * Math.PI * 2) > 0 ? 1 : 0;
     return { left: on, right: on };
@@ -220,6 +251,26 @@ function drawBeacon(ctx, x, y, color, intensity, radius) {
   ctx.fill();
 }
 
+function syncLightEditorFromSelection() {
+  const idx = Math.max(0, Math.min(lights.length - 1, Number(selectedLightInput.value) || 0));
+  const light = lights[idx];
+  lightXInput.value = String(light.x);
+  lightYInput.value = String(light.y);
+  lightColorInput.value = light.color;
+  lightGroupInput.value = light.group;
+  lightPatternModeInput.value = light.mode;
+}
+
+function updateSelectedLight() {
+  const idx = Math.max(0, Math.min(lights.length - 1, Number(selectedLightInput.value) || 0));
+  const light = lights[idx];
+  light.x = clamp01(lightXInput.value);
+  light.y = clamp01(lightYInput.value);
+  light.color = lightColorInput.value;
+  light.group = lightGroupInput.value === 'B' ? 'B' : 'A';
+  light.mode = lightPatternModeInput.value;
+}
+
 function renderToCanvas(targetCanvas, frameIndex = 0, totalFrames = 12) {
   const ctx = targetCanvas.getContext('2d');
   const size = Number(iconSizeSelect.value) || 36;
@@ -227,6 +278,7 @@ function renderToCanvas(targetCanvas, frameIndex = 0, totalFrames = 12) {
   targetCanvas.height = size;
   ctx.clearRect(0, 0, size, size);
 
+  cutoutCanvas = activeCutoutCanvas();
   if (!cutoutCanvas) return;
 
   const zoom = Number(zoomInput.value) || 1;
@@ -242,16 +294,27 @@ function renderToCanvas(targetCanvas, frameIndex = 0, totalFrames = 12) {
   ctx.drawImage(cutoutCanvas, dx, dy, drawW, drawH);
 
   if (lightsEnabledInput.checked) {
-    const pattern = patternSelect.value;
-    const { left, right } = frameLightPhase(frameIndex, totalFrames, pattern);
     const intensity = clamp01(lightIntensityInput.value);
-    const roofY = dy + Math.max(2, drawH * 0.22);
-    const leftX = dx + drawW * 0.36;
-    const rightX = dx + drawW * 0.64;
     const radius = Math.max(2, size * 0.2);
+    const groupPhaseA = frameLightPhase(frameIndex, totalFrames, groupPatternAInput.value);
+    const groupPhaseB = frameLightPhase(frameIndex, totalFrames, groupPatternBInput.value);
 
-    if (left > 0.01) drawBeacon(ctx, leftX, roofY, colorAInput.value, intensity * left, radius);
-    if (right > 0.01) drawBeacon(ctx, rightX, roofY, colorBInput.value, intensity * right, radius);
+    lights.forEach((light) => {
+      const pair = light.mode === 'group'
+        ? (light.group === 'B' ? groupPhaseB : groupPhaseA)
+        : frameLightPhase(frameIndex, totalFrames, light.mode);
+      const brightness = light.group === 'B' ? pair.right : pair.left;
+      if (brightness <= 0.01) return;
+      drawBeacon(ctx, size * clamp01(light.x), size * clamp01(light.y), light.color, intensity * brightness, radius);
+    });
+
+    const activeIndex = Math.max(0, Math.min(lights.length - 1, Number(selectedLightInput.value) || 0));
+    const selected = lights[activeIndex];
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(size * clamp01(selected.x), size * clamp01(selected.y), Math.max(2, size * 0.07), 0, Math.PI * 2);
+    ctx.stroke();
   }
 }
 
@@ -370,6 +433,7 @@ sourceImageInput.addEventListener('change', async (event) => {
   if (!file) return;
   try {
     sourceBitmap = await loadBitmapFromFile(file);
+    segmentedCanvas = null;
     cutoutCanvas = null;
     setStatus('Image loaded. Click "Remove Background".');
     renderPreview(performance.now());
@@ -385,9 +449,40 @@ segmentBtn.addEventListener('click', () => {
   });
 });
 
-[iconSizeSelect, zoomInput, offsetXInput, offsetYInput, lightsEnabledInput, colorAInput, colorBInput, patternSelect, fpsInput, lightIntensityInput, maskThresholdInput].forEach((el) => {
+[iconSizeSelect, zoomInput, offsetXInput, offsetYInput, lightsEnabledInput, groupPatternAInput, groupPatternBInput, fpsInput, lightIntensityInput, maskThresholdInput, autoCropInput, cropPaddingInput].forEach((el) => {
   el.addEventListener('input', () => renderPreview(performance.now()));
   el.addEventListener('change', () => renderPreview(performance.now()));
+});
+
+[lightXInput, lightYInput, lightColorInput, lightGroupInput, lightPatternModeInput].forEach((el) => {
+  el.addEventListener('input', () => {
+    updateSelectedLight();
+    renderPreview(performance.now());
+  });
+  el.addEventListener('change', () => {
+    updateSelectedLight();
+    renderPreview(performance.now());
+  });
+});
+
+selectedLightInput.addEventListener('change', () => {
+  syncLightEditorFromSelection();
+  renderPreview(performance.now());
+});
+
+previewCanvas.addEventListener('click', (event) => {
+  const rect = previewCanvas.getBoundingClientRect();
+  const px = ((event.clientX - rect.left) / rect.width) * previewCanvas.width;
+  const py = ((event.clientY - rect.top) / rect.height) * previewCanvas.height;
+  const drawSize = Math.min(previewCanvas.width, previewCanvas.height) * 0.72;
+  const dx = (previewCanvas.width - drawSize) / 2;
+  const dy = (previewCanvas.height - drawSize) / 2;
+  if (px < dx || py < dy || px > dx + drawSize || py > dy + drawSize) return;
+
+  lightXInput.value = String(clamp01((px - dx) / drawSize));
+  lightYInput.value = String(clamp01((py - dy) / drawSize));
+  updateSelectedLight();
+  renderPreview(performance.now());
 });
 
 downloadPngBtn.addEventListener('click', exportPng);
@@ -398,4 +493,5 @@ window.addEventListener('beforeunload', () => {
   if (animationHandle) cancelAnimationFrame(animationHandle);
 });
 
+syncLightEditorFromSelection();
 setStatus('Upload an image to begin.');

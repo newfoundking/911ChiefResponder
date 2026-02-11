@@ -65,6 +65,10 @@
         <label for="maskThreshold">Edge alpha cutoff</label>
         <input id="maskThreshold" type="range" min="0" max="255" step="1" value="16" />
 
+        <label><input id="autoCrop" type="checkbox" style="width:auto;"> Auto-crop to detected object</label>
+        <label for="cropPadding">Crop padding</label>
+        <input id="cropPadding" type="range" min="0" max="0.4" step="0.01" value="0.04" />
+
         <button id="segmentBtn" type="button">Remove Background</button>
 
         <h2>2) Icon Layout</h2>
@@ -100,30 +104,73 @@
         <label><input id="lightsEnabled" type="checkbox" checked style="width:auto;"> Enable flashing lights</label>
         <div class="row">
           <div>
-            <label for="colorA">Light color A</label>
-            <input id="colorA" type="color" value="#ff0000" />
+            <label for="groupPatternA">Group A pattern</label>
+            <select id="groupPatternA">
+              <option value="alternate">Alternate</option>
+              <option value="simultaneous">Simultaneous</option>
+              <option value="sweep">Sweep</option>
+              <option value="pulse">Pulse</option>
+            </select>
           </div>
           <div>
-            <label for="colorB">Light color B</label>
-            <input id="colorB" type="color" value="#2f6bff" />
+            <label for="groupPatternB">Group B pattern</label>
+            <select id="groupPatternB">
+              <option value="alternate">Alternate</option>
+              <option value="simultaneous">Simultaneous</option>
+              <option value="sweep" selected>Sweep</option>
+              <option value="pulse">Pulse</option>
+            </select>
           </div>
         </div>
         <div class="row">
           <div>
-            <label for="pattern">Pattern</label>
-            <select id="pattern">
-              <option value="alternate">Alternate</option>
-              <option value="simultaneous">Simultaneous</option>
-              <option value="sweep">Sweep</option>
-            </select>
-          </div>
-          <div>
             <label for="fps">Flash speed (fps)</label>
             <input id="fps" type="range" min="2" max="24" step="1" value="8" />
+          </div>
+          <div>
+            <label for="selectedLight">Edit light #</label>
+            <select id="selectedLight">
+              <option value="0">1</option>
+              <option value="1">2</option>
+              <option value="2">3</option>
+              <option value="3">4</option>
+            </select>
           </div>
         </div>
         <label for="lightIntensity">Light intensity</label>
         <input id="lightIntensity" type="range" min="0" max="1" step="0.01" value="0.9" />
+
+        <div class="row">
+          <div>
+            <label for="lightX">Light X position</label>
+            <input id="lightX" type="range" min="0" max="1" step="0.01" value="0.36" />
+          </div>
+          <div>
+            <label for="lightY">Light Y position</label>
+            <input id="lightY" type="range" min="0" max="1" step="0.01" value="0.25" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label for="lightColor">Light color</label>
+            <input id="lightColor" type="color" value="#ff0000" />
+          </div>
+          <div>
+            <label for="lightGroup">Light group</label>
+            <select id="lightGroup">
+              <option value="A">A</option>
+              <option value="B">B</option>
+            </select>
+          </div>
+        </div>
+        <label for="lightPatternMode">Light pattern mode</label>
+        <select id="lightPatternMode">
+          <option value="group">Use group pattern</option>
+          <option value="alternate">Alternate</option>
+          <option value="simultaneous">Simultaneous</option>
+          <option value="sweep">Sweep</option>
+          <option value="pulse">Pulse</option>
+        </select>
 
         <div class="actions">
           <button id="downloadPngBtn" type="button">Download PNG</button>
@@ -144,7 +191,7 @@
               <label>Actual icon preview</label>
               <canvas id="miniPreview" class="mini" width="128" height="128"></canvas>
             </div>
-            <p class="hint">Tip: move zoom/offset to center your vehicle. Flash overlays are added around the roof area automatically. GIF export renders 12 frames with transparent background.</p>
+            <p class="hint">Tip: segmentation now keeps the full image by default so you can verify what's removed. Turn on auto-crop after checking. Click the large preview to place the selected light.</p>
           </div>
         </div>
       </section>
