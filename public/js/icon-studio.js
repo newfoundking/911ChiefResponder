@@ -106,25 +106,6 @@ function shouldKeepClass(className, mode) {
   return VEHICLE_CLASSES.has(String(className || '').toLowerCase());
 }
 
-function buildSegmentedImageData(map, legend, sourceData, width, height, mode) {
-  const out = new ImageData(width, height);
-  let kept = 0;
-
-  for (let i = 0; i < map.length; i += 1) {
-    const classId = map[i];
-    const className = legend[classId] || '';
-    const keep = shouldKeepClass(className, mode);
-    const p = i * 4;
-    out.data[p] = sourceData.data[p];
-    out.data[p + 1] = sourceData.data[p + 1];
-    out.data[p + 2] = sourceData.data[p + 2];
-    out.data[p + 3] = keep ? sourceData.data[p + 3] : 0;
-    if (keep) kept += 1;
-  }
-
-  return { out, kept };
-}
-
 function cropToOpaqueBounds(canvas, paddingRatio = 0) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -189,37 +170,40 @@ async function segmentVehicle() {
   const map = segmentation.segmentationMap;
   const legend = segmentation.legend || {};
   const sourceData = inputCtx.getImageData(0, 0, inputCanvas.width, inputCanvas.height);
-  const pixelCount = inputCanvas.width * inputCanvas.height;
+  const out = inputCtx.createImageData(inputCanvas.width, inputCanvas.height);
 
   const mode = maskModeSelect.value;
   const threshold = Number(maskThresholdInput.value) || 0;
 
-  let { out, kept } = buildSegmentedImageData(map, legend, sourceData, inputCanvas.width, inputCanvas.height, mode);
-  let usedMode = mode;
+  let kept = 0;
 
-  const keptRatio = kept / Math.max(1, pixelCount);
-  const needsFallback = kept === 0 || keptRatio < 0.02;
-  if (needsFallback && mode === 'vehicle') {
-    const fallback = buildSegmentedImageData(map, legend, sourceData, inputCanvas.width, inputCanvas.height, 'foreground');
-    out = fallback.out;
-    kept = fallback.kept;
-    usedMode = 'foreground';
+  for (let i = 0; i < map.length; i += 1) {
+    const classId = map[i];
+    const className = legend[classId] || '';
+    const keep = shouldKeepClass(className, mode);
+    const p = i * 4;
+    out.data[p] = sourceData.data[p];
+    out.data[p + 1] = sourceData.data[p + 1];
+    out.data[p + 2] = sourceData.data[p + 2];
+    out.data[p + 3] = keep ? sourceData.data[p + 3] : 0;
+    if (keep) kept += 1;
+  }
+
+  if (kept === 0 && mode === 'vehicle') {
+    for (let i = 0; i < map.length; i += 1) {
+      const classId = map[i];
+      const className = legend[classId] || '';
+      const keep = className !== 'background';
+      const p = i * 4;
+      out.data[p + 3] = keep ? sourceData.data[p + 3] : 0;
+      if (keep) kept += 1;
+    }
   }
 
   if (threshold > 0) {
     for (let i = 3; i < out.data.length; i += 4) {
       if (out.data[i] < threshold) out.data[i] = 0;
     }
-  }
-
-  let thresholdKept = 0;
-  for (let i = 3; i < out.data.length; i += 4) {
-    if (out.data[i] > 0) thresholdKept += 1;
-  }
-  if (thresholdKept / Math.max(1, pixelCount) < 0.01) {
-    out = new ImageData(new Uint8ClampedArray(sourceData.data), sourceData.width, sourceData.height);
-    thresholdKept = pixelCount;
-    usedMode = 'original';
   }
 
   segmentedCanvas = document.createElement('canvas');
@@ -234,13 +218,7 @@ async function segmentVehicle() {
     return;
   }
 
-  if (usedMode === 'original') {
-    setStatus('Segmentation looked too aggressive, so full original image is shown. Try cityscapes + foreground, then lower edge cutoff.', true);
-  } else if (usedMode === 'foreground' && mode === 'vehicle') {
-    setStatus('Vehicle-only mask was too small; switched to foreground mask. Full frame is shown before cropping.');
-  } else {
-    setStatus('Background removed. Full segmented image is shown first; enable auto-crop when ready.');
-  }
+  setStatus('Background removed. Full segmented image is shown first; enable auto-crop when ready.');
   renderPreview(performance.now());
 }
 
