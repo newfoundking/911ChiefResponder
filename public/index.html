@@ -691,6 +691,7 @@
 <button id="utilityToggle" class="utility-toggle" aria-expanded="false" aria-controls="utilityPanel" title="Toggle utilities">⚙️</button>
 <div id="utilityPanel" class="utility-panel" aria-hidden="true">
         <button id="generateMission" class="button button-primary">Generate Mission</button>
+        <button id="openIconStudio" class="button">Open Icon Studio</button>
         <button id="clearMissions" class="button button-danger">DEBUG CLEAR ALL CALLS</button>
 </div>
 
@@ -1310,6 +1311,10 @@ utilityToggle?.addEventListener('click', () => {
   const isOpen = utilityPanel.classList.toggle('is-open');
   utilityToggle.setAttribute('aria-expanded', String(isOpen));
   utilityPanel.setAttribute('aria-hidden', String(!isOpen));
+});
+
+document.getElementById('openIconStudio')?.addEventListener('click', () => {
+  window.open('/icon-studio.html', '_blank', 'noopener');
 });
 
 document.getElementById('unitFilter')?.addEventListener('input', renderUnitList);
