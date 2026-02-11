@@ -176,6 +176,7 @@ async function segmentVehicle() {
   const threshold = Number(maskThresholdInput.value) || 0;
 
   let kept = 0;
+
   for (let i = 0; i < map.length; i += 1) {
     const classId = map[i];
     const className = legend[classId] || '';
@@ -435,6 +436,7 @@ sourceImageInput.addEventListener('change', async (event) => {
     sourceBitmap = await loadBitmapFromFile(file);
     segmentedCanvas = null;
     cutoutCanvas = null;
+    autoCropInput.checked = false;
     setStatus('Image loaded. Click "Remove Background".');
     renderPreview(performance.now());
   } catch (err) {

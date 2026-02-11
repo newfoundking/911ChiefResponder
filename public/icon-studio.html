@@ -52,14 +52,14 @@
         <label for="modelQuality">Segmentation quality</label>
         <select id="modelQuality">
           <option value="pascal">Fast (pascal)</option>
-          <option value="cityscapes">Vehicle-focused (cityscapes)</option>
+          <option value="cityscapes" selected>Vehicle-focused (cityscapes)</option>
           <option value="ade20k">Detailed (ade20k)</option>
         </select>
 
         <label for="maskMode">Mask mode</label>
         <select id="maskMode">
           <option value="vehicle">Vehicle classes only</option>
-          <option value="foreground">Any non-background object</option>
+          <option value="foreground" selected>Any non-background object</option>
         </select>
 
         <label for="maskThreshold">Edge alpha cutoff</label>
@@ -191,7 +191,7 @@
               <label>Actual icon preview</label>
               <canvas id="miniPreview" class="mini" width="128" height="128"></canvas>
             </div>
-            <p class="hint">Tip: segmentation now keeps the full image by default so you can verify what's removed. Turn on auto-crop after checking. Click the large preview to place the selected light.</p>
+            <p class="hint">Tip: segmentation keeps the full frame first. If detection is too aggressive, switch mask mode to "Any non-background object" and lower edge cutoff. Turn on auto-crop only after you confirm the result.</p>
           </div>
         </div>
       </section>
