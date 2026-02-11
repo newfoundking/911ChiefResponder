@@ -30,7 +30,10 @@ const equipmentKey = (name) => {
 function gatherEquipmentForUnit(unit) {
   const counts = new Map();
   if (!unit) return counts;
-  const eqArr = Array.isArray(unit.equipment) ? unit.equipment : [];
+  const eqArr = [
+    ...(Array.isArray(unit.equipment) ? unit.equipment : []),
+    ...(Array.isArray(unit.upgrades) ? unit.upgrades : []),
+  ];
   for (const eq of eqArr) {
     const label = typeof eq === 'string' ? eq : eq?.name;
     const key = equipmentKey(label);
@@ -801,9 +804,8 @@ async function showUnitDetail(unitId) {
     } catch {}
     const personnel = await fetchNoCache(`/api/personnel?station_id=${unit.station_id}`).then(r=>r.json());
     const assigned = personnel.filter(p=>p.unit_id===unitId);
-    const eqNames = Array.isArray(unit.equipment)
-      ? unit.equipment.map(e => typeof e === 'string' ? e : e?.name).filter(Boolean)
-      : [];
+    const eqNames = ([...(Array.isArray(unit.equipment) ? unit.equipment : []), ...(Array.isArray(unit.upgrades) ? unit.upgrades : [])])
+      .map(e => typeof e === 'string' ? e : e?.name).filter(Boolean);
     const equipmentHtml = eqNames.length
       ? `<ul>${eqNames.map(n => `<li>${n} <button class="remove-equip-btn" data-name="${n}">Remove</button></li>`).join('')}</ul>`
       : '<em>No equipment</em>';

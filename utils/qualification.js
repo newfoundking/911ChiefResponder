@@ -15,7 +15,10 @@ function trainingKey(name) {
 function gatherUnitEquipment(unit, getDefaultUnitEquipment) {
   const counts = new Map();
   if (!unit) return counts;
-  const eqArr = Array.isArray(unit.equipment) ? unit.equipment : parseArrayField(unit.equipment);
+  const eqArr = [
+    ...(Array.isArray(unit.equipment) ? unit.equipment : parseArrayField(unit.equipment)),
+    ...(Array.isArray(unit.upgrades) ? unit.upgrades : parseArrayField(unit.upgrades)),
+  ];
   for (const eq of eqArr) {
     const label = typeof eq === 'string' ? eq : eq?.name;
     const key = equipmentKey(label);
