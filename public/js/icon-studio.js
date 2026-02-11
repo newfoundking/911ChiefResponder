@@ -23,11 +23,17 @@ const groupPatternBInput = document.getElementById('groupPatternB');
 const fpsInput = document.getElementById('fps');
 const lightIntensityInput = document.getElementById('lightIntensity');
 const selectedLightInput = document.getElementById('selectedLight');
+const addLightBtn = document.getElementById('addLightBtn');
+const removeLightBtn = document.getElementById('removeLightBtn');
 const lightXInput = document.getElementById('lightX');
 const lightYInput = document.getElementById('lightY');
+const lightOffsetXInput = document.getElementById('lightOffsetX');
+const lightOffsetYInput = document.getElementById('lightOffsetY');
 const lightColorInput = document.getElementById('lightColor');
 const lightGroupInput = document.getElementById('lightGroup');
 const lightPatternModeInput = document.getElementById('lightPatternMode');
+const lightSpeedInput = document.getElementById('lightSpeed');
+const lightTimingInput = document.getElementById('lightTiming');
 const downloadPngBtn = document.getElementById('downloadPngBtn');
 const downloadGifBtn = document.getElementById('downloadGifBtn');
 const statusEl = document.getElementById('status');
@@ -53,11 +59,28 @@ let isEditingMask = false;
 let editorDrawTransform = null;
 
 const lights = [
-  { x: 0.36, y: 0.25, color: '#ff0000', group: 'A', mode: 'group' },
-  { x: 0.64, y: 0.25, color: '#2f6bff', group: 'B', mode: 'group' },
-  { x: 0.5, y: 0.25, color: '#ffffff', group: 'A', mode: 'pulse' },
-  { x: 0.5, y: 0.35, color: '#ffbf00', group: 'B', mode: 'group' },
+  { x: 0.36, y: 0.25, offsetX: 0, offsetY: 0, color: '#ff0000', group: 'A', mode: 'group', speed: 1, timing: 0 },
+  { x: 0.64, y: 0.25, offsetX: 0, offsetY: 0, color: '#2f6bff', group: 'B', mode: 'group', speed: 1, timing: 0 },
+  { x: 0.5, y: 0.25, offsetX: 0, offsetY: 0, color: '#ffffff', group: 'A', mode: 'pulse', speed: 1.2, timing: 0.25 },
+  { x: 0.5, y: 0.35, offsetX: 0, offsetY: 0, color: '#ffbf00', group: 'B', mode: 'group', speed: 1, timing: 0.5 },
 ];
+
+function getSelectedLightIndex() {
+  if (!lights.length) return -1;
+  return Math.max(0, Math.min(lights.length - 1, Number(selectedLightInput.value) || 0));
+}
+
+function refreshLightSelector() {
+  const selectedIndex = getSelectedLightIndex();
+  selectedLightInput.innerHTML = '';
+  lights.forEach((light, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = `#${index + 1} (${light.group})`;
+    selectedLightInput.append(option);
+  });
+  selectedLightInput.value = String(selectedIndex >= 0 ? selectedIndex : 0);
+}
 
 function setStatus(msg, isError = false) {
   statusEl.textContent = msg;
@@ -318,8 +341,8 @@ async function segmentVehicle() {
   renderPreview(performance.now());
 }
 
-function frameLightPhase(frameIndex, totalFrames, pattern) {
-  const t = (frameIndex % totalFrames) / totalFrames;
+function frameLightPhase(frameIndex, totalFrames, pattern, speed = 1, timing = 0) {
+  const t = ((((frameIndex % totalFrames) / totalFrames) * Math.max(0.05, speed)) + timing) % 1;
   if (pattern === 'pulse') {
     const pulse = Math.max(0, Math.sin(t * Math.PI * 2));
     return { left: pulse, right: pulse };
@@ -349,23 +372,34 @@ function drawBeacon(ctx, x, y, color, intensity, radius) {
 }
 
 function syncLightEditorFromSelection() {
-  const idx = Math.max(0, Math.min(lights.length - 1, Number(selectedLightInput.value) || 0));
+  const idx = getSelectedLightIndex();
+  if (idx < 0) return;
   const light = lights[idx];
   lightXInput.value = String(light.x);
   lightYInput.value = String(light.y);
+  lightOffsetXInput.value = String(light.offsetX || 0);
+  lightOffsetYInput.value = String(light.offsetY || 0);
   lightColorInput.value = light.color;
   lightGroupInput.value = light.group;
   lightPatternModeInput.value = light.mode;
+  lightSpeedInput.value = String(light.speed || 1);
+  lightTimingInput.value = String(light.timing || 0);
 }
 
 function updateSelectedLight() {
-  const idx = Math.max(0, Math.min(lights.length - 1, Number(selectedLightInput.value) || 0));
+  const idx = getSelectedLightIndex();
+  if (idx < 0) return;
   const light = lights[idx];
   light.x = clamp01(lightXInput.value);
   light.y = clamp01(lightYInput.value);
+  light.offsetX = Math.max(-0.5, Math.min(0.5, Number(lightOffsetXInput.value) || 0));
+  light.offsetY = Math.max(-0.5, Math.min(0.5, Number(lightOffsetYInput.value) || 0));
   light.color = lightColorInput.value;
   light.group = lightGroupInput.value === 'B' ? 'B' : 'A';
   light.mode = lightPatternModeInput.value;
+  light.speed = Math.max(0.25, Math.min(4, Number(lightSpeedInput.value) || 1));
+  light.timing = clamp01(lightTimingInput.value);
+  refreshLightSelector();
 }
 
 function renderToCanvas(targetCanvas, frameIndex = 0, totalFrames = 12) {
@@ -393,24 +427,33 @@ function renderToCanvas(targetCanvas, frameIndex = 0, totalFrames = 12) {
   if (lightsEnabledInput.checked) {
     const intensity = clamp01(lightIntensityInput.value);
     const radius = Math.max(2, size * 0.2);
-    const groupPhaseA = frameLightPhase(frameIndex, totalFrames, groupPatternAInput.value);
-    const groupPhaseB = frameLightPhase(frameIndex, totalFrames, groupPatternBInput.value);
 
     lights.forEach((light) => {
       const pair = light.mode === 'group'
-        ? (light.group === 'B' ? groupPhaseB : groupPhaseA)
-        : frameLightPhase(frameIndex, totalFrames, light.mode);
+        ? frameLightPhase(
+          frameIndex,
+          totalFrames,
+          light.group === 'B' ? groupPatternBInput.value : groupPatternAInput.value,
+          light.speed,
+          light.timing,
+        )
+        : frameLightPhase(frameIndex, totalFrames, light.mode, light.speed, light.timing);
       const brightness = light.group === 'B' ? pair.right : pair.left;
       if (brightness <= 0.01) return;
-      drawBeacon(ctx, size * clamp01(light.x), size * clamp01(light.y), light.color, intensity * brightness, radius);
+      const drawX = size * clamp01(light.x + (light.offsetX || 0));
+      const drawY = size * clamp01(light.y + (light.offsetY || 0));
+      drawBeacon(ctx, drawX, drawY, light.color, intensity * brightness, radius);
     });
 
-    const activeIndex = Math.max(0, Math.min(lights.length - 1, Number(selectedLightInput.value) || 0));
+    const activeIndex = getSelectedLightIndex();
+    if (activeIndex < 0) return;
     const selected = lights[activeIndex];
+    const selectedX = size * clamp01(selected.x + (selected.offsetX || 0));
+    const selectedY = size * clamp01(selected.y + (selected.offsetY || 0));
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(size * clamp01(selected.x), size * clamp01(selected.y), Math.max(2, size * 0.07), 0, Math.PI * 2);
+    ctx.arc(selectedX, selectedY, Math.max(2, size * 0.07), 0, Math.PI * 2);
     ctx.stroke();
   }
 }
@@ -556,7 +599,7 @@ segmentBtn.addEventListener('click', () => {
   el.addEventListener('change', () => renderPreview(performance.now()));
 });
 
-[lightXInput, lightYInput, lightColorInput, lightGroupInput, lightPatternModeInput].forEach((el) => {
+[lightXInput, lightYInput, lightOffsetXInput, lightOffsetYInput, lightColorInput, lightGroupInput, lightPatternModeInput, lightSpeedInput, lightTimingInput].forEach((el) => {
   el.addEventListener('input', () => {
     updateSelectedLight();
     renderPreview(performance.now());
@@ -565,6 +608,39 @@ segmentBtn.addEventListener('click', () => {
     updateSelectedLight();
     renderPreview(performance.now());
   });
+});
+
+addLightBtn.addEventListener('click', () => {
+  const template = lights[getSelectedLightIndex()] || lights[lights.length - 1] || { x: 0.5, y: 0.25, offsetX: 0, offsetY: 0, color: '#ff0000', group: 'A', mode: 'group', speed: 1, timing: 0 };
+  lights.push({
+    x: clamp01(template.x + 0.03),
+    y: clamp01(template.y + 0.03),
+    offsetX: template.offsetX || 0,
+    offsetY: template.offsetY || 0,
+    color: template.color,
+    group: template.group === 'B' ? 'B' : 'A',
+    mode: template.mode || 'group',
+    speed: template.speed || 1,
+    timing: template.timing || 0,
+  });
+  refreshLightSelector();
+  selectedLightInput.value = String(lights.length - 1);
+  syncLightEditorFromSelection();
+  renderPreview(performance.now());
+  setStatus(`Added light #${lights.length}. Click preview to place it.`);
+});
+
+removeLightBtn.addEventListener('click', () => {
+  if (lights.length <= 1) {
+    setStatus('At least one light is required.', true);
+    return;
+  }
+  const idx = getSelectedLightIndex();
+  lights.splice(idx, 1);
+  refreshLightSelector();
+  syncLightEditorFromSelection();
+  renderPreview(performance.now());
+  setStatus('Removed selected light.');
 });
 
 selectedLightInput.addEventListener('change', () => {
@@ -618,6 +694,7 @@ previewCanvas.addEventListener('click', (event) => {
   lightXInput.value = String(clamp01((px - dx) / drawSize));
   lightYInput.value = String(clamp01((py - dy) / drawSize));
   updateSelectedLight();
+  syncLightEditorFromSelection();
   renderPreview(performance.now());
 });
 
@@ -629,6 +706,7 @@ window.addEventListener('beforeunload', () => {
   if (animationHandle) cancelAnimationFrame(animationHandle);
 });
 
+refreshLightSelector();
 syncLightEditorFromSelection();
 setStatus('Upload an image to begin.');
 renderEditor();
