@@ -231,14 +231,17 @@
                         box-shadow: 0 8px 20px rgba(56, 189, 248, 0.25);
                 }
                 .mission-speed {
-                        padding: 0.5em 1em;
+                        min-width: 2.1em;
+                        padding: 0.3em 0.65em;
                         border: 1px solid transparent;
                         background: rgba(30, 41, 59, 0.7);
                         cursor: pointer;
-                        margin-right: 0.5em;
+                        margin-right: 0;
                         border-radius: 999px;
                         color: var(--text-muted);
                         font-weight: 600;
+                        font-size: 0.85rem;
+                        line-height: 1.15;
                 }
                 .mission-speed.active {
                         background: linear-gradient(120deg, rgba(14, 165, 233, 0.9), rgba(99, 102, 241, 0.9));
@@ -251,7 +254,7 @@
                 .tab-controls.active { display: block; }
                 .speed-controls {
                         display: flex;
-                        gap: 0.5em;
+                        gap: 0.35em;
                         flex-wrap: nowrap;
                         overflow-x: auto;
                         white-space: nowrap;
@@ -606,10 +609,10 @@
                         </div>
                 </div>
                 <div id="missionSpeedControls" class="speed-controls" style="margin-bottom:1em;">
-                        <button class="mission-speed active" data-speed="pause">Pause</button>
-                        <button class="mission-speed" data-speed="slow">Slow</button>
-                        <button class="mission-speed" data-speed="medium">Medium</button>
-                        <button class="mission-speed" data-speed="fast">Fast</button>
+                        <button class="mission-speed active" data-speed="pause" aria-label="Pause mission generation" title="Pause mission generation">||</button>
+                        <button class="mission-speed" data-speed="slow" aria-label="Mission generation speed 1" title="Mission generation speed 1">1</button>
+                        <button class="mission-speed" data-speed="medium" aria-label="Mission generation speed 2" title="Mission generation speed 2">2</button>
+                        <button class="mission-speed" data-speed="fast" aria-label="Mission generation speed 3" title="Mission generation speed 3">3</button>
                 </div>
                 <div class="sidebar-actions">
                         <button id="startPatrols" class="button button-success">Start Patrols</button>
