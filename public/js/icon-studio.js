@@ -174,34 +174,40 @@ async function segmentVehicle() {
 
   const mode = maskModeSelect.value;
   const threshold = Number(maskThresholdInput.value) || 0;
+  const sourceWidth = inputCanvas.width;
+  const sourceHeight = inputCanvas.height;
+  const mapWidth = Number(segmentation.width) || sourceWidth;
+  const mapHeight = Number(segmentation.height) || sourceHeight;
 
   let kept = 0;
 
-  for (let i = 0; i < map.length; i += 1) {
-    const classId = map[i];
-    const className = legend[classId] || '';
-    const keep = shouldKeepClass(className, mode);
-    const p = i * 4;
-    out.data[p] = sourceData.data[p];
-    out.data[p + 1] = sourceData.data[p + 1];
-    out.data[p + 2] = sourceData.data[p + 2];
-    out.data[p + 3] = keep ? sourceData.data[p + 3] : 0;
-    if (keep) kept += 1;
-  }
-
-  for (let y = 0; y < sourceHeight; y += 1) {
-    const mapY = Math.min(mapHeight - 1, Math.max(0, Math.floor((y / sourceHeight) * mapHeight)));
-    for (let x = 0; x < sourceWidth; x += 1) {
-      const mapX = Math.min(mapWidth - 1, Math.max(0, Math.floor((x / sourceWidth) * mapWidth)));
-      const classId = labelMap[mapY * mapWidth + mapX];
-      const className = labels[classId] || '';
+  if (map.length === sourceWidth * sourceHeight) {
+    for (let i = 0; i < map.length; i += 1) {
+      const classId = map[i];
+      const className = legend[classId] || '';
       const keep = shouldKeepClass(className, mode);
-      const p = (y * sourceWidth + x) * 4;
+      const p = i * 4;
       out.data[p] = sourceData.data[p];
       out.data[p + 1] = sourceData.data[p + 1];
       out.data[p + 2] = sourceData.data[p + 2];
       out.data[p + 3] = keep ? sourceData.data[p + 3] : 0;
       if (keep) kept += 1;
+    }
+  } else {
+    for (let y = 0; y < sourceHeight; y += 1) {
+      const mapY = Math.min(mapHeight - 1, Math.max(0, Math.floor((y / sourceHeight) * mapHeight)));
+      for (let x = 0; x < sourceWidth; x += 1) {
+        const mapX = Math.min(mapWidth - 1, Math.max(0, Math.floor((x / sourceWidth) * mapWidth)));
+        const classId = map[mapY * mapWidth + mapX];
+        const className = legend[classId] || '';
+        const keep = shouldKeepClass(className, mode);
+        const p = (y * sourceWidth + x) * 4;
+        out.data[p] = sourceData.data[p];
+        out.data[p + 1] = sourceData.data[p + 1];
+        out.data[p + 2] = sourceData.data[p + 2];
+        out.data[p + 3] = keep ? sourceData.data[p + 3] : 0;
+        if (keep) kept += 1;
+      }
     }
   }
 
