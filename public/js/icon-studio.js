@@ -27,13 +27,11 @@ const addLightBtn = document.getElementById('addLightBtn');
 const removeLightBtn = document.getElementById('removeLightBtn');
 const lightXInput = document.getElementById('lightX');
 const lightYInput = document.getElementById('lightY');
-const lightOffsetXInput = document.getElementById('lightOffsetX');
-const lightOffsetYInput = document.getElementById('lightOffsetY');
 const lightColorInput = document.getElementById('lightColor');
 const lightGroupInput = document.getElementById('lightGroup');
 const lightPatternModeInput = document.getElementById('lightPatternMode');
 const lightSpeedInput = document.getElementById('lightSpeed');
-const lightTimingInput = document.getElementById('lightTiming');
+const lightFlashOffsetMsInput = document.getElementById('lightFlashOffsetMs');
 const downloadPngBtn = document.getElementById('downloadPngBtn');
 const downloadGifBtn = document.getElementById('downloadGifBtn');
 const statusEl = document.getElementById('status');
@@ -44,6 +42,11 @@ const editorCanvas = document.getElementById('editorCanvas');
 const editorCtx = editorCanvas.getContext('2d');
 const miniPreview = document.getElementById('miniPreview');
 const miniCtx = miniPreview.getContext('2d');
+const focusPreviewBtn = document.getElementById('focusPreviewBtn');
+const focusMaskBtn = document.getElementById('focusMaskBtn');
+const previewCanvasWrap = document.getElementById('previewCanvasWrap');
+const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+const tabContents = Array.from(document.querySelectorAll('.tab-content'));
 
 let sourceBitmap = null;
 let segmentedCanvas = null;
@@ -59,10 +62,10 @@ let isEditingMask = false;
 let editorDrawTransform = null;
 
 const lights = [
-  { x: 0.36, y: 0.25, offsetX: 0, offsetY: 0, color: '#ff0000', group: 'A', mode: 'group', speed: 1, timing: 0 },
-  { x: 0.64, y: 0.25, offsetX: 0, offsetY: 0, color: '#2f6bff', group: 'B', mode: 'group', speed: 1, timing: 0 },
-  { x: 0.5, y: 0.25, offsetX: 0, offsetY: 0, color: '#ffffff', group: 'A', mode: 'pulse', speed: 1.2, timing: 0.25 },
-  { x: 0.5, y: 0.35, offsetX: 0, offsetY: 0, color: '#ffbf00', group: 'B', mode: 'group', speed: 1, timing: 0.5 },
+  { x: 0.36, y: 0.25, color: '#ff0000', group: 'A', mode: 'group', speed: 1, flashOffsetMs: 0 },
+  { x: 0.64, y: 0.25, color: '#2f6bff', group: 'B', mode: 'group', speed: 1, flashOffsetMs: 0 },
+  { x: 0.5, y: 0.25, color: '#ffffff', group: 'A', mode: 'pulse', speed: 1.2, flashOffsetMs: 250 },
+  { x: 0.5, y: 0.35, color: '#ffbf00', group: 'B', mode: 'group', speed: 1, flashOffsetMs: 500 },
 ];
 
 function getSelectedLightIndex() {
@@ -341,8 +344,9 @@ async function segmentVehicle() {
   renderPreview(performance.now());
 }
 
-function frameLightPhase(frameIndex, totalFrames, pattern, speed = 1, timing = 0) {
-  const t = ((((frameIndex % totalFrames) / totalFrames) * Math.max(0.05, speed)) + timing) % 1;
+function frameLightPhase(frameIndex, pattern, speed = 1, flashOffsetMs = 0, fps = 8) {
+  const elapsedSeconds = (frameIndex / Math.max(1, fps)) + (flashOffsetMs / 1000);
+  const t = ((elapsedSeconds * Math.max(0.05, speed)) % 1 + 1) % 1;
   if (pattern === 'pulse') {
     const pulse = Math.max(0, Math.sin(t * Math.PI * 2));
     return { left: pulse, right: pulse };
@@ -377,13 +381,11 @@ function syncLightEditorFromSelection() {
   const light = lights[idx];
   lightXInput.value = String(light.x);
   lightYInput.value = String(light.y);
-  lightOffsetXInput.value = String(light.offsetX || 0);
-  lightOffsetYInput.value = String(light.offsetY || 0);
   lightColorInput.value = light.color;
   lightGroupInput.value = light.group;
   lightPatternModeInput.value = light.mode;
   lightSpeedInput.value = String(light.speed || 1);
-  lightTimingInput.value = String(light.timing || 0);
+  lightFlashOffsetMsInput.value = String(light.flashOffsetMs || 0);
 }
 
 function updateSelectedLight() {
@@ -392,17 +394,15 @@ function updateSelectedLight() {
   const light = lights[idx];
   light.x = clamp01(lightXInput.value);
   light.y = clamp01(lightYInput.value);
-  light.offsetX = Math.max(-0.5, Math.min(0.5, Number(lightOffsetXInput.value) || 0));
-  light.offsetY = Math.max(-0.5, Math.min(0.5, Number(lightOffsetYInput.value) || 0));
   light.color = lightColorInput.value;
   light.group = lightGroupInput.value === 'B' ? 'B' : 'A';
   light.mode = lightPatternModeInput.value;
   light.speed = Math.max(0.25, Math.min(4, Number(lightSpeedInput.value) || 1));
-  light.timing = clamp01(lightTimingInput.value);
+  light.flashOffsetMs = Math.max(0, Math.min(2000, Number(lightFlashOffsetMsInput.value) || 0));
   refreshLightSelector();
 }
 
-function renderToCanvas(targetCanvas, frameIndex = 0, totalFrames = 12) {
+function renderToCanvas(targetCanvas, frameIndex = 0, totalFrames = 12, fps = 8) {
   const ctx = targetCanvas.getContext('2d');
   const size = Number(iconSizeSelect.value) || 36;
   targetCanvas.width = size;
@@ -432,24 +432,24 @@ function renderToCanvas(targetCanvas, frameIndex = 0, totalFrames = 12) {
       const pair = light.mode === 'group'
         ? frameLightPhase(
           frameIndex,
-          totalFrames,
           light.group === 'B' ? groupPatternBInput.value : groupPatternAInput.value,
           light.speed,
-          light.timing,
+          light.flashOffsetMs || 0,
+          fps,
         )
-        : frameLightPhase(frameIndex, totalFrames, light.mode, light.speed, light.timing);
+        : frameLightPhase(frameIndex, light.mode, light.speed, light.flashOffsetMs || 0, fps);
       const brightness = light.group === 'B' ? pair.right : pair.left;
       if (brightness <= 0.01) return;
-      const drawX = size * clamp01(light.x + (light.offsetX || 0));
-      const drawY = size * clamp01(light.y + (light.offsetY || 0));
+      const drawX = size * clamp01(light.x);
+      const drawY = size * clamp01(light.y);
       drawBeacon(ctx, drawX, drawY, light.color, intensity * brightness, radius);
     });
 
     const activeIndex = getSelectedLightIndex();
     if (activeIndex < 0) return;
     const selected = lights[activeIndex];
-    const selectedX = size * clamp01(selected.x + (selected.offsetX || 0));
-    const selectedY = size * clamp01(selected.y + (selected.offsetY || 0));
+    const selectedX = size * clamp01(selected.x);
+    const selectedY = size * clamp01(selected.y);
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
@@ -468,16 +468,21 @@ function renderPreview(ts) {
   drawChecker(previewCtx, previewCanvas.width, previewCanvas.height);
 
   const temp = document.createElement('canvas');
-  renderToCanvas(temp, frame, 12);
+  renderToCanvas(temp, frame, 12, fps);
 
-  const drawSize = Math.min(previewCanvas.width, previewCanvas.height) * 0.72;
+  const drawSize = Math.min(previewCanvas.width, previewCanvas.height);
   const dx = (previewCanvas.width - drawSize) / 2;
   const dy = (previewCanvas.height - drawSize) / 2;
   previewCtx.drawImage(temp, dx, dy, drawSize, drawSize);
 
-  miniCtx.clearRect(0, 0, miniPreview.width, miniPreview.height);
+  const iconSize = Number(iconSizeSelect.value) || 36;
+  miniPreview.width = iconSize;
+  miniPreview.height = iconSize;
+  miniPreview.style.width = `${iconSize}px`;
+  miniPreview.style.height = `${iconSize}px`;
+  miniCtx.clearRect(0, 0, iconSize, iconSize);
   miniCtx.imageSmoothingEnabled = false;
-  miniCtx.drawImage(temp, 0, 0, miniPreview.width, miniPreview.height);
+  miniCtx.drawImage(temp, 0, 0, iconSize, iconSize);
 }
 
 function loop(ts) {
@@ -502,7 +507,7 @@ async function exportPng() {
     return;
   }
   const canvas = document.createElement('canvas');
-  renderToCanvas(canvas, 0, 1);
+  renderToCanvas(canvas, 0, 1, Math.max(2, Number(fpsInput.value) || 8));
   canvas.toBlob((blob) => {
     if (!blob) {
       setStatus('Failed to create PNG.', true);
@@ -540,7 +545,7 @@ function exportGif() {
 
   for (let i = 0; i < 12; i += 1) {
     const frameCanvas = document.createElement('canvas');
-    renderToCanvas(frameCanvas, i, 12);
+    renderToCanvas(frameCanvas, i, 12, fps);
 
     const ctx = frameCanvas.getContext('2d');
     const keyColor = '#00ff00';
@@ -599,7 +604,7 @@ segmentBtn.addEventListener('click', () => {
   el.addEventListener('change', () => renderPreview(performance.now()));
 });
 
-[lightXInput, lightYInput, lightOffsetXInput, lightOffsetYInput, lightColorInput, lightGroupInput, lightPatternModeInput, lightSpeedInput, lightTimingInput].forEach((el) => {
+[lightXInput, lightYInput, lightColorInput, lightGroupInput, lightPatternModeInput, lightSpeedInput, lightFlashOffsetMsInput].forEach((el) => {
   el.addEventListener('input', () => {
     updateSelectedLight();
     renderPreview(performance.now());
@@ -611,17 +616,15 @@ segmentBtn.addEventListener('click', () => {
 });
 
 addLightBtn.addEventListener('click', () => {
-  const template = lights[getSelectedLightIndex()] || lights[lights.length - 1] || { x: 0.5, y: 0.25, offsetX: 0, offsetY: 0, color: '#ff0000', group: 'A', mode: 'group', speed: 1, timing: 0 };
+  const template = lights[getSelectedLightIndex()] || lights[lights.length - 1] || { x: 0.5, y: 0.25, color: '#ff0000', group: 'A', mode: 'group', speed: 1, flashOffsetMs: 0 };
   lights.push({
     x: clamp01(template.x + 0.03),
     y: clamp01(template.y + 0.03),
-    offsetX: template.offsetX || 0,
-    offsetY: template.offsetY || 0,
     color: template.color,
     group: template.group === 'B' ? 'B' : 'A',
     mode: template.mode || 'group',
     speed: template.speed || 1,
-    timing: template.timing || 0,
+    flashOffsetMs: template.flashOffsetMs || 0,
   });
   refreshLightSelector();
   selectedLightInput.value = String(lights.length - 1);
@@ -686,7 +689,7 @@ previewCanvas.addEventListener('click', (event) => {
   const rect = previewCanvas.getBoundingClientRect();
   const px = ((event.clientX - rect.left) / rect.width) * previewCanvas.width;
   const py = ((event.clientY - rect.top) / rect.height) * previewCanvas.height;
-  const drawSize = Math.min(previewCanvas.width, previewCanvas.height) * 0.72;
+  const drawSize = Math.min(previewCanvas.width, previewCanvas.height);
   const dx = (previewCanvas.width - drawSize) / 2;
   const dy = (previewCanvas.height - drawSize) / 2;
   if (px < dx || py < dy || px > dx + drawSize || py > dy + drawSize) return;
@@ -701,6 +704,26 @@ previewCanvas.addEventListener('click', (event) => {
 downloadPngBtn.addEventListener('click', exportPng);
 downloadGifBtn.addEventListener('click', exportGif);
 
+
+function setFocusView(mode) {
+  const previewMode = mode !== 'mask';
+  previewCanvasWrap.style.display = previewMode ? 'grid' : 'none';
+  editorCanvas.style.display = previewMode ? 'none' : 'block';
+  focusPreviewBtn.classList.toggle('active', previewMode);
+  focusMaskBtn.classList.toggle('active', !previewMode);
+}
+
+focusPreviewBtn.addEventListener('click', () => setFocusView('preview'));
+focusMaskBtn.addEventListener('click', () => setFocusView('mask'));
+
+for (const button of tabButtons) {
+  button.addEventListener('click', () => {
+    const tab = button.dataset.tab;
+    for (const b of tabButtons) b.classList.toggle('active', b === button);
+    for (const panel of tabContents) panel.classList.toggle('active', panel.id === `tab-${tab}`);
+  });
+}
+
 animationHandle = requestAnimationFrame(loop);
 window.addEventListener('beforeunload', () => {
   if (animationHandle) cancelAnimationFrame(animationHandle);
@@ -708,5 +731,6 @@ window.addEventListener('beforeunload', () => {
 
 refreshLightSelector();
 syncLightEditorFromSelection();
+setFocusView('preview');
 setStatus('Upload an image to begin.');
 renderEditor();
