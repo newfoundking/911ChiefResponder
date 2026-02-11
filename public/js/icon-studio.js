@@ -7,6 +7,12 @@ const maskThresholdInput = document.getElementById('maskThreshold');
 const autoCropInput = document.getElementById('autoCrop');
 const cropPaddingInput = document.getElementById('cropPadding');
 const segmentBtn = document.getElementById('segmentBtn');
+const refineModeInput = document.getElementById('refineMode');
+const refineBrushSizeInput = document.getElementById('refineBrushSize');
+const smartRefineInput = document.getElementById('smartRefine');
+const smartToleranceInput = document.getElementById('smartTolerance');
+const resetRefineBtn = document.getElementById('resetRefineBtn');
+const invertRefineBtn = document.getElementById('invertRefineBtn');
 const iconSizeSelect = document.getElementById('iconSize');
 const zoomInput = document.getElementById('zoom');
 const offsetXInput = document.getElementById('offsetX');
@@ -28,6 +34,8 @@ const statusEl = document.getElementById('status');
 
 const previewCanvas = document.getElementById('previewCanvas');
 const previewCtx = previewCanvas.getContext('2d');
+const editorCanvas = document.getElementById('editorCanvas');
+const editorCtx = editorCanvas.getContext('2d');
 const miniPreview = document.getElementById('miniPreview');
 const miniCtx = miniPreview.getContext('2d');
 
@@ -38,6 +46,11 @@ let model = null;
 let modelNameLoaded = '';
 let animationHandle = 0;
 let animationStart = performance.now();
+let sourcePixels = null;
+let baseMask = null;
+let manualMask = null;
+let isEditingMask = false;
+let editorDrawTransform = null;
 
 const lights = [
   { x: 0.36, y: 0.25, color: '#ff0000', group: 'A', mode: 'group' },
@@ -151,6 +164,97 @@ function activeCutoutCanvas() {
   return cropToOpaqueBounds(segmentedCanvas, Number(cropPaddingInput.value) || 0);
 }
 
+function rebuildSegmentedCanvas() {
+  if (!sourcePixels || !baseMask || !sourceBitmap) return;
+  const width = sourceBitmap.width;
+  const height = sourceBitmap.height;
+  const out = new ImageData(width, height);
+  for (let i = 0; i < baseMask.length; i += 1) {
+    const p = i * 4;
+    let keep = baseMask[i] === 1;
+    if (manualMask) {
+      if (manualMask[i] === 1) keep = true;
+      if (manualMask[i] === -1) keep = false;
+    }
+    out.data[p] = sourcePixels[p];
+    out.data[p + 1] = sourcePixels[p + 1];
+    out.data[p + 2] = sourcePixels[p + 2];
+    out.data[p + 3] = keep ? sourcePixels[p + 3] : 0;
+  }
+
+  segmentedCanvas = document.createElement('canvas');
+  segmentedCanvas.width = width;
+  segmentedCanvas.height = height;
+  segmentedCanvas.getContext('2d').putImageData(out, 0, 0);
+  cutoutCanvas = activeCutoutCanvas();
+}
+
+function renderEditor() {
+  if (!editorCtx) return;
+  drawChecker(editorCtx, editorCanvas.width, editorCanvas.height);
+  editorDrawTransform = null;
+  if (!segmentedCanvas) return;
+
+  const fit = Math.min(editorCanvas.width / segmentedCanvas.width, editorCanvas.height / segmentedCanvas.height);
+  const drawW = segmentedCanvas.width * fit;
+  const drawH = segmentedCanvas.height * fit;
+  const dx = (editorCanvas.width - drawW) / 2;
+  const dy = (editorCanvas.height - drawH) / 2;
+  editorCtx.drawImage(segmentedCanvas, dx, dy, drawW, drawH);
+  editorDrawTransform = { dx, dy, drawW, drawH };
+}
+
+function pointerToImagePixel(event) {
+  if (!sourceBitmap || !editorDrawTransform) return null;
+  const rect = editorCanvas.getBoundingClientRect();
+  const px = ((event.clientX - rect.left) / rect.width) * editorCanvas.width;
+  const py = ((event.clientY - rect.top) / rect.height) * editorCanvas.height;
+  const { dx, dy, drawW, drawH } = editorDrawTransform;
+  if (px < dx || py < dy || px > dx + drawW || py > dy + drawH) return null;
+  const nx = (px - dx) / drawW;
+  const ny = (py - dy) / drawH;
+  const ix = Math.max(0, Math.min(sourceBitmap.width - 1, Math.floor(nx * sourceBitmap.width)));
+  const iy = Math.max(0, Math.min(sourceBitmap.height - 1, Math.floor(ny * sourceBitmap.height)));
+  return { x: ix, y: iy };
+}
+
+function paintMask(centerX, centerY) {
+  if (!sourceBitmap || !manualMask || !sourcePixels) return;
+  const width = sourceBitmap.width;
+  const height = sourceBitmap.height;
+  const brushRadius = Number(refineBrushSizeInput.value) || 16;
+  const radiusPx = Math.max(1, Math.round((brushRadius / 520) * Math.max(width, height)));
+  const mode = refineModeInput.value === 'remove' ? -1 : 1;
+  const smart = smartRefineInput.checked;
+  const tolerance = Number(smartToleranceInput.value) || 75;
+  const seedIdx = (centerY * width + centerX) * 4;
+  const sr = sourcePixels[seedIdx];
+  const sg = sourcePixels[seedIdx + 1];
+  const sb = sourcePixels[seedIdx + 2];
+
+  for (let y = Math.max(0, centerY - radiusPx); y <= Math.min(height - 1, centerY + radiusPx); y += 1) {
+    for (let x = Math.max(0, centerX - radiusPx); x <= Math.min(width - 1, centerX + radiusPx); x += 1) {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      if (dx * dx + dy * dy > radiusPx * radiusPx) continue;
+      const i = y * width + x;
+      if (smart) {
+        const p = i * 4;
+        const dr = sourcePixels[p] - sr;
+        const dg = sourcePixels[p + 1] - sg;
+        const db = sourcePixels[p + 2] - sb;
+        const distance = Math.sqrt(dr * dr + dg * dg + db * db);
+        if (distance > tolerance) continue;
+      }
+      manualMask[i] = mode;
+    }
+  }
+
+  rebuildSegmentedCanvas();
+  renderEditor();
+  renderPreview(performance.now());
+}
+
 async function segmentVehicle() {
   if (!sourceBitmap) {
     setStatus('Please upload an image first.', true);
@@ -170,28 +274,24 @@ async function segmentVehicle() {
   const map = segmentation.segmentationMap;
   const legend = segmentation.legend || {};
   const sourceData = inputCtx.getImageData(0, 0, inputCanvas.width, inputCanvas.height);
-  const out = inputCtx.createImageData(inputCanvas.width, inputCanvas.height);
 
   const mode = maskModeSelect.value;
-  const threshold = Number(maskThresholdInput.value) || 0;
+  const thresholdAlpha = Number(maskThresholdInput.value) || 0;
   const sourceWidth = inputCanvas.width;
   const sourceHeight = inputCanvas.height;
   const mapWidth = Number(segmentation.width) || sourceWidth;
   const mapHeight = Number(segmentation.height) || sourceHeight;
 
-  let kept = 0;
+  sourcePixels = sourceData.data;
+  baseMask = new Uint8Array(sourceWidth * sourceHeight);
+  manualMask = new Int8Array(sourceWidth * sourceHeight);
 
   if (map.length === sourceWidth * sourceHeight) {
     for (let i = 0; i < map.length; i += 1) {
       const classId = map[i];
       const className = legend[classId] || '';
-      const keep = shouldKeepClass(className, mode);
-      const p = i * 4;
-      out.data[p] = sourceData.data[p];
-      out.data[p + 1] = sourceData.data[p + 1];
-      out.data[p + 2] = sourceData.data[p + 2];
-      out.data[p + 3] = keep ? sourceData.data[p + 3] : 0;
-      if (keep) kept += 1;
+      const keep = shouldKeepClass(className, mode) && sourceData.data[i * 4 + 3] >= thresholdAlpha;
+      baseMask[i] = keep ? 1 : 0;
     }
   } else {
     for (let y = 0; y < sourceHeight; y += 1) {
@@ -200,36 +300,21 @@ async function segmentVehicle() {
         const mapX = Math.min(mapWidth - 1, Math.max(0, Math.floor((x / sourceWidth) * mapWidth)));
         const classId = map[mapY * mapWidth + mapX];
         const className = legend[classId] || '';
-        const keep = shouldKeepClass(className, mode);
         const p = (y * sourceWidth + x) * 4;
-        out.data[p] = sourceData.data[p];
-        out.data[p + 1] = sourceData.data[p + 1];
-        out.data[p + 2] = sourceData.data[p + 2];
-        out.data[p + 3] = keep ? sourceData.data[p + 3] : 0;
-        if (keep) kept += 1;
+        const keep = shouldKeepClass(className, mode) && sourceData.data[p + 3] >= thresholdAlpha;
+        baseMask[y * sourceWidth + x] = keep ? 1 : 0;
       }
     }
   }
 
-  if (threshold > 0) {
-    for (let i = 3; i < out.data.length; i += 4) {
-      if (out.data[i] < threshold) out.data[i] = 0;
-    }
-  }
-
-  segmentedCanvas = document.createElement('canvas');
-  segmentedCanvas.width = inputCanvas.width;
-  segmentedCanvas.height = inputCanvas.height;
-  const ctx = segmentedCanvas.getContext('2d');
-  ctx.putImageData(out, 0, 0);
-
-  cutoutCanvas = activeCutoutCanvas();
+  rebuildSegmentedCanvas();
   if (!cutoutCanvas) {
     setStatus('No visible object found after segmentation.', true);
     return;
   }
 
-  setStatus('Background removed. Full segmented image is shown first; enable auto-crop when ready.');
+  setStatus('Background removed. Use the manual mask editor to keep/remove areas with optional smart assist.');
+  renderEditor();
   renderPreview(performance.now());
 }
 
@@ -447,8 +532,12 @@ sourceImageInput.addEventListener('change', async (event) => {
     sourceBitmap = await loadBitmapFromFile(file);
     segmentedCanvas = null;
     cutoutCanvas = null;
+    sourcePixels = null;
+    baseMask = null;
+    manualMask = null;
     autoCropInput.checked = false;
     setStatus('Image loaded. Click "Remove Background".');
+    renderEditor();
     renderPreview(performance.now());
   } catch (err) {
     setStatus(`Failed to load image: ${err.message || err}`, true);
@@ -483,6 +572,40 @@ selectedLightInput.addEventListener('change', () => {
   renderPreview(performance.now());
 });
 
+resetRefineBtn.addEventListener('click', () => {
+  if (!manualMask) return;
+  manualMask.fill(0);
+  rebuildSegmentedCanvas();
+  renderEditor();
+  renderPreview(performance.now());
+  setStatus('Manual edits reset.');
+});
+
+invertRefineBtn.addEventListener('click', () => {
+  refineModeInput.value = refineModeInput.value === 'remove' ? 'keep' : 'remove';
+});
+
+function handleEditorPaint(event) {
+  const point = pointerToImagePixel(event);
+  if (!point) return;
+  paintMask(point.x, point.y);
+}
+
+editorCanvas.addEventListener('pointerdown', (event) => {
+  if (!segmentedCanvas) return;
+  isEditingMask = true;
+  handleEditorPaint(event);
+});
+
+editorCanvas.addEventListener('pointermove', (event) => {
+  if (!isEditingMask) return;
+  handleEditorPaint(event);
+});
+
+window.addEventListener('pointerup', () => {
+  isEditingMask = false;
+});
+
 previewCanvas.addEventListener('click', (event) => {
   const rect = previewCanvas.getBoundingClientRect();
   const px = ((event.clientX - rect.left) / rect.width) * previewCanvas.width;
@@ -508,3 +631,4 @@ window.addEventListener('beforeunload', () => {
 
 syncLightEditorFromSelection();
 setStatus('Upload an image to begin.');
+renderEditor();

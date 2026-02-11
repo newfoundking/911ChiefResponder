@@ -28,6 +28,8 @@
     .status.error { color: #b91c1c; }
     .status.ok { color: #047857; }
     .mini { width: 128px; height: 128px; border: 1px solid #d9dee5; border-radius: 8px; margin: 0 auto; }
+    .editor-canvas { width: 100%; max-width: 520px; aspect-ratio: 1 / 1; border: 1px solid #d9dee5; border-radius: 8px; cursor: crosshair; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; }
+    .fine-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .top-links { display: flex; gap: 8px; margin-bottom: 12px; }
     .top-links a { text-decoration: none; background: #0b6cff; color: #fff; padding: 8px 12px; border-radius: 8px; font-weight: 700; }
     .top-links a.secondary { background: #374151; }
@@ -70,6 +72,25 @@
         <input id="cropPadding" type="range" min="0" max="0.4" step="0.01" value="0.04" />
 
         <button id="segmentBtn" type="button">Remove Background</button>
+
+        <h2>1b) Assisted Manual Cleanup</h2>
+        <label for="refineMode">Brush mode</label>
+        <select id="refineMode">
+          <option value="keep">Keep area</option>
+          <option value="remove">Remove area</option>
+        </select>
+
+        <label for="refineBrushSize">Brush size</label>
+        <input id="refineBrushSize" type="range" min="2" max="80" step="1" value="16" />
+
+        <label><input id="smartRefine" type="checkbox" checked style="width:auto;"> Smart assist (match nearby similar colors)</label>
+        <label for="smartTolerance">Smart tolerance</label>
+        <input id="smartTolerance" type="range" min="10" max="200" step="1" value="75" />
+
+        <div class="fine-actions">
+          <button id="resetRefineBtn" type="button">Reset manual edits</button>
+          <button id="invertRefineBtn" type="button">Invert keep/remove mode</button>
+        </div>
 
         <h2>2) Icon Layout</h2>
         <div class="row">
@@ -188,10 +209,14 @@
           </div>
           <div class="stack">
             <div>
+              <label>Manual mask editor</label>
+              <canvas id="editorCanvas" class="editor-canvas" width="520" height="520"></canvas>
+            </div>
+            <div>
               <label>Actual icon preview</label>
               <canvas id="miniPreview" class="mini" width="128" height="128"></canvas>
             </div>
-            <p class="hint">Tip: segmentation keeps the full frame first. If detection is too aggressive, switch mask mode to "Any non-background object" and lower edge cutoff. Turn on auto-crop only after you confirm the result.</p>
+            <p class="hint">Tip: use the manual mask editor to paint keep/remove areas. Turn on Smart assist to spread each brush stroke to nearby pixels with similar color so cleanup is faster.</p>
           </div>
         </div>
       </section>
