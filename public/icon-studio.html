@@ -8,10 +8,39 @@
     :root { color-scheme: light; }
     body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f8; color: #111; }
     .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
-    h1 { margin-top: 0; }
-    .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
-    .panel { background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 12px; }
-    .panel h2 { margin: 0 0 8px; font-size: 18px; }
+    .top-links { display: flex; gap: 8px; margin-bottom: 12px; }
+    .top-links a { text-decoration: none; background: #0b6cff; color: #fff; padding: 8px 12px; border-radius: 8px; font-weight: 700; }
+    .top-links a.secondary { background: #374151; }
+    .header-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    h1 { margin: 0; }
+    .status { min-height: 22px; font-weight: 700; }
+    .status.error { color: #b91c1c; }
+    .status.ok { color: #047857; }
+    .hint { font-size: 12px; color: #4b5563; line-height: 1.35; }
+
+    .studio-center { display: grid; gap: 14px; justify-items: center; }
+    .view-toggle { display: inline-flex; background: #e5e7eb; border-radius: 10px; padding: 4px; gap: 4px; }
+    .view-btn { border: 0; background: transparent; padding: 8px 14px; border-radius: 8px; font-weight: 700; cursor: pointer; }
+    .view-btn.active { background: #111827; color: #fff; }
+
+    .focus-stage { width: min(92vw, 760px); min-height: 540px; display: grid; place-items: center; background: #fff; border: 1px solid #d9dee5; border-radius: 12px; padding: 12px; }
+    .canvas-box { width: 100%; height: 100%; display: grid; place-items: center; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; border: 1px solid #d9dee5; border-radius: 10px; }
+    canvas { image-rendering: auto; display: block; margin: 0 auto; }
+    #previewCanvas { width: min(100%, 720px); height: auto; }
+    #editorCanvas { width: min(100%, 720px); height: auto; border: 1px solid #d9dee5; border-radius: 8px; cursor: crosshair; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; }
+
+    .actual-preview { width: min(92vw, 760px); background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
+    .mini-window { min-height: 70px; border: 1px solid #d9dee5; border-radius: 8px; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; padding: 8px; display: grid; place-items: center; justify-content: start; overflow: auto; }
+    .mini { width: auto; height: auto; border: 1px solid #374151; border-radius: 4px; background: transparent; }
+
+    .options-panel { margin-top: 16px; background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 12px; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 10px; }
+    .tab-btn { width: auto; border: 1px solid #cfd8e3; background: #f9fafb; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 700; }
+    .tab-btn.active { background: #0b6cff; color: #fff; border-color: #0b6cff; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .section-grid { display: grid; gap: 8px; }
+
     label { display: block; margin: 8px 0 4px; font-weight: 600; }
     input, select, button { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cfd8e3; border-radius: 6px; }
     input[type="color"] { padding: 2px; height: 38px; }
@@ -19,21 +48,12 @@
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
     .actions button { font-weight: 700; cursor: pointer; }
-    .preview-wrap { display: grid; grid-template-columns: 1fr 220px; gap: 12px; align-items: start; }
-    .canvas-box { background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; border: 1px solid #d9dee5; border-radius: 10px; padding: 12px; }
-    canvas { image-rendering: auto; display: block; margin: 0 auto; }
-    .stack { display: grid; gap: 8px; }
-    .hint { font-size: 12px; color: #4b5563; line-height: 1.35; }
-    .status { min-height: 22px; font-weight: 700; }
-    .status.error { color: #b91c1c; }
-    .status.ok { color: #047857; }
-    .mini { width: 128px; height: 128px; border: 1px solid #d9dee5; border-radius: 8px; margin: 0 auto; }
-    .editor-canvas { width: 100%; max-width: 520px; aspect-ratio: 1 / 1; border: 1px solid #d9dee5; border-radius: 8px; cursor: crosshair; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; }
     .fine-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .top-links { display: flex; gap: 8px; margin-bottom: 12px; }
-    .top-links a { text-decoration: none; background: #0b6cff; color: #fff; padding: 8px 12px; border-radius: 8px; font-weight: 700; }
-    .top-links a.secondary { background: #374151; }
-    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .preview-wrap { grid-template-columns: 1fr; } }
+
+    @media (max-width: 720px) {
+      .row, .actions, .fine-actions { grid-template-columns: 1fr; }
+      .focus-stage { min-height: 420px; }
+    }
   </style>
 </head>
 <body>
@@ -42,12 +62,44 @@
       <a href="/index.html">Back to CAD</a>
       <a class="secondary" href="/mobile.html">Mobile</a>
     </div>
-    <h1>Vehicle Icon Studio</h1>
+
+    <div class="header-row">
+      <h1>Vehicle Icon Studio</h1>
+      <div id="status" class="status"></div>
+    </div>
     <p class="hint">Upload a vehicle image, remove the background, add configurable flashing lights, then export as transparent PNG or animated GIF for later assignment.</p>
 
-    <div class="layout">
-      <section class="panel stack">
-        <h2>1) Image + Cutout</h2>
+    <section class="studio-center">
+      <div class="view-toggle" role="group" aria-label="Focus view">
+        <button type="button" id="focusPreviewBtn" class="view-btn active">Preview Focus</button>
+        <button type="button" id="focusMaskBtn" class="view-btn">Manual Mask Focus</button>
+      </div>
+
+      <div class="focus-stage">
+        <div id="previewCanvasWrap" class="canvas-box">
+          <canvas id="previewCanvas" width="720" height="720"></canvas>
+        </div>
+        <canvas id="editorCanvas" width="720" height="720" style="display:none;"></canvas>
+      </div>
+
+      <div class="actual-preview">
+        <strong>Actual icon preview (real output size)</strong>
+        <div class="mini-window">
+          <canvas id="miniPreview" class="mini" width="36" height="36"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="options-panel">
+      <div class="tabs" role="tablist" aria-label="Studio sections">
+        <button type="button" class="tab-btn active" data-tab="cutout">Image + Cutout</button>
+        <button type="button" class="tab-btn" data-tab="cleanup">Manual Cleanup</button>
+        <button type="button" class="tab-btn" data-tab="layout">Icon Layout</button>
+        <button type="button" class="tab-btn" data-tab="lights">Flashing Lights</button>
+        <button type="button" class="tab-btn" data-tab="export">Export</button>
+      </div>
+
+      <div id="tab-cutout" class="tab-content active section-grid">
         <label for="sourceImage">Vehicle image</label>
         <input id="sourceImage" type="file" accept="image/*" />
 
@@ -72,8 +124,9 @@
         <input id="cropPadding" type="range" min="0" max="0.4" step="0.01" value="0.04" />
 
         <button id="segmentBtn" type="button">Remove Background</button>
+      </div>
 
-        <h2>1b) Assisted Manual Cleanup</h2>
+      <div id="tab-cleanup" class="tab-content section-grid">
         <label for="refineMode">Brush mode</label>
         <select id="refineMode">
           <option value="keep">Keep area</option>
@@ -91,17 +144,18 @@
           <button id="resetRefineBtn" type="button">Reset manual edits</button>
           <button id="invertRefineBtn" type="button">Invert keep/remove mode</button>
         </div>
+        <p class="hint">Tip: use the manual mask editor to paint keep/remove areas. Turn on Smart assist to spread each brush stroke to nearby pixels with similar color so cleanup is faster.</p>
+      </div>
 
-        <h2>2) Icon Layout</h2>
+      <div id="tab-layout" class="tab-content section-grid">
         <div class="row">
           <div>
             <label for="iconSize">Icon size</label>
             <select id="iconSize">
-              <option value="24">24x24</option>
-              <option value="30">30x30</option>
               <option value="36" selected>36x36</option>
-              <option value="48">48x48</option>
               <option value="64">64x64</option>
+              <option value="128">128x128</option>
+              <option value="256">256x256</option>
             </select>
           </div>
           <div>
@@ -120,8 +174,9 @@
             <input id="offsetY" type="range" min="-0.8" max="0.8" step="0.01" value="0.12" />
           </div>
         </div>
+      </div>
 
-        <h2>3) Flashing Lights</h2>
+      <div id="tab-lights" class="tab-content section-grid">
         <label><input id="lightsEnabled" type="checkbox" checked style="width:auto;"> Enable flashing lights</label>
         <div class="row">
           <div>
@@ -156,10 +211,10 @@
 
         <div class="actions" style="margin-top: 4px;">
           <button id="addLightBtn" type="button">Add Light</button>
-          <button id="removeLightBtn" type="button" class="secondary">Remove Light</button>
+          <button id="removeLightBtn" type="button">Remove Light</button>
         </div>
 
-        <p class="hint">Click the big preview to place the selected light. Use X/Y offset for fine adjustment.</p>
+        <p class="hint">Click the big preview to place the selected light.</p>
         <label for="lightIntensity">Light intensity</label>
         <input id="lightIntensity" type="range" min="0" max="1" step="0.01" value="0.9" />
 
@@ -171,16 +226,6 @@
           <div>
             <label for="lightY">Light Y position</label>
             <input id="lightY" type="number" min="0" max="1" step="0.01" value="0.25" />
-          </div>
-        </div>
-        <div class="row">
-          <div>
-            <label for="lightOffsetX">Light X offset</label>
-            <input id="lightOffsetX" type="number" min="-0.5" max="0.5" step="0.01" value="0" />
-          </div>
-          <div>
-            <label for="lightOffsetY">Light Y offset</label>
-            <input id="lightOffsetY" type="number" min="-0.5" max="0.5" step="0.01" value="0" />
           </div>
         </div>
         <div class="row">
@@ -211,39 +256,19 @@
             <input id="lightSpeed" type="number" min="0.25" max="4" step="0.05" value="1" />
           </div>
           <div>
-            <label for="lightTiming">Timing offset (0-1 cycle)</label>
-            <input id="lightTiming" type="number" min="0" max="1" step="0.01" value="0" />
+            <label for="lightFlashOffsetMs">Flash offset (ms)</label>
+            <input id="lightFlashOffsetMs" type="number" min="0" max="2000" step="10" value="0" />
           </div>
         </div>
+      </div>
 
+      <div id="tab-export" class="tab-content section-grid">
         <div class="actions">
           <button id="downloadPngBtn" type="button">Download PNG</button>
           <button id="downloadGifBtn" type="button">Download GIF</button>
         </div>
-
-        <div id="status" class="status"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Preview</h2>
-        <div class="preview-wrap">
-          <div class="canvas-box">
-            <canvas id="previewCanvas" width="360" height="360"></canvas>
-          </div>
-          <div class="stack">
-            <div>
-              <label>Manual mask editor</label>
-              <canvas id="editorCanvas" class="editor-canvas" width="520" height="520"></canvas>
-            </div>
-            <div>
-              <label>Actual icon preview</label>
-              <canvas id="miniPreview" class="mini" width="128" height="128"></canvas>
-            </div>
-            <p class="hint">Tip: use the manual mask editor to paint keep/remove areas. Turn on Smart assist to spread each brush stroke to nearby pixels with similar color so cleanup is faster.</p>
-          </div>
-        </div>
-      </section>
-    </div>
+      </div>
+    </section>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
