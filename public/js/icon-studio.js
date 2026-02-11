@@ -721,12 +721,6 @@ for (const button of tabButtons) {
     const tab = button.dataset.tab;
     for (const b of tabButtons) b.classList.toggle('active', b === button);
     for (const panel of tabContents) panel.classList.toggle('active', panel.id === `tab-${tab}`);
-
-    if (tab === 'cleanup') {
-      setFocusView('mask');
-    } else if (tab === 'lights') {
-      setFocusView('preview');
-    }
   });
 }
 

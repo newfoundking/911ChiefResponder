@@ -18,48 +18,41 @@
     .status.ok { color: #047857; }
     .hint { font-size: 12px; color: #4b5563; line-height: 1.35; }
 
-    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 12px; align-items: start; }
-    .focus-column { display: grid; gap: 10px; }
-    .view-toggle { display: inline-flex; background: #e5e7eb; border-radius: 10px; padding: 4px; gap: 4px; width: fit-content; }
+    .studio-center { display: grid; gap: 14px; justify-items: center; }
+    .view-toggle { display: inline-flex; background: #e5e7eb; border-radius: 10px; padding: 4px; gap: 4px; }
     .view-btn { border: 0; background: transparent; padding: 8px 14px; border-radius: 8px; font-weight: 700; cursor: pointer; }
     .view-btn.active { background: #111827; color: #fff; }
 
-    .focus-stage { width: 100%; min-height: 560px; display: grid; place-items: center; background: #fff; border: 1px solid #d9dee5; border-radius: 12px; padding: 12px; }
+    .focus-stage { width: min(92vw, 760px); min-height: 540px; display: grid; place-items: center; background: #fff; border: 1px solid #d9dee5; border-radius: 12px; padding: 12px; }
     .canvas-box { width: 100%; height: 100%; display: grid; place-items: center; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; border: 1px solid #d9dee5; border-radius: 10px; }
     canvas { image-rendering: auto; display: block; margin: 0 auto; }
     #previewCanvas { width: min(100%, 720px); height: auto; }
     #editorCanvas { width: min(100%, 720px); height: auto; border: 1px solid #d9dee5; border-radius: 8px; cursor: crosshair; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; }
 
-    .side-column { background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 10px; display: grid; gap: 12px; }
-    .actual-preview { display: grid; gap: 8px; }
-    .mini-window { min-height: 70px; border: 1px solid #d9dee5; border-radius: 8px; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; padding: 8px; display: grid; justify-content: start; align-content: start; overflow: auto; }
+    .actual-preview { width: min(92vw, 760px); background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
+    .mini-window { min-height: 70px; border: 1px solid #d9dee5; border-radius: 8px; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; padding: 8px; display: grid; place-items: center; justify-content: start; overflow: auto; }
     .mini { width: auto; height: auto; border: 1px solid #374151; border-radius: 4px; background: transparent; }
 
-    .actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
-    .actions button { font-weight: 700; cursor: pointer; }
-
-    .options-panel { margin-top: 14px; background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 12px; }
+    .options-panel { margin-top: 16px; background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 12px; }
     .tabs { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 10px; }
     .tab-btn { width: auto; border: 1px solid #cfd8e3; background: #f9fafb; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 700; }
     .tab-btn.active { background: #0b6cff; color: #fff; border-color: #0b6cff; }
     .tab-content { display: none; }
-    .tab-content.active { display: grid; }
-    .section-grid { gap: 8px; }
+    .tab-content.active { display: block; }
+    .section-grid { display: grid; gap: 8px; }
 
     label { display: block; margin: 8px 0 4px; font-weight: 600; }
     input, select, button { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #cfd8e3; border-radius: 6px; }
     input[type="color"] { padding: 2px; height: 38px; }
     input[type="range"] { width: 100%; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .actions button { font-weight: 700; cursor: pointer; }
     .fine-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
-    @media (max-width: 980px) {
-      .workspace { grid-template-columns: 1fr; }
-      .side-column { order: 2; }
-      .focus-stage { min-height: 460px; }
-    }
     @media (max-width: 720px) {
-      .row, .fine-actions { grid-template-columns: 1fr; }
+      .row, .actions, .fine-actions { grid-template-columns: 1fr; }
+      .focus-stage { min-height: 420px; }
     }
   </style>
 </head>
@@ -76,33 +69,25 @@
     </div>
     <p class="hint">Upload a vehicle image, remove the background, add configurable flashing lights, then export as transparent PNG or animated GIF for later assignment.</p>
 
-    <section class="workspace">
-      <div class="focus-column">
-        <div class="view-toggle" role="group" aria-label="Focus view">
-          <button type="button" id="focusPreviewBtn" class="view-btn active">Preview Focus</button>
-          <button type="button" id="focusMaskBtn" class="view-btn">Manual Mask Focus</button>
-        </div>
-        <div class="focus-stage">
-          <div id="previewCanvasWrap" class="canvas-box">
-            <canvas id="previewCanvas" width="720" height="720"></canvas>
-          </div>
-          <canvas id="editorCanvas" width="720" height="720" style="display:none;"></canvas>
-        </div>
+    <section class="studio-center">
+      <div class="view-toggle" role="group" aria-label="Focus view">
+        <button type="button" id="focusPreviewBtn" class="view-btn active">Preview Focus</button>
+        <button type="button" id="focusMaskBtn" class="view-btn">Manual Mask Focus</button>
       </div>
 
-      <aside class="side-column">
-        <div class="actual-preview">
-          <strong>Actual icon preview (real output size)</strong>
-          <div class="mini-window">
-            <canvas id="miniPreview" class="mini" width="36" height="36"></canvas>
-          </div>
+      <div class="focus-stage">
+        <div id="previewCanvasWrap" class="canvas-box">
+          <canvas id="previewCanvas" width="720" height="720"></canvas>
         </div>
+        <canvas id="editorCanvas" width="720" height="720" style="display:none;"></canvas>
+      </div>
 
-        <div class="actions">
-          <button id="downloadPngBtn" type="button">Download PNG</button>
-          <button id="downloadGifBtn" type="button">Download GIF</button>
+      <div class="actual-preview">
+        <strong>Actual icon preview (real output size)</strong>
+        <div class="mini-window">
+          <canvas id="miniPreview" class="mini" width="36" height="36"></canvas>
         </div>
-      </aside>
+      </div>
     </section>
 
     <section class="options-panel">
@@ -111,6 +96,7 @@
         <button type="button" class="tab-btn" data-tab="cleanup">Manual Cleanup</button>
         <button type="button" class="tab-btn" data-tab="layout">Icon Layout</button>
         <button type="button" class="tab-btn" data-tab="lights">Flashing Lights</button>
+        <button type="button" class="tab-btn" data-tab="export">Export</button>
       </div>
 
       <div id="tab-cutout" class="tab-content active section-grid">
@@ -273,6 +259,13 @@
             <label for="lightFlashOffsetMs">Flash offset (ms)</label>
             <input id="lightFlashOffsetMs" type="number" min="0" max="2000" step="10" value="0" />
           </div>
+        </div>
+      </div>
+
+      <div id="tab-export" class="tab-content section-grid">
+        <div class="actions">
+          <button id="downloadPngBtn" type="button">Download PNG</button>
+          <button id="downloadGifBtn" type="button">Download GIF</button>
         </div>
       </div>
     </section>
