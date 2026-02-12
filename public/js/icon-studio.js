@@ -713,16 +713,39 @@ function setFocusView(mode) {
   focusMaskBtn.classList.toggle('active', !previewMode);
 }
 
+function syncFocusModeForTab(tab) {
+  if (tab === 'cleanup') {
+    setFocusView('mask');
+    return;
+  }
+  if (tab === 'lights') {
+    setFocusView('preview');
+    return;
+  }
+  if (tab === 'layout' || tab === 'cutout') {
+    setFocusView('preview');
+  }
+}
+
+function setActiveTab(tab) {
+  const target = tabButtons.find((b) => b.dataset.tab === tab);
+  if (!target) return;
+  for (const b of tabButtons) b.classList.toggle('active', b === target);
+  for (const panel of tabContents) panel.classList.toggle('active', panel.id === `tab-${tab}`);
+  syncFocusModeForTab(tab);
+}
+
+
+
 focusPreviewBtn.addEventListener('click', () => setFocusView('preview'));
 focusMaskBtn.addEventListener('click', () => setFocusView('mask'));
 
 for (const button of tabButtons) {
   button.addEventListener('click', () => {
-    const tab = button.dataset.tab;
-    for (const b of tabButtons) b.classList.toggle('active', b === button);
-    for (const panel of tabContents) panel.classList.toggle('active', panel.id === `tab-${tab}`);
+    setActiveTab(button.dataset.tab);
   });
 }
+
 
 animationHandle = requestAnimationFrame(loop);
 window.addEventListener('beforeunload', () => {
@@ -731,6 +754,6 @@ window.addEventListener('beforeunload', () => {
 
 refreshLightSelector();
 syncLightEditorFromSelection();
-setFocusView('preview');
+setActiveTab(tabButtons.find((button) => button.classList.contains('active'))?.dataset.tab || 'cutout');
 setStatus('Upload an image to begin.');
 renderEditor();

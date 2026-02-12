@@ -18,18 +18,21 @@
     .status.ok { color: #047857; }
     .hint { font-size: 12px; color: #4b5563; line-height: 1.35; }
 
-    .studio-center { display: grid; gap: 14px; justify-items: center; }
+    .studio-center { display: grid; gap: 14px; }
+    .workspace-row { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 12px; align-items: start; }
     .view-toggle { display: inline-flex; background: #e5e7eb; border-radius: 10px; padding: 4px; gap: 4px; }
     .view-btn { border: 0; background: transparent; padding: 8px 14px; border-radius: 8px; font-weight: 700; cursor: pointer; }
     .view-btn.active { background: #111827; color: #fff; }
 
-    .focus-stage { width: min(92vw, 760px); min-height: 540px; display: grid; place-items: center; background: #fff; border: 1px solid #d9dee5; border-radius: 12px; padding: 12px; }
+    .focus-stage { width: 100%; min-height: 540px; display: grid; place-items: center; background: #fff; border: 1px solid #d9dee5; border-radius: 12px; padding: 12px; }
     .canvas-box { width: 100%; height: 100%; display: grid; place-items: center; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; border: 1px solid #d9dee5; border-radius: 10px; }
     canvas { image-rendering: auto; display: block; margin: 0 auto; }
     #previewCanvas { width: min(100%, 720px); height: auto; }
     #editorCanvas { width: min(100%, 720px); height: auto; border: 1px solid #d9dee5; border-radius: 8px; cursor: crosshair; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; }
 
-    .actual-preview { width: min(92vw, 760px); background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
+    .side-panel { display: grid; gap: 10px; }
+    .actual-preview { width: 100%; background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
+    .side-downloads { background: #fff; border: 1px solid #d9dee5; border-radius: 10px; padding: 10px 12px; }
     .mini-window { min-height: 70px; border: 1px solid #d9dee5; border-radius: 8px; background: repeating-conic-gradient(#eee 0% 25%, #ddd 0% 50%) 50% / 16px 16px; padding: 8px; display: grid; place-items: center; justify-content: start; overflow: auto; }
     .mini { width: auto; height: auto; border: 1px solid #374151; border-radius: 4px; background: transparent; }
 
@@ -49,6 +52,10 @@
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
     .actions button { font-weight: 700; cursor: pointer; }
     .fine-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    @media (max-width: 900px) {
+      .workspace-row { grid-template-columns: 1fr; }
+    }
 
     @media (max-width: 720px) {
       .row, .actions, .fine-actions { grid-template-columns: 1fr; }
@@ -75,18 +82,29 @@
         <button type="button" id="focusMaskBtn" class="view-btn">Manual Mask Focus</button>
       </div>
 
-      <div class="focus-stage">
-        <div id="previewCanvasWrap" class="canvas-box">
-          <canvas id="previewCanvas" width="720" height="720"></canvas>
+      <div class="workspace-row">
+        <div class="focus-stage">
+          <div id="previewCanvasWrap" class="canvas-box">
+            <canvas id="previewCanvas" width="720" height="720"></canvas>
+          </div>
+          <canvas id="editorCanvas" width="720" height="720" style="display:none;"></canvas>
         </div>
-        <canvas id="editorCanvas" width="720" height="720" style="display:none;"></canvas>
-      </div>
 
-      <div class="actual-preview">
-        <strong>Actual icon preview (real output size)</strong>
-        <div class="mini-window">
-          <canvas id="miniPreview" class="mini" width="36" height="36"></canvas>
-        </div>
+        <aside class="side-panel">
+          <div class="actual-preview">
+            <strong>Actual icon preview (real output size)</strong>
+            <div class="mini-window">
+              <canvas id="miniPreview" class="mini" width="36" height="36"></canvas>
+            </div>
+          </div>
+
+          <div class="side-downloads">
+            <div class="actions">
+              <button id="downloadPngBtn" type="button">Download PNG</button>
+              <button id="downloadGifBtn" type="button">Download GIF</button>
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
 
@@ -96,7 +114,6 @@
         <button type="button" class="tab-btn" data-tab="cleanup">Manual Cleanup</button>
         <button type="button" class="tab-btn" data-tab="layout">Icon Layout</button>
         <button type="button" class="tab-btn" data-tab="lights">Flashing Lights</button>
-        <button type="button" class="tab-btn" data-tab="export">Export</button>
       </div>
 
       <div id="tab-cutout" class="tab-content active section-grid">
@@ -262,12 +279,6 @@
         </div>
       </div>
 
-      <div id="tab-export" class="tab-content section-grid">
-        <div class="actions">
-          <button id="downloadPngBtn" type="button">Download PNG</button>
-          <button id="downloadGifBtn" type="button">Download GIF</button>
-        </div>
-      </div>
     </section>
   </div>
 
