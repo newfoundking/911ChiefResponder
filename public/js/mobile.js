@@ -24,10 +24,30 @@ for (const btn of tabButtons) {
 // Modal helper
 const modal = document.getElementById('modal');
 const modalContent = document.getElementById('modalContent');
+let activeMissionModalId = null;
+let activeMissionSnapshot = null;
+let hasPendingMissionUpdate = false;
+
+function deepCloneMission(mission) {
+  if (!mission || typeof mission !== 'object') return mission;
+  if (typeof structuredClone === 'function') return structuredClone(mission);
+  return JSON.parse(JSON.stringify(mission));
+}
+
+function getLatestMissionById(id) {
+  return latestMissions.find((mission) => String(mission.id) === String(id)) || null;
+}
+
+function clearMissionModalSession() {
+  activeMissionModalId = null;
+  activeMissionSnapshot = null;
+  hasPendingMissionUpdate = false;
+}
 
 function closeModal() {
   modal.style.display = 'none';
   modalContent.innerHTML = '';
+  clearMissionModalSession();
 }
 
 function showModal(content) {
@@ -48,6 +68,53 @@ function showModal(content) {
   modal.style.display = 'flex';
   modalContent.scrollTop = 0;
   closeBtn.focus();
+}
+
+function renderMissionModalSessionControls() {
+  if (!activeMissionModalId || modal.style.display === 'none') return;
+  let controls = document.getElementById('missionModalSessionControls');
+  if (!controls) {
+    controls = document.createElement('div');
+    controls.id = 'missionModalSessionControls';
+    controls.className = 'dispatch-status';
+    const closeBtn = document.getElementById('modalClose');
+    if (closeBtn && closeBtn.parentNode === modalContent) {
+      modalContent.insertBefore(controls, closeBtn.nextSibling);
+    } else {
+      modalContent.prepend(controls);
+    }
+  }
+
+  controls.innerHTML = '';
+  const refreshBtn = document.createElement('button');
+  refreshBtn.type = 'button';
+  refreshBtn.className = 'dispatch-button';
+  refreshBtn.textContent = 'Refresh Call';
+  refreshBtn.addEventListener('click', () => {
+    const latest = getLatestMissionById(activeMissionModalId);
+    if (!latest) return;
+    activeMissionSnapshot = deepCloneMission(latest);
+    hasPendingMissionUpdate = false;
+    showModal(buildMissionDetail(activeMissionSnapshot));
+    renderMissionModalSessionControls();
+  });
+
+  if (hasPendingMissionUpdate) {
+    const indicator = document.createElement('span');
+    indicator.textContent = 'Call updated — refresh to view latest details. ';
+    controls.appendChild(indicator);
+  }
+  controls.appendChild(refreshBtn);
+}
+
+function openMissionModalById(id) {
+  const mission = getLatestMissionById(id);
+  if (!mission) return;
+  activeMissionModalId = mission.id;
+  activeMissionSnapshot = deepCloneMission(mission);
+  hasPendingMissionUpdate = false;
+  showModal(buildMissionDetail(activeMissionSnapshot));
+  renderMissionModalSessionControls();
 }
 
 modal.addEventListener('click', (event) => {
@@ -714,6 +781,19 @@ async function loadData() {
     renderMissions(missions);
     renderUnits(units);
     renderMap(missions, stations, units);
+
+    if (activeMissionModalId) {
+      const latestActiveMission = getLatestMissionById(activeMissionModalId);
+      if (!latestActiveMission) {
+        closeModal();
+      } else if (activeMissionSnapshot) {
+        const changed = JSON.stringify(latestActiveMission) !== JSON.stringify(activeMissionSnapshot);
+        if (changed) {
+          hasPendingMissionUpdate = true;
+          renderMissionModalSessionControls();
+        }
+      }
+    }
   } catch (err) {
     console.error('Failed to load mobile data', err);
   } finally {
@@ -768,7 +848,7 @@ function renderMissions(missions) {
       meta,
       sections
     });
-    card.addEventListener('click', () => showModal(buildMissionDetail(mission)));
+    card.addEventListener('click', () => openMissionModalById(mission.id));
     container.appendChild(card);
   });
 
@@ -889,7 +969,7 @@ function renderMap(missions, stations, units) {
     const assigned = missionAssignments.get(mission.id) || [];
     const marker = L.marker([mission.lat, mission.lon], { icon: makeIcon(missionIconUrl(mission, assigned), 34) })
       .addTo(map)
-      .on('click', () => showModal(buildMissionDetail(mission)));
+      .on('click', () => openMissionModalById(mission.id));
     mapLayers.push(marker);
     boundsPoints.push(marker.getLatLng());
   });
@@ -1452,6 +1532,11 @@ function createAssignedChip(unit) {
   const status = formatStatus(unit.status || 'enroute', unit.responding);
   return createChip(`${label} • ${status}`, 'unit');
 }
+
+function getMissionForAction(fallbackMission) {
+  return getLatestMissionById(activeMissionModalId || fallbackMission?.id) || fallbackMission;
+}
+
 function buildMissionDetail(mission) {
   const assigned = missionAssignments.get(mission.id) || [];
   const detail = document.createElement('div');
@@ -1529,9 +1614,12 @@ function buildMissionDispatchSection(mission) {
 
   const refreshMissionDetail = async () => {
     await loadData();
-    const updated = latestMissions.find((m) => m.id === mission.id);
+    const updated = getMissionForAction(mission);
     if (updated) {
-      showModal(buildMissionDetail(updated));
+      activeMissionSnapshot = deepCloneMission(updated);
+      hasPendingMissionUpdate = false;
+      showModal(buildMissionDetail(activeMissionSnapshot));
+      renderMissionModalSessionControls();
     } else {
       closeModal();
     }
@@ -1594,7 +1682,7 @@ function buildMissionDispatchSection(mission) {
     handleAction(autoBtn, async () => {
       hidePanel();
       setStatus('Calculating auto dispatch…', 'info');
-      const count = await autoDispatchMission(mission);
+      const count = await autoDispatchMission(getMissionForAction(mission));
       setStatus(`Dispatched ${count} unit${count === 1 ? '' : 's'}.`, 'success');
       await refreshMissionDetail();
     })
@@ -1606,7 +1694,7 @@ function buildMissionDispatchSection(mission) {
     handleAction(runCardBtn, async () => {
       hidePanel();
       setStatus('Applying run card…', 'info');
-      const count = await runCardDispatchMission(mission);
+      const count = await runCardDispatchMission(getMissionForAction(mission));
       setStatus(`Dispatched ${count} unit${count === 1 ? '' : 's'}.`, 'success');
       await refreshMissionDetail();
     })
@@ -1617,7 +1705,7 @@ function buildMissionDispatchSection(mission) {
   manualBtn.addEventListener('click', () => {
     setStatus('');
     openPanel('manual', () =>
-      buildManualDispatchPanel(mission, {
+      buildManualDispatchPanel(getMissionForAction(mission), {
         setStatus,
         onComplete: refreshMissionDetail
       })
@@ -1629,7 +1717,7 @@ function buildMissionDispatchSection(mission) {
   unitTypeBtn.addEventListener('click', () => {
     setStatus('');
     openPanel('unitType', () =>
-      buildUnitTypeDispatchPanel(mission, {
+      buildUnitTypeDispatchPanel(getMissionForAction(mission), {
         setStatus,
         onComplete: refreshMissionDetail
       })
@@ -1671,7 +1759,7 @@ function buildManualDispatchPanel(mission, { setStatus, onComplete }) {
     listWrapper.innerHTML = '<div class="dispatch-panel__loading">Loading available units…</div>';
     dispatchBtn.disabled = true;
     try {
-      const { units } = await fetchAvailableUnitsForMission(mission, { ignoreDepartments: true });
+      const { units } = await fetchAvailableUnitsForMission(getMissionForAction(mission), { ignoreDepartments: true });
       if (!units.length) {
         listWrapper.innerHTML = '<div class="dispatch-panel__empty">No available units meet the criteria.</div>';
         return;
@@ -1775,7 +1863,7 @@ function buildManualDispatchPanel(mission, { setStatus, onComplete }) {
     dispatchBtn.disabled = true;
     setStatus('Dispatching selected units…', 'info');
     try {
-      await dispatchUnitsForMission(mission, selected, { force: true });
+      await dispatchUnitsForMission(getMissionForAction(mission), selected, { force: true });
       setStatus(`Dispatched ${selected.length} unit${selected.length === 1 ? '' : 's'}.`, 'success');
       await onComplete();
     } catch (err) {
@@ -1799,7 +1887,7 @@ function buildUnitTypeDispatchPanel(mission, { setStatus, onComplete }) {
   const populate = async () => {
     listWrapper.innerHTML = '<div class="dispatch-panel__loading">Loading unit types…</div>';
     try {
-      const { units } = await fetchAvailableUnitsForMission(mission, { ignoreDepartments: true });
+      const { units } = await fetchAvailableUnitsForMission(getMissionForAction(mission), { ignoreDepartments: true });
       const groups = new Map();
       units.forEach((unit) => {
         const typeKey = unit.type || 'Unknown';
@@ -1846,7 +1934,7 @@ function buildUnitTypeDispatchPanel(mission, { setStatus, onComplete }) {
           sendBtn.disabled = true;
           setStatus(`Dispatching ${unit.name || unit.type || 'unit'}…`, 'info');
           try {
-            await dispatchUnitsForMission(mission, [unit.id], { force: true });
+            await dispatchUnitsForMission(getMissionForAction(mission), [unit.id], { force: true });
             setStatus(`Dispatched ${unit.name || unit.type || 'unit'}.`, 'success');
             await onComplete();
           } catch (err) {
