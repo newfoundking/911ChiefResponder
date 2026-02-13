@@ -9,7 +9,7 @@ export async function getMissions() {
 export function sortMissions(missions) {
   const level = m => {
     if (m.resolve_at) return 3;
-    return (m.assigned_count > 0) ? 2 : 1;
+    return (m.responding_count > 0) ? 2 : 1;
   };
   return missions
     .filter(m => m.status !== 'resolved')
@@ -22,7 +22,7 @@ export function sortMissions(missions) {
 }
 
 export function renderMissionRow(mission) {
-  const lvl = mission.level || (mission.resolve_at ? 3 : (mission.assigned_count > 0 ? 2 : 1));
+  const lvl = mission.level || (mission.resolve_at ? 3 : (mission.responding_count > 0 ? 2 : 1));
   const icon = `/warning${lvl}.png`;
   let time = '';
   if (mission.resolve_at) {
