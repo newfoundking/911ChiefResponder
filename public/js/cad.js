@@ -27,6 +27,28 @@ const equipmentKey = (name) => {
   return trimmed ? trimmed.toLowerCase() : '';
 };
 
+const canonicalRequirementId = (unitClass, type) => {
+  const cls = String(unitClass || '').trim().toLowerCase();
+  const unitType = String(type || '').trim();
+  if (!cls || !unitType) return '';
+  return `${cls}:${unitType}`;
+};
+
+const requirementTokensFor = (req) => {
+  const raw = Array.isArray(req?.types) ? req.types : [req?.id || req?.type];
+  const tokens = raw.map((v) => String(v || '').trim()).filter(Boolean);
+  if (req?.class && req?.type) {
+    const canonical = canonicalRequirementId(req.class, req.type);
+    if (canonical && !tokens.includes(canonical)) tokens.unshift(canonical);
+  }
+  return [...new Set(tokens)];
+};
+
+const matchesRequirementTokens = (unit, tokens) => {
+  const scoped = tokens.some((t) => t.includes(':')) ? tokens.filter((t) => t.includes(':')) : tokens;
+  return scoped.some((token) => unitQualifiesAs(unit, token));
+};
+
 function gatherEquipmentForUnit(unit) {
   const counts = new Map();
   if (!unit) return counts;
@@ -141,6 +163,8 @@ function getUnitQualificationSet(unit) {
     if (alias) quals.add(alias);
   };
   if (unit.type) addQualification(unit.type);
+  const canonical = canonicalRequirementId(unit.class, unit.type);
+  if (canonical) addQualification(canonical);
   const cfg = getVehicleUpgradeConfigForClass(unit.class);
   const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
   if (!upgrades.length) return quals;
@@ -436,13 +460,13 @@ async function checkMissionCompletion(mission) {
     const reqTrain = Array.isArray(mission.required_training) ? mission.required_training : [];
     const penalties = Array.isArray(mission.penalties) ? mission.penalties : [];
     const unitsMet = reqUnits.every(r => {
-      const types = Array.isArray(r.types) ? r.types : [r.type];
+      const types = requirementTokensFor(r);
       const baseNeed = r.quantity ?? r.count ?? r.qty ?? 1;
       const ignored = penalties
         .filter(p => (!p.category || p.category === 'unit') && types.includes(p.type))
         .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
       const need = Math.max(0, baseNeed - ignored);
-      const count = types.reduce((s, t) => s + (unitOnScene.get(t) || 0), 0);
+      const count = assigned.filter((u) => u.status === 'on_scene' && matchesRequirementTokens(u, types)).length;
       return count >= need;
     });
     const equipMet = reqEquip.every(r => {
@@ -1025,13 +1049,8 @@ async function autoDispatch(mission) {
 
     // Account for units already assigned to this mission (enroute/on_scene)
     const assigned = await fetchNoCache(`/api/missions/${mission.id}/units`).then(r=>r.json()).catch(()=>[]);
-    const assignedCounts = new Map();
-    for (const a of assigned) {
-      if (!['enroute','on_scene'].includes(a.status)) continue;
-      const quals = getUnitQualificationSet(a);
-      for (const q of quals) {
-        assignedCounts.set(q, (assignedCounts.get(q) || 0) + 1);
-      }
+    const activeAssigned = assigned.filter((a) => ['enroute', 'on_scene'].includes(a.status));
+    for (const a of activeAssigned) {
       applyNeeds(a);
     }
 
@@ -1052,18 +1071,14 @@ async function autoDispatch(mission) {
     }
 
     function unitMatchesTypes(u, types) {
-      const unitClass = String(u.class || '').trim().toLowerCase();
-      return types.some((t) => {
-        const target = String(t || '').trim().toLowerCase();
-        return target && (unitQualifiesAs(u, t) || target === unitClass);
-      });
+      return matchesRequirementTokens(u, types);
     }
 
     const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
     for (const r of reqUnits) {
-      const types = Array.isArray(r.types) ? r.types : [r.type];
+      const types = requirementTokensFor(r);
       let need = (r.quantity ?? r.count ?? r.qty ?? 1)
-        - types.reduce((s, t) => s + (assignedCounts.get(t) || 0), 0);
+        - activeAssigned.filter((u) => unitMatchesTypes(u, types)).length;
       for (let i=0; i<need; i++) {
         let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && unitMatchesTypes(u, types))
                                  .sort(sortUnits);

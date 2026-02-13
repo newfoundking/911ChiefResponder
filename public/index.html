@@ -1907,7 +1907,7 @@ async function generateMissionAtPOI(poi) {
   const tagVal = poi.tags.amenity || poi.tags.building || poi.tags.leisure || poi.tags.tourism || poi.tags.shop || poi.tags.aeroway || poi.tags.landuse || poi.tags.office || poi.tags.man_made || poi.tags.name;
   document.getElementById("cadType").textContent = `POI: ${tagVal}`;
   const formatReq = r => {
-    const types = Array.isArray(r.types) ? r.types : [r.type];
+    const types = requirementTokensFor(r);
     const typeStr = types.join(' or ');
     const count = r.count ?? r.quantity ?? r.qty ?? 1;
     return `${count}x ${typeStr}`;
@@ -2281,6 +2281,34 @@ function getVehicleUpgradeConfigForClass(unitClass) {
   return source?.[key] || null;
 }
 
+
+function canonicalRequirementId(unitClass, type) {
+  const cls = String(unitClass || '').trim().toLowerCase();
+  const unitType = String(type || '').trim();
+  if (!cls || !unitType) return '';
+  return `${cls}:${unitType}`;
+}
+
+function requirementTokensFor(req) {
+  const raw = Array.isArray(req?.types) ? req.types : [req?.id || req?.type];
+  const tokens = raw.map(v => String(v || '').trim()).filter(Boolean);
+  if (req?.class && req?.type) {
+    const canonical = canonicalRequirementId(req.class, req.type);
+    if (canonical && !tokens.includes(canonical)) tokens.unshift(canonical);
+  }
+  return [...new Set(tokens)];
+}
+
+function requirementHasCanonical(tokens) {
+  return tokens.some(token => token.includes(':'));
+}
+
+function matchesRequirementTokens(unit, tokens) {
+  const quals = getUnitQualificationSet(unit);
+  const scoped = requirementHasCanonical(tokens) ? tokens.filter(t => t.includes(':')) : tokens;
+  return scoped.some(token => quals.has(token));
+}
+
 function expandTrainingListForUnit(list, unitClass) {
   if (typeof trainingHelpers !== 'undefined' && trainingHelpers && typeof trainingHelpers.expandTrainingList === 'function') {
     return trainingHelpers.expandTrainingList(list, unitClass) || [];
@@ -2325,6 +2353,8 @@ function getUnitQualificationSet(unit) {
     if (alias) quals.add(alias);
   };
   if (unit.type) addQualification(unit.type);
+  const canonical = canonicalRequirementId(unit.class, unit.type);
+  if (canonical) addQualification(canonical);
   const cfg = getVehicleUpgradeConfigForClass(unit.class);
   const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
   if (!upgrades.length) return quals;
@@ -2411,15 +2441,15 @@ function renderRequirementsDynamic(mission, assigned) {
 
   // Build unit requirement list
   const unitItems = reqUnits.map(r => {
-    const types = Array.isArray(r.types) ? r.types : [r.type];
+    const types = requirementTokensFor(r);
     const typeStr = types.join(' or ');
     const baseNeed = r.quantity ?? r.count ?? 1;
     const ignored = penalties
       .filter(p => (p.category || 'vehicle') === 'vehicle' && types.includes(p.type))
       .reduce((s, p) => s + (p.quantity || 0), 0);
     const need = Math.max(0, baseNeed - ignored);
-    const onScene = types.reduce((s, t) => s + (unitCounts.on_scene.get(t) || 0), 0);
-    const enroute = types.reduce((s, t) => s + (unitCounts.enroute.get(t) || 0), 0);
+    const onScene = (assigned || []).filter(u => u.status === 'on_scene' && matchesRequirementTokens(u, types)).length;
+    const enroute = (assigned || []).filter(u => u.status === 'enroute' && matchesRequirementTokens(u, types)).length;
     const outstanding = Math.max(0, need - enroute - onScene);
     return `<li>${need} × ${typeStr} <small>(Outstanding: ${outstanding}, En route: ${enroute}, On scene: ${onScene})</small></li>`;
   });
@@ -2663,7 +2693,14 @@ function collectRunCardRows(container, key) {
       const value = select?.value?.trim();
       const qty = Math.max(1, Number.parseInt(input?.value ?? '1', 10) || 1);
       if (!value) return null;
-      if (key === 'type') return { type: value, quantity: qty };
+      if (key === 'type') {
+        const [cls, ...rest] = String(value).split(':');
+        if (rest.length) {
+          const type = rest.join(':').trim();
+          return { id: value, class: cls.trim().toLowerCase(), type, quantity: qty };
+        }
+        return { type: value, quantity: qty };
+      }
       if (key === 'training') return { training: value, qty };
       return { name: value, qty };
     })
@@ -2721,8 +2758,8 @@ function openRunCardFormModal({ title, includeLabel, initial = {} }) {
     };
 
     const unitOptions = (unitTypes || []).map(u => ({
-      value: u.type,
-      label: `${u.class} - ${u.type}`
+      value: canonicalRequirementId(u.class, u.type),
+      label: `${String(u.class || '').toUpperCase()} — ${u.type}`
     }));
     const trainingOptions = getTrainingDisplayList().map(({ name, cost }) => ({
       value: name,
@@ -2742,7 +2779,7 @@ function openRunCardFormModal({ title, includeLabel, initial = {} }) {
     equipmentSection.btn.addEventListener('click', () => createRunCardRow(equipmentSection.container, equipmentOptions));
 
     (initial.units || []).forEach(u => {
-      const value = Array.isArray(u.types) ? u.types[0] : (u.type || u.types || '');
+      const value = u.id || (u.class && u.type ? canonicalRequirementId(u.class, u.type) : (Array.isArray(u.types) ? u.types[0] : (u.type || u.types || '')));
       createRunCardRow(unitsSection.container, unitOptions, value, u.quantity ?? u.count ?? 1);
     });
     (initial.training || []).forEach(t => {
@@ -6102,16 +6139,8 @@ async function autoDispatch(mission) {
       applyNeeds(a);
     }
 
-    const normalizeType = value => String(value || '').toLowerCase();
-    const unitMatchesTypes = (unit, types) => {
-      const unitClass = normalizeType(unit.class);
-      return types.some(t => {
-        const normalized = normalizeType(t);
-        return normalized && (unitQualifiesAs(unit, t) || normalized === unitClass);
-      });
-    };
-    const countAssignedForTypes = types =>
-      assignedActive.filter(u => unitMatchesTypes(u, types)).length;
+    const unitMatchesTypes = (unit, types) => matchesRequirementTokens(unit, types);
+    const countAssignedForTypes = types => assignedActive.filter(u => unitMatchesTypes(u, types)).length;
 
     function unitMatchesNeed(u) {
       return trainingNeeds.some(n=>n.qty>0 && trainingCount(u,n.name)>0) ||
@@ -6131,7 +6160,7 @@ async function autoDispatch(mission) {
 
     const reqUnits = Array.isArray(mission.required_units) ? mission.required_units : [];
     for (const r of reqUnits) {
-      const types = Array.isArray(r.types) ? r.types : [r.type];
+      const types = requirementTokensFor(r);
       let need = (r.quantity ?? r.count ?? r.qty ?? 1) - countAssignedForTypes(types);
       for (let i=0; i<need; i++) {
         let candidates = allUnits.filter(u=>!selectedIds.has(u.id) && unitMatchesTypes(u, types))
