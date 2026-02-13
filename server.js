@@ -517,6 +517,44 @@ db.run(`INSERT OR IGNORE INTO wallet (id, balance) VALUES (1, 100000)`);
 const { missionClocks, beginMissionClock, clearMissionClock, rehydrateMissionClocks } = require('./services/missionTimers');
 rehydrateMissionClocks();
 
+function canonicalRequirementId(unitClass, type) {
+  const cls = String(unitClass || '').trim().toLowerCase();
+  const unitType = String(type || '').trim();
+  if (!cls || !unitType) return '';
+  return `${cls}:${unitType}`;
+}
+
+function requirementTokensFor(req) {
+  const raw = Array.isArray(req?.types) ? req.types : [req?.id || req?.type];
+  const tokens = raw.map((v) => String(v || '').trim()).filter(Boolean);
+  if (req?.class && req?.type) {
+    const canonical = canonicalRequirementId(req.class, req.type);
+    if (canonical && !tokens.includes(canonical)) tokens.unshift(canonical);
+  }
+  return [...new Set(tokens)];
+}
+
+function normalizeUnitRequirement(req) {
+  const tokens = requirementTokensFor(req);
+  if (req?.class && req?.type) return { ...req, id: canonicalRequirementId(req.class, req.type), types: tokens };
+  const first = tokens[0] || '';
+  if (first.includes(':')) {
+    const [cls, ...rest] = first.split(':');
+    return { ...req, id: first, class: cls, type: rest.join(':'), types: tokens };
+  }
+  return { ...req, type: req?.type || first, types: tokens };
+}
+
+function unitMatchesRequirement(unit, tokens) {
+  const quals = getUnitQualificationSet(unit, {
+    vehicleUpgrades: equipment.vehicleUpgrades || {},
+    getDefaultUnitEquipment,
+    expandTrainingList,
+  });
+  const scoped = tokens.some((t) => t.includes(':')) ? tokens.filter((t) => t.includes(':')) : tokens;
+  return scoped.some((token) => quals.has(token));
+}
+
 function missionRequirementsMet(mission, assigned) {
   const unitOnScene = new Map();
   const equipOnScene = new Map();
@@ -562,13 +600,14 @@ function missionRequirementsMet(mission, assigned) {
   }
 
   const penalties = parseArrayField(mission.penalties);
-  const reqUnits = parseArrayField(mission.required_units).map(r => {
-    const types = Array.isArray(r.types) ? r.types : (r.type ? [r.type] : []);
+  const reqUnits = parseArrayField(mission.required_units).map((r) => {
+    const normalized = normalizeUnitRequirement(r);
+    const types = normalized.types;
     const ignored = penalties
-      .filter(p => (p.category ? p.category === 'vehicle' : true) && types.includes(p.type))
-      .reduce((s, p) => s + (Number(p.quantity) || 0), 0);
+      .filter((p) => (p.category ? p.category === 'vehicle' : true) && types.includes(p.type))
+      .reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
     const qty = Math.max(0, (r.quantity ?? r.count ?? 1) - ignored);
-    return { ...r, quantity: qty, types };
+    return { ...normalized, quantity: qty };
   });
 
   const reqEquip = parseArrayField(mission.equipment_required).map(r => {
@@ -599,8 +638,16 @@ function missionRequirementsMet(mission, assigned) {
     return { ...r, name, key, quantity: qty };
   });
 
-  const unitsMet = reqUnits.every(r => {
-    const count = r.types.reduce((s, t) => s + (unitOnScene.get(t) || 0), 0);
+  const onSceneUnits = assigned.filter((u) => {
+    const normStatus = String(u.status || '').toLowerCase().replace(/\s+/g, '_');
+    return normStatus === 'on_scene' || normStatus === 'onscene';
+  }).map((u) => ({
+    ...u,
+    equipment: Array.isArray(u.equipment) ? u.equipment : parseArrayField(u.equipment),
+    personnel: Array.isArray(u.personnel) ? u.personnel : parseArrayField(u.personnel),
+  }));
+  const unitsMet = reqUnits.every((r) => {
+    const count = onSceneUnits.filter((u) => unitMatchesRequirement(u, r.types)).length;
     return count >= (r.quantity ?? r.count ?? 1);
   });
   const equipMet = reqEquip.every(r => {
@@ -1957,7 +2004,7 @@ app.post('/api/run-cards', express.json(), (req, res) => {
   if (!b.mission_name || !b.label) {
     return res.status(400).json({ error: 'mission_name and label are required' });
   }
-  const units = JSON.stringify(b.units || []);
+  const units = JSON.stringify((b.units || []).map(normalizeUnitRequirement));
   const training = JSON.stringify(b.training || []);
   const equipment = JSON.stringify(b.equipment || []);
   db.run(
@@ -1977,7 +2024,7 @@ app.post('/api/run-cards', express.json(), (req, res) => {
 
 app.put('/api/run-cards/:name', express.json(), (req, res) => {
   const b = req.body || {};
-  const units = JSON.stringify(b.units || []);
+  const units = JSON.stringify((b.units || []).map(normalizeUnitRequirement));
   const training = JSON.stringify(b.training || []);
   const equipment = JSON.stringify(b.equipment || []);
   db.run(

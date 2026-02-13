@@ -110,6 +110,28 @@ const equipmentKey = (name) => {
   return trimmed ? trimmed.toLowerCase() : '';
 };
 
+const canonicalRequirementId = (unitClass, type) => {
+  const cls = String(unitClass || '').trim().toLowerCase();
+  const unitType = String(type || '').trim();
+  if (!cls || !unitType) return '';
+  return `${cls}:${unitType}`;
+};
+
+function requirementTokensFor(req) {
+  const raw = Array.isArray(req?.types) ? req.types : [req?.id || req?.type];
+  const tokens = raw.map((v) => String(v || '').trim()).filter(Boolean);
+  if (req?.class && req?.type) {
+    const canonical = canonicalRequirementId(req.class, req.type);
+    if (canonical && !tokens.includes(canonical)) tokens.unshift(canonical);
+  }
+  return [...new Set(tokens)];
+}
+
+function matchesRequirementTokens(unit, tokens) {
+  const scoped = tokens.some((t) => t.includes(':')) ? tokens.filter((t) => t.includes(':')) : tokens;
+  return scoped.some((token) => unitQualifiesAs(unit, token));
+}
+
 function gatherEquipmentForUnit(unit) {
   const counts = new Map();
   if (!unit) return counts;
@@ -173,6 +195,8 @@ function getUnitQualificationSet(unit) {
     if (alias) quals.add(alias);
   };
   if (unit.type) addQualification(unit.type);
+  const canonical = canonicalRequirementId(unit.class, unit.type);
+  if (canonical) addQualification(canonical);
   const cfg = getVehicleUpgradeConfigForClass(unit.class);
   const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
   if (!upgrades.length) return quals;
@@ -1383,11 +1407,11 @@ function createUnitIconNode(unit, options = {}) {
 
 function formatRequirementText(req) {
   if (!req) return '';
-  const types = Array.isArray(req.types) ? req.types.filter(Boolean) : [];
-  if (!types.length && req.type) types.push(req.type);
+  const types = requirementTokensFor(req);
   const count = Number(req.count ?? req.quantity ?? req.qty ?? req.min ?? 1);
   const safeCount = Number.isFinite(count) && count > 0 ? count : 1;
-  const typeStr = types.length ? types.join(' or ') : 'Units';
+  const pretty = (token) => token.includes(':') ? `${token.split(':')[0].toUpperCase()} — ${token.split(':').slice(1).join(':')}` : token;
+  const typeStr = types.length ? types.map(pretty).join(' or ') : 'Units';
   return `${safeCount}× ${typeStr}`;
 }
 
@@ -1882,13 +1906,9 @@ async function autoDispatchMission(mission) {
   }
 
   const assigned = await fetchJson(`/api/missions/${mission.id}/units`).catch(() => []);
-  const assignedCounts = new Map();
-  for (const unit of Array.isArray(assigned) ? assigned : []) {
+  const activeAssigned = (Array.isArray(assigned) ? assigned : []).filter((unit) => ['enroute', 'on_scene'].includes(unit?.status));
+  for (const unit of activeAssigned) {
     if (!['enroute', 'on_scene'].includes(unit?.status)) continue;
-    const quals = getUnitQualificationSet(unit);
-    for (const q of quals) {
-      assignedCounts.set(q, (assignedCounts.get(q) || 0) + 1);
-    }
     applyNeeds(unit);
   }
 
@@ -1924,20 +1944,15 @@ async function autoDispatchMission(mission) {
 
   const requirements = Array.isArray(mission.required_units) ? mission.required_units : [];
   for (const req of requirements) {
-    const types = Array.isArray(req.types) ? req.types.filter(Boolean) : [];
-    if (!types.length && req.type) types.push(req.type);
+    const types = requirementTokensFor(req);
     const needTotal = Number(req.quantity ?? req.count ?? req.qty ?? 1) || 1;
-    let remaining = needTotal - types.reduce((sum, type) => sum + (assignedCounts.get(type) || 0), 0);
+    let remaining = needTotal - activeAssigned.filter((unit) => matchesRequirementTokens(unit, types)).length;
     remaining = Math.max(0, remaining);
     for (let i = 0; i < remaining; i++) {
       const candidates = units
         .filter((unit) => {
           if (selectedIds.has(unit.id)) return false;
-          const unitClass = String(unit.class || '').trim().toLowerCase();
-          return types.some((type) => {
-            const target = String(type || '').trim().toLowerCase();
-            return target && (unitQualifiesAs(unit, type) || target === unitClass);
-          });
+          return matchesRequirementTokens(unit, types);
         })
         .sort(sortUnits);
       if (!candidates.length) break;

@@ -58,6 +58,13 @@ function getVehicleUpgradeConfigForClass(vehicleUpgrades, unitClass) {
   return vehicleUpgrades?.[key] || null;
 }
 
+function canonicalRequirementId(unitClass, type) {
+  const cls = String(unitClass || '').trim().toLowerCase();
+  const unitType = String(type || '').trim();
+  if (!cls || !unitType) return '';
+  return `${cls}:${unitType}`;
+}
+
 function getUnitQualificationSet(unit, options = {}) {
   const quals = new Set();
   if (!unit) return quals;
@@ -72,6 +79,8 @@ function getUnitQualificationSet(unit, options = {}) {
     if (alias) quals.add(alias);
   };
   if (unit.type) addQualification(unit.type);
+  const canonical = canonicalRequirementId(unit.class, unit.type);
+  if (canonical) addQualification(canonical);
   const cfg = getVehicleUpgradeConfigForClass(options.vehicleUpgrades || {}, unit.class);
   const upgrades = Array.isArray(cfg?.upgrades) ? cfg.upgrades : [];
   if (!upgrades.length) return quals;
@@ -112,6 +121,7 @@ function getUnitQualificationSet(unit, options = {}) {
 }
 
 module.exports = {
+  canonicalRequirementId,
   equipmentKey,
   trainingKey,
   gatherUnitEquipment,
