@@ -278,8 +278,61 @@ let cachedMissions = [];
 let cachedStations = [];
 let map;
 let selectedMissionId = null;
+let activeMissionModalId = null;
+let activeMissionSnapshot = null;
+let hasPendingMissionUpdate = false;
 const stationMarkers = new Map();
 const missionMarkers = new Map();
+
+function deepCloneMission(mission) {
+  if (!mission || typeof mission !== 'object') return mission;
+  if (typeof structuredClone === 'function') return structuredClone(mission);
+  return JSON.parse(JSON.stringify(mission));
+}
+
+function getMissionById(id, missions = cachedMissions) {
+  return (Array.isArray(missions) ? missions : []).find((m) => String(m.id) === String(id)) || null;
+}
+
+function clearMissionModalSession() {
+  activeMissionModalId = null;
+  activeMissionSnapshot = null;
+  hasPendingMissionUpdate = false;
+}
+
+function renderCadMissionModalFromSnapshot() {
+  const mission = activeMissionSnapshot;
+  if (!mission) return;
+  const titleEl = document.getElementById('cadMissionTitle');
+  const addressEl = document.getElementById('cadMissionAddress');
+  const bodyEl = document.querySelector('#cadMissionModal .cad-mission-modal__body');
+  if (!titleEl || !addressEl || !bodyEl) return;
+
+  const addressText = mission.address || `${mission.lat?.toFixed(4) ?? ''}, ${mission.lon?.toFixed(4) ?? ''}`;
+  titleEl.textContent = mission.type || 'Mission';
+  addressEl.textContent = addressText;
+
+  bodyEl.innerHTML = '';
+  if (hasPendingMissionUpdate) {
+    const wrap = document.createElement('div');
+    wrap.className = 'cad-mission-modal__update';
+    wrap.textContent = 'Call updated — ';
+    const refreshBtn = document.createElement('button');
+    refreshBtn.type = 'button';
+    refreshBtn.textContent = 'Refresh';
+    refreshBtn.addEventListener('click', async () => {
+      if (!activeMissionModalId) return;
+      await loadMissions();
+      const latest = getMissionById(activeMissionModalId);
+      if (!latest) return;
+      activeMissionSnapshot = deepCloneMission(latest);
+      hasPendingMissionUpdate = false;
+      renderCadMissionModalFromSnapshot();
+    });
+    wrap.appendChild(refreshBtn);
+    bodyEl.appendChild(wrap);
+  }
+}
 
 function makeIcon(url, size) {
   return L.icon({ iconUrl: url, iconSize: [size, size], iconAnchor: [size / 2, size] });
@@ -431,6 +484,21 @@ async function loadMissions() {
     }, idx * 100);
   });
   cachedMissions = missions;
+
+  if (activeMissionModalId) {
+    const latestActiveMission = getMissionById(activeMissionModalId, missions);
+    if (!latestActiveMission) {
+      clearMissionModalSession();
+      const modal = document.getElementById('cadMissionModal');
+      modal?.classList.add('hidden');
+    } else if (activeMissionSnapshot) {
+      const changed = JSON.stringify(latestActiveMission) !== JSON.stringify(activeMissionSnapshot);
+      if (changed) {
+        hasPendingMissionUpdate = true;
+        renderCadMissionModalFromSnapshot();
+      }
+    }
+  }
 }
 
 async function checkMissionCompletion(mission) {
@@ -934,17 +1002,16 @@ async function showUnitDetail(unitId) {
 }
 
 async function openMission(id) {
-  const mission = cachedMissions.find(m=>String(m.id)===String(id));
+  const mission = getMissionById(id);
   if (!mission) return;
   showMissionOnMap(mission);
   const modal = document.getElementById('cadMissionModal');
-  const titleEl = document.getElementById('cadMissionTitle');
-  const addressEl = document.getElementById('cadMissionAddress');
-  if (!modal || !titleEl || !addressEl) return;
+  if (!modal) return;
 
-  const addressText = mission.address || `${mission.lat?.toFixed(4) ?? ''}, ${mission.lon?.toFixed(4) ?? ''}`;
-  titleEl.textContent = mission.type || 'Mission';
-  addressEl.textContent = addressText;
+  activeMissionModalId = mission.id;
+  activeMissionSnapshot = deepCloneMission(mission);
+  hasPendingMissionUpdate = false;
+  renderCadMissionModalFromSnapshot();
 
   modal.classList.remove('hidden');
   document.getElementById('cadDetail').classList.add('hidden');
@@ -953,12 +1020,29 @@ async function openMission(id) {
     modal.classList.add('hidden');
     document.getElementById('cadUnits').classList.add('hidden');
     selectedMissionId = null;
+    clearMissionModalSession();
     fitMapToMarkers();
   };
-  document.getElementById('cadMissionManualDispatch').onclick = () => openManualDispatch(mission);
-  document.getElementById('cadMissionAutoDispatch').onclick = () => autoDispatch(mission);
-  document.getElementById('cadMissionRunCardDispatch').onclick = () => runCardDispatch(mission);
-  document.getElementById('cadMissionUnitTypeDispatch').onclick = () => openUnitTypeDispatch(mission);
+  document.getElementById('cadMissionManualDispatch').onclick = () => {
+    const latestMission = getMissionById(activeMissionModalId);
+    if (!latestMission) return;
+    openManualDispatch(latestMission);
+  };
+  document.getElementById('cadMissionAutoDispatch').onclick = () => {
+    const latestMission = getMissionById(activeMissionModalId);
+    if (!latestMission) return;
+    autoDispatch(latestMission);
+  };
+  document.getElementById('cadMissionRunCardDispatch').onclick = () => {
+    const latestMission = getMissionById(activeMissionModalId);
+    if (!latestMission) return;
+    runCardDispatch(latestMission);
+  };
+  document.getElementById('cadMissionUnitTypeDispatch').onclick = () => {
+    const latestMission = getMissionById(activeMissionModalId);
+    if (!latestMission) return;
+    openUnitTypeDispatch(latestMission);
+  };
 }
 
 async function missionDepartmentsFor(mission) {
